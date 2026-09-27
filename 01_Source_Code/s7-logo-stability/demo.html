@@ -33,7 +33,7 @@
         </div>
 
         <div class="section-title targets-title"><h2>2. 上样目标</h2><button id="add-target" type="button" class="button secondary">+ 添加目标</button></div>
-        <p class="hint">位置和比例使用 0–1。每个对象必须有唯一 ID，例如 product、box-front。</p>
+        <p class="hint">位置和比例使用 0–1。每个对象必须有唯一 ID。点击“复制 Logo”可复制当前上样实例，再拖动副本到第二个位置。</p>
         <div id="targets" class="targets"></div>
 
         <button id="generate" type="button" class="button primary">生成四个版本</button>
@@ -45,7 +45,7 @@
         <div class="preview-section">
           <div class="preview-title"><strong>拖动 Logo 定位</strong><span id="selected-target">未选择目标</span></div>
           <div class="canvas-wrap"><canvas id="placement-canvas" aria-label="Logo拖动定位画布"></canvas><div id="preview-empty" class="preview-empty">上传原图后，这里会显示可拖动的 Logo</div></div>
-          <p class="hint">拖动 Logo 移动；蓝色方块缩放；上方圆形手柄旋转。左侧参数会同步更新。</p>
+          <p class="hint">拖动 Logo 移动；蓝色方块缩放；上方圆形手柄旋转。左侧参数会同步更新。每个副本都可以独立调整。</p>
         </div>
         <div id="empty-state" class="empty-state"><strong>四个版本会显示在这里</strong><span>ORIGINAL · BLACK · GOLD FOIL · SILVER FOIL</span></div>
         <div id="results" class="results" aria-live="polite"></div>

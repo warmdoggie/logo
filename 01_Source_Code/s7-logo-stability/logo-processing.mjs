@@ -1,8 +1,7 @@
 import sharp from 'sharp';
 
 function nearColor(data,index,background,threshold){
-  const a=data[index+3];
-  return a===0||Math.max(Math.abs(data[index]-background[0]),Math.abs(data[index+1]-background[1]),Math.abs(data[index+2]-background[2]))<=threshold;
+  return Math.max(Math.abs(data[index]-background[0]),Math.abs(data[index+1]-background[1]),Math.abs(data[index+2]-background[2]))<=threshold;
 }
 
 function edgeBackground(data,width,height){
@@ -10,18 +9,27 @@ function edgeBackground(data,width,height){
   for(let x=0;x<width;x++)points.push(x,0,x,height-1);
   for(let y=0;y<height;y++)points.push(0,y,width-1,y);
   for(let i=0;i<points.length;i+=2){const index=(points[i+1]*width+points[i])*4;if(data[index+3])return [data[index],data[index+1],data[index+2]];}
-  return [255,255,255];
+  return null;
 }
 
 function removeEdgeBackground(data,width,height,threshold){
   const background=edgeBackground(data,width,height),visited=new Uint8Array(width*height),queue=[];
-  const add=(x,y)=>{if(x<0||x>=width||y<0||y>=height)return;const p=y*width+x;if(visited[p]||!nearColor(data,p*4,background,threshold))return;visited[p]=1;queue.push(p);};
-  for(let x=0;x<width;x++){add(x,0);add(x,height-1);}
-  for(let y=0;y<height;y++){add(0,y);add(width-1,y);}
+  const add=(x,y,reference)=>{
+    if(x<0||x>=width||y<0||y>=height)return;
+    const p=y*width+x,index=p*4;
+    if(visited[p])return;
+    if(data[index+3]===0){visited[p]=1;queue.push(p);return;}
+    if(!reference||!nearColor(data,index,reference,threshold))return;
+    visited[p]=1;queue.push(p);
+  };
+  if(!background)return;
+  for(let x=0;x<width;x++){add(x,0,background);add(x,height-1,background);}
+  for(let y=0;y<height;y++){add(0,y,background);add(width-1,y,background);}
   for(let cursor=0;cursor<queue.length;cursor++){
     const p=queue[cursor],x=p%width,y=Math.floor(p/width),i=p*4;
     data[i+3]=0;
-    add(x-1,y);add(x+1,y);add(x,y-1);add(x,y+1);
+    const reference=[data[i],data[i+1],data[i+2]];
+    add(x-1,y,reference);add(x+1,y,reference);add(x,y-1,reference);add(x,y+1,reference);
   }
 }
 

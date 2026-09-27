@@ -27,3 +27,19 @@ test('加工Logo会识别并去除黑色边缘背景',async()=>{
   assert.equal(data[3],255);
   assert.deepEqual([...data.subarray(0,3)],[255,255,255]);
 });
+
+test('加工Logo会沿边缘连续去除渐变底色',async()=>{
+  const raw=Buffer.alloc(12*5*4);
+  for(let y=0;y<5;y++)for(let x=0;x<12;x++){
+    const shade=255-Math.min(x,11-x)*15;
+    const i=(y*12+x)*4;
+    raw[i]=shade;raw[i+1]=shade;raw[i+2]=shade;raw[i+3]=255;
+  }
+  for(let y=1;y<4;y++)for(let x=5;x<7;x++){
+    const i=(y*12+x)*4;raw[i]=0;raw[i+1]=0;raw[i+2]=0;raw[i+3]=255;
+  }
+  const source=await sharp(raw,{raw:{width:12,height:5,channels:4}}).png().toBuffer();
+  const output=await processLogo(source,{removeWhiteBackground:true,cropTransparentBounds:true,threshold:20});
+  const meta=await sharp(output).metadata();
+  assert.deepEqual({width:meta.width,height:meta.height},{width:2,height:3});
+});

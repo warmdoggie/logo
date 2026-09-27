@@ -1,4 +1,5 @@
 import {pointerToNormalized,rotationFromPointer,widthRatioFromScalePointer} from './demo-geometry.mjs';
+import {cloneTarget} from './target-state.mjs';
 
 const targets=document.querySelector('#targets');
 const status=document.querySelector('#status');
@@ -27,8 +28,9 @@ function addTarget(value={}){
   const row=document.createElement('div');
   row.className='target-row';
   row.dataset.targetId=id;
-  row.innerHTML=`<div class="target-head"><strong>目标 ${targetNumber}</strong><button type="button" class="remove-target">删除</button></div><div class="target-grid"><label>ID<input data-key="id" value="${esc(id)}" spellcheck="false"></label><label>X<input data-key="x" type="number" min="0" max="1" step=".01" value="${value.x??.5}"></label><label>Y<input data-key="y" type="number" min="0" max="1" step=".01" value="${value.y??.5}"></label><label>宽度比例<input data-key="widthRatio" type="number" min=".01" max="1" step=".01" value="${value.widthRatio??.2}"></label><label>旋转角度<input data-key="rotation" type="number" min="-180" max="180" step="1" value="${value.rotation??0}"></label></div>`;
+  row.innerHTML=`<div class="target-head"><strong>目标 ${targetNumber}</strong><span class="target-actions"><button type="button" class="duplicate-target">复制 Logo</button><button type="button" class="remove-target">删除</button></span></div><div class="target-grid"><label>ID<input data-key="id" value="${esc(id)}" spellcheck="false"></label><label>X<input data-key="x" type="number" min="0" max="1" step=".01" value="${value.x??.5}"></label><label>Y<input data-key="y" type="number" min="0" max="1" step=".01" value="${value.y??.5}"></label><label>宽度比例<input data-key="widthRatio" type="number" min=".01" max="1" step=".01" value="${value.widthRatio??.2}"></label><label>旋转角度<input data-key="rotation" type="number" min="-180" max="180" step="1" value="${value.rotation??0}"></label></div>`;
   row.addEventListener('click',event=>{if(event.target.closest('button'))return;selectedTargetId=row.dataset.targetId;refreshTargetSelection();drawPreview();});
+  row.querySelector('.duplicate-target').onclick=event=>{event.stopPropagation();const source=collectTargets().find(target=>target.id===row.dataset.targetId);if(!source)return;const copy=cloneTarget(source,collectTargets().map(target=>target.id));addTarget(copy);selectedTargetId=copy.id;refreshTargetSelection();drawPreview();setStatus(`已复制 Logo：${copy.id}，请继续拖动定位。`,'success');};
   row.querySelector('.remove-target').onclick=event=>{event.stopPropagation();if(targets.children.length===1){setStatus('至少保留一个上样目标','error');return;}const wasSelected=row.dataset.targetId===selectedTargetId;row.remove();if(wasSelected)selectedTargetId=targets.firstElementChild.dataset.targetId;refreshTargetSelection();drawPreview();};
   row.querySelectorAll('[data-key]').forEach(input=>input.addEventListener('input',()=>{
     if(input.dataset.key==='id'){if(row.dataset.targetId===selectedTargetId)selectedTargetId=input.value.trim();row.dataset.targetId=input.value.trim();}
