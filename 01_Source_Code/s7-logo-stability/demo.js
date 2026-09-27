@@ -105,18 +105,23 @@ document.querySelector('#add-target').onclick=()=>addTarget();
 document.querySelector('#base-image').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{const loaded=await fileData(file);baseData=loaded.data;baseImage=await loadImage(loaded.dataUrl);document.querySelector('#base-name').textContent=file.name;drawPreview();}catch(error){setStatus(error.message,'error');}};
 document.querySelector('#logo-image').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{const loaded=await fileData(file);logoData=loaded.data;logoImage=await loadImage(loaded.dataUrl);processButton.disabled=false;document.querySelector('#logo-name').textContent=file.name;drawPreview();}catch(error){setStatus(error.message,'error');}};
 
-document.querySelector('#white-threshold').oninput=event=>{document.querySelector('#threshold-value').value=event.target.value;};
 processButton.onclick=()=>{if(logoData)processingPanel.hidden=false;};
 document.querySelector('#cancel-processing').onclick=()=>{processingPanel.hidden=true;};
 document.querySelector('#apply-processing').onclick=async()=>{
   if(!logoData)return;
-  const processingStatus=document.querySelector('#processing-status');processingStatus.textContent='正在加工…';
+  const processingStatus=document.querySelector('#processing-status');processingStatus.textContent='正在调用 AI 图片模型…';
   try{
-    const response=await fetch('/api/process-logo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({logoImage:logoData,removeWhiteBackground:document.querySelector('#remove-white').checked,cropTransparentBounds:document.querySelector('#crop-bounds').checked,threshold:Number(document.querySelector('#white-threshold').value)})});
+    const response=await fetch('/api/ai-process-logo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({logoImage:logoData})});
     const payload=await response.json();if(!response.ok)throw Error(payload.error||'Logo加工失败');
-    logoData=payload.dataUrl.split(',')[1];logoImage=await loadImage(payload.dataUrl);document.querySelector('#logo-name').textContent='已加工 Logo';processingStatus.textContent=`加工完成：${payload.width} × ${payload.height}`;processingPanel.hidden=true;drawPreview();setStatus('Logo 已加工，可以拖动定位。','success');
+    logoData=payload.dataUrl.split(',')[1];logoImage=await loadImage(payload.dataUrl);document.querySelector('#logo-name').textContent='AI 已加工 Logo';processingStatus.textContent=`AI 加工完成：${payload.width} × ${payload.height}`;processingPanel.hidden=true;drawPreview();setStatus('AI Logo 已加工为透明底黑字，可以拖动定位。','success');
   }catch(error){processingStatus.textContent=error.message||'Logo加工失败';}
 };
+
+async function loadAiProviderStatus(){
+  const hint=document.querySelector('#ai-provider-status');
+  try{const response=await fetch('/api/ai-logo/status');const payload=await response.json();hint.textContent=payload.configured?`已连接 AI 图片模型：${payload.provider} / ${payload.model}`:'尚未配置 AI 图片模型，请先配置 JSON_IMAGE_EDIT_V1 接口。';hint.className=`hint ${payload.configured?'provider-ready':'provider-missing'}`;}
+  catch{hint.textContent='无法读取 AI 图片模型配置，请检查 S7 服务。';hint.className='hint provider-missing';}
+}
 
 function renderResults(payload){
   emptyState.hidden=true;results.replaceChildren();resultMeta.textContent=`${payload.targetIds.length} 个目标 · 指纹 ${payload.layoutFingerprint.slice(0,10)}`;
@@ -135,3 +140,4 @@ document.querySelector('#generate').onclick=async()=>{
 };
 
 addTarget({id:'product',x:.5,y:.5,widthRatio:.2,rotation:0});
+loadAiProviderStatus();

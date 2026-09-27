@@ -5,6 +5,8 @@ import {fileURLToPath} from 'node:url';
 import sharp from 'sharp';
 import {renderLogoSet} from './index.mjs';
 import {processLogo} from './logo-processing.mjs';
+import {validateAiLogoOutput} from './ai-logo-processing.mjs';
+import {createAiLogoProcessor,getAiLogoProviderStatus} from './ai-logo-provider.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const MAX_BODY=50*1024*1024;
@@ -32,13 +34,21 @@ async function staticFile(res,path){
   }catch{return false;}
 }
 
-export function createDemoServer(){
+export function createDemoServer({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus()}={}){
   return createServer(async(req,res)=>{
     try{
       const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);
       if(req.method==='GET'){
+        if(url.pathname==='/api/ai-logo/status'){json(res,200,aiStatus());return;}
         if(await staticFile(res,url.pathname))return;
         json(res,404,{error:'页面不存在'});return;
+      }
+      if(req.method==='POST'&&url.pathname==='/api/ai-process-logo'){
+        const input=await body(req);
+        const processed=await aiProcessor(Buffer.from(input.logoImage||'','base64'),{targetColor:'#000000'});
+        const output=await validateAiLogoOutput(processed?.bytes||processed);
+        json(res,200,{width:output.width,height:output.height,provider:processed?.provider||null,model:processed?.model||null,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`});
+        return;
       }
       if(req.method==='POST'&&url.pathname==='/api/process-logo'){
         const input=await body(req);

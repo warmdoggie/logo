@@ -7,8 +7,8 @@ async function image(width,height,background){
   return sharp({create:{width,height,channels:4,background}}).png().toBuffer();
 }
 
-async function openServer(){
-  const server=createDemoServer();
+async function openServer(options={}){
+  const server=createDemoServer(options);
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   return {server,base:`http://127.0.0.1:${server.address().port}`};
 }
@@ -48,5 +48,24 @@ test('展示界面可以先加工Logo再用于上样',async()=>{
     const payload=await response.json();
     assert.match(payload.dataUrl,/^data:image\/png;base64,/);
     assert.deepEqual({width:payload.width,height:payload.height},{width:6,height:4});
+  }finally{await new Promise(resolve=>server.close(resolve));}
+});
+
+test('展示界面通过AI接口生成透明底黑字Logo',async()=>{
+  const processedRaw=Buffer.alloc(6*4*4);
+  for(let y=1;y<3;y++)for(let x=1;x<5;x++){const i=(y*6+x)*4;processedRaw[i]=0;processedRaw[i+1]=0;processedRaw[i+2]=0;processedRaw[i+3]=255;}
+  const processed=await sharp(processedRaw,{raw:{width:6,height:4,channels:4}}).png().toBuffer();
+  const {server,base}=await openServer({aiProcessor:async(source,options)=>{
+    assert.ok(source.length>0);
+    assert.equal(options.targetColor,'#000000');
+    return processed;
+  }});
+  try{
+    const response=await fetch(base+'/api/ai-process-logo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({logoImage:'AQIDBA=='})});
+    assert.equal(response.status,200);
+    const payload=await response.json();
+    assert.equal(payload.width,6);
+    assert.equal(payload.height,4);
+    assert.match(payload.dataUrl,/^data:image\/png;base64,/);
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
