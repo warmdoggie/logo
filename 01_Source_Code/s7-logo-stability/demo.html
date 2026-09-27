@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>S7 Logo Stability</title>
+  <link rel="stylesheet" href="demo.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div>
+        <p class="eyebrow">AI LOGO · S7</p>
+        <h1>Logo 稳定上样演示</h1>
+        <p>先锁定同一个布局，再输出四个独立版本。当前版本为确定性预览，不改变原图保护区域。</p>
+      </div>
+      <span class="badge">独立模块</span>
+    </header>
+
+    <div class="workspace">
+      <section class="panel controls">
+        <div class="section-title"><h2>1. 上传素材</h2><span>必填</span></div>
+        <label class="file-field">产品 / 彩盒原图<input id="base-image" type="file" accept="image/*" required><small id="base-name">尚未选择</small></label>
+        <label class="file-field">透明 Logo<input id="logo-image" type="file" accept="image/png,image/webp,image/svg+xml" required><small id="logo-name">尚未选择</small></label>
+
+        <div class="section-title targets-title"><h2>2. 上样目标</h2><button id="add-target" type="button" class="button secondary">+ 添加目标</button></div>
+        <p class="hint">位置和比例使用 0–1。每个对象必须有唯一 ID，例如 product、box-front。</p>
+        <div id="targets" class="targets"></div>
+
+        <button id="generate" type="button" class="button primary">生成四个版本</button>
+        <p id="status" class="status" role="status">等待上传素材。</p>
+      </section>
+
+      <section class="panel results-panel">
+        <div class="section-title"><h2>3. 结果预览</h2><span id="result-meta">尚未生成</span></div>
+        <div id="empty-state" class="empty-state"><strong>四个版本会显示在这里</strong><span>ORIGINAL · BLACK · GOLD FOIL · SILVER FOIL</span></div>
+        <div id="results" class="results" aria-live="polite"></div>
+      </section>
+    </div>
+  </main>
+  <script type="module" src="demo.js"></script>
+</body>
+</html>
