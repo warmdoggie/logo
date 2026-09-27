@@ -1,0 +1,23 @@
+# Dependencies
+01_Source_Code/node_modules/
+
+# Runtime data and generated files
+01_Source_Code/data/
+01_Source_Code/work/
+01_Source_Code/outputs/
+01_Source_Code/logs/
+01_Source_Code/uploads/
+
+# Local database and provider configuration
+**/*.sqlite
+**/*.sqlite-shm
+**/*.sqlite-wal
+**/ai-provider.local.json
+**/.env
+**/.env.*
+
+# Temporary and editor files
+**/*.log
+**/tmp/
+**/.DS_Store
+Thumbs.db
