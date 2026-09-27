@@ -37,3 +37,16 @@ test('展示界面对非法输入返回可读的400错误',async()=>{
     assert.match((await response.json()).error,/至少需要一个上样目标|图片/);
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
+
+test('展示界面可以先加工Logo再用于上样',async()=>{
+  const {server,base}=await openServer();
+  try{
+    const raw=Buffer.alloc(20*12*4,255);
+    for(let y=4;y<8;y++)for(let x=7;x<13;x++){const i=(y*20+x)*4;raw[i]=0;raw[i+1]=0;raw[i+2]=0;raw[i+3]=255;}
+    const response=await fetch(base+'/api/process-logo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({logoImage:(await sharp(raw,{raw:{width:20,height:12,channels:4}}).png().toBuffer()).toString('base64'),threshold:24})});
+    assert.equal(response.status,200);
+    const payload=await response.json();
+    assert.match(payload.dataUrl,/^data:image\/png;base64,/);
+    assert.deepEqual({width:payload.width,height:payload.height},{width:6,height:4});
+  }finally{await new Promise(resolve=>server.close(resolve));}
+});

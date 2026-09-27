@@ -2,11 +2,13 @@ import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {dirname,join,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import sharp from 'sharp';
 import {renderLogoSet} from './index.mjs';
+import {processLogo} from './logo-processing.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const MAX_BODY=50*1024*1024;
-const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
+const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
 
 function json(res,status,payload){
   const body=JSON.stringify(payload);
@@ -37,6 +39,13 @@ export function createDemoServer(){
       if(req.method==='GET'){
         if(await staticFile(res,url.pathname))return;
         json(res,404,{error:'页面不存在'});return;
+      }
+      if(req.method==='POST'&&url.pathname==='/api/process-logo'){
+        const input=await body(req);
+        const processed=await processLogo(Buffer.from(input.logoImage||'','base64'),{removeWhiteBackground:input.removeWhiteBackground!==false,cropTransparentBounds:input.cropTransparentBounds!==false,threshold:Number(input.threshold??24)});
+        const meta=await sharp(processed).metadata();
+        json(res,200,{width:meta.width,height:meta.height,dataUrl:`data:image/png;base64,${processed.toString('base64')}`});
+        return;
       }
       if(req.method!=='POST'||url.pathname!=='/api/render'){
         json(res,404,{error:'接口不存在'});return;
