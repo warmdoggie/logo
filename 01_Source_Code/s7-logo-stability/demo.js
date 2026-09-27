@@ -1,4 +1,4 @@
-import {pointerToNormalized} from './demo-geometry.mjs';
+import {pointerToNormalized,rotationFromPointer,widthRatioFromScalePointer} from './demo-geometry.mjs';
 
 const targets=document.querySelector('#targets');
 const status=document.querySelector('#status');
@@ -12,6 +12,7 @@ const processingPanel=document.querySelector('#processing-panel');
 let targetNumber=0;
 let selectedTargetId='product';
 let dragTarget=null;
+let dragMode=null;
 let baseData='',logoData='';
 let baseImage=null,logoImage=null;
 
@@ -51,6 +52,17 @@ function targetAt(point){
   for(let i=list.length-1;i>=0;i--){const rect=targetRect(list[i]);if(point.x*canvas.width>=rect.left&&point.x*canvas.width<=rect.left+rect.width&&point.y*canvas.height>=rect.top&&point.y*canvas.height<=rect.top+rect.height)return list[i];}
   return null;
 }
+function canvasPoint(event){
+  const normalized=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect());
+  return {x:normalized.x*canvas.width,y:normalized.y*canvas.height};
+}
+function rotateLocal(center,x,y,degrees){const radians=degrees*Math.PI/180;return {x:center.x+x*Math.cos(radians)-y*Math.sin(radians),y:center.y+x*Math.sin(radians)+y*Math.cos(radians)};}
+function handlePoints(target){
+  const center={x:target.x*canvas.width,y:target.y*canvas.height};
+  const width=target.widthRatio*canvas.width,height=logoImage?width*logoImage.naturalHeight/logoImage.naturalWidth:width;
+  return {center,scale:rotateLocal(center,width/2,height/2,target.rotation),rotation:rotateLocal(center,0,-height/2-36,target.rotation)};
+}
+function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
 function updateInputs(target){
   const row=[...targets.children].find(item=>item.dataset.targetId===target.id);if(!row)return;
   for(const key of ['x','y','widthRatio','rotation']){const input=row.querySelector(`[data-key="${key}"]`);if(input)input.value=Number(target[key].toFixed(4));}
@@ -63,20 +75,28 @@ function drawPreview(){
   for(const target of collectTargets()){
     const width=target.widthRatio*canvas.width,height=width*logoImage.naturalHeight/logoImage.naturalWidth;
     context.save();context.translate(target.x*canvas.width,target.y*canvas.height);context.rotate(target.rotation*Math.PI/180);context.globalAlpha=target.id===selectedTargetId?.9:.68;context.drawImage(logoImage,-width/2,-height/2,width,height);context.globalAlpha=1;context.strokeStyle=target.id===selectedTargetId?'#5369d9':'#ffffff';context.lineWidth=Math.max(2,canvas.width/500);context.setLineDash(target.id===selectedTargetId?[]:[8,6]);context.strokeRect(-width/2,-height/2,width,height);context.restore();
+    if(target.id===selectedTargetId){const handles=handlePoints(target),size=Math.max(10,canvas.width/80);context.setLineDash([]);context.strokeStyle='#5369d9';context.lineWidth=Math.max(2,canvas.width/500);context.beginPath();context.moveTo(handles.center.x,handles.center.y);context.lineTo(handles.rotation.x,handles.rotation.y);context.stroke();context.fillStyle='#5369d9';context.fillRect(handles.scale.x-size/2,handles.scale.y-size/2,size,size);context.beginPath();context.arc(handles.rotation.x,handles.rotation.y,size*.55,0,Math.PI*2);context.fill();}
   }
 }
 
 canvas.addEventListener('pointerdown',event=>{
   if(!baseImage||!logoImage)return;
-  const point=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect());
-  dragTarget=targetAt(point);if(!dragTarget)return;selectedTargetId=dragTarget.id;canvas.setPointerCapture(event.pointerId);canvas.classList.add('dragging');refreshTargetSelection();drawPreview();
+  const normalized=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect()),point={x:normalized.x*canvas.width,y:normalized.y*canvas.height};
+  const selected=collectTargets().find(target=>target.id===selectedTargetId),handles=selected?handlePoints(selected):null,hitRadius=Math.max(18,canvas.width/35);
+  if(handles&&distance(point,handles.scale)<=hitRadius){dragTarget=selected;dragMode='scale';}
+  else if(handles&&distance(point,handles.rotation)<=hitRadius){dragTarget=selected;dragMode='rotate';}
+  else{dragTarget=targetAt(normalized);dragMode=dragTarget?'move':null;}
+  if(!dragTarget)return;selectedTargetId=dragTarget.id;canvas.setPointerCapture(event.pointerId);canvas.classList.add('dragging');refreshTargetSelection();drawPreview();
 });
 canvas.addEventListener('pointermove',event=>{
   if(!dragTarget)return;
-  const point=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect());
-  dragTarget.x=point.x;dragTarget.y=point.y;updateInputs(dragTarget);drawPreview();
+  const normalized=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect()),point={x:normalized.x*canvas.width,y:normalized.y*canvas.height};
+  if(dragMode==='move'){dragTarget.x=normalized.x;dragTarget.y=normalized.y;}
+  if(dragMode==='scale')dragTarget.widthRatio=widthRatioFromScalePointer(dragTarget,point,canvas.width,canvas.height);
+  if(dragMode==='rotate')dragTarget.rotation=rotationFromPointer({x:dragTarget.x*canvas.width,y:dragTarget.y*canvas.height},point);
+  updateInputs(dragTarget);drawPreview();
 });
-function endDrag(event){if(!dragTarget)return;dragTarget=null;canvas.classList.remove('dragging');if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);}
+function endDrag(event){if(!dragTarget)return;dragTarget=null;dragMode=null;canvas.classList.remove('dragging');if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);}
 canvas.addEventListener('pointerup',endDrag);canvas.addEventListener('pointercancel',endDrag);
 
 document.querySelector('#add-target').onclick=()=>addTarget();

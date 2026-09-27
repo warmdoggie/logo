@@ -25,7 +25,7 @@
         <button id="process-logo" type="button" class="button secondary process-button" disabled>加工 Logo</button>
         <div id="processing-panel" class="processing-panel" hidden>
           <div class="processing-head"><strong>Logo 加工</strong><button id="cancel-processing" type="button" class="text-button">取消</button></div>
-          <label class="check-line"><input id="remove-white" type="checkbox" checked> 去除边缘白底</label>
+          <label class="check-line"><input id="remove-white" type="checkbox" checked> 去除边缘背景色</label>
           <label class="range-line">去底阈值 <input id="white-threshold" type="range" min="0" max="80" value="24"><output id="threshold-value">24</output></label>
           <label class="check-line"><input id="crop-bounds" type="checkbox" checked> 裁剪透明边界</label>
           <button id="apply-processing" type="button" class="button primary">应用加工</button>
@@ -45,7 +45,7 @@
         <div class="preview-section">
           <div class="preview-title"><strong>拖动 Logo 定位</strong><span id="selected-target">未选择目标</span></div>
           <div class="canvas-wrap"><canvas id="placement-canvas" aria-label="Logo拖动定位画布"></canvas><div id="preview-empty" class="preview-empty">上传原图后，这里会显示可拖动的 Logo</div></div>
-          <p class="hint">点击目标后拖动 Logo；左侧 X/Y 会同步更新。多个目标分别点击定位。</p>
+          <p class="hint">拖动 Logo 移动；蓝色方块缩放；上方圆形手柄旋转。左侧参数会同步更新。</p>
         </div>
         <div id="empty-state" class="empty-state"><strong>四个版本会显示在这里</strong><span>ORIGINAL · BLACK · GOLD FOIL · SILVER FOIL</span></div>
         <div id="results" class="results" aria-live="polite"></div>
