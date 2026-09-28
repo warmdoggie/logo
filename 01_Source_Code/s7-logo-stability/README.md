@@ -20,19 +20,19 @@
 
 ## AI Logo 加工配置
 
-S7 读取 `01_Source_Code/data/ai-provider.local.json`，也可以使用环境变量 `S7_AI_CONFIG` 指向配置文件。配置需要使用 `JSON_IMAGE_EDIT_V1`，例如：
+S7 读取 `01_Source_Code/data/ai-provider.local.json`，也可以使用环境变量 `S7_AI_CONFIG` 指向配置文件。APIMart 配置示例：
 
 ```json
 {
   "enabled": true,
-  "provider": "JSON_IMAGE_EDIT_V1",
-  "model": "your-image-model",
-  "endpoint": "https://your-image-service.example/v1/logo-edit",
+  "provider": "APIMART",
+  "model": "wan2.7-image-pro",
+  "endpoint": "https://api.apimart.ai",
   "apiKey": "只保存在本机配置，不要提交到 Git"
 }
 ```
 
-接口需要接收 `contract`、`model`、`logoImage`、`targetColor` 和 `prompt`，并返回 `{ "imageBase64": "...PNG base64..." }`。返回结果必须是带透明背景的 PNG。
+S7 会向 APIMart 提交 `/v1/images/generations` 图片编辑任务，使用 Logo 的 base64 data URL，轮询 `/v1/tasks/{task_id}` 后下载结果。当前允许模型：`wan2.7-image-pro`、`wan2.7-image`。下载结果必须是带透明背景的 PNG，否则会直接提示失败，不会使用本地抠图算法兜底。
 
 金银版本当前是确定性颜色版本，尚未加入真实金属反光。AI 材质融合会在后续阶段通过受保护遮罩接入。
 

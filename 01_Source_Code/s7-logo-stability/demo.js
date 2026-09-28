@@ -119,7 +119,7 @@ document.querySelector('#apply-processing').onclick=async()=>{
 
 async function loadAiProviderStatus(){
   const hint=document.querySelector('#ai-provider-status');
-  try{const response=await fetch('/api/ai-logo/status');const payload=await response.json();hint.textContent=payload.configured?`已连接 AI 图片模型：${payload.provider} / ${payload.model}`:'尚未配置 AI 图片模型，请先配置 JSON_IMAGE_EDIT_V1 接口。';hint.className=`hint ${payload.configured?'provider-ready':'provider-missing'}`;}
+  try{const response=await fetch('/api/ai-logo/status');const payload=await response.json();hint.textContent=payload.configured?`已连接 AI 图片模型：${payload.provider} / ${payload.model}`:'尚未配置 APIMart 图片模型，请先配置本机 APIMart 参数。';hint.className=`hint ${payload.configured?'provider-ready':'provider-missing'}`;}
   catch{hint.textContent='无法读取 AI 图片模型配置，请检查 S7 服务。';hint.className='hint provider-missing';}
 }
 
