@@ -1,0 +1,27 @@
+[Unit]
+Description=S7 Logo Stability service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=s7-logo
+Group=s7-logo
+WorkingDirectory=/srv/s7-logo
+Environment=NODE_ENV=production
+Environment=S7_PORT=3237
+Environment=S7_AI_CONFIG=/etc/s7-logo/ai-provider.json
+EnvironmentFile=-/etc/s7-logo/production.env
+ExecStart=/usr/bin/node /srv/s7-logo/s7-logo-stability/demo-server.mjs
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/s7-logo /var/log/s7-logo
+StandardOutput=append:/var/log/s7-logo/service.log
+StandardError=append:/var/log/s7-logo/service-error.log
+
+[Install]
+WantedBy=multi-user.target

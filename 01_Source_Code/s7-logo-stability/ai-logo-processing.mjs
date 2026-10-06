@@ -14,6 +14,7 @@ export function buildAiLogoRequest(logoImage,{model,targetColor='#000000'}={}){
 export function buildApimartLogoRequest(logoDataUrl,{model}={}){
   if(typeof logoDataUrl!=='string'||!logoDataUrl.startsWith('data:image/'))throw Error('缺少 APIMart Logo 图片');
   if(typeof model!=='string'||!model.trim())throw Error('缺少 APIMart 图片模型');
+  if(model==='gpt-image-2'||model==='gpt-image-2.5-flare')return {model:model.trim(),n:1,size:'1:1',resolution:'2K',quality:'high',background:'transparent',output_format:'png',prompt:APIMART_LOGO_INSTRUCTIONS,image_urls:[logoDataUrl]};
   return {model:model.trim(),n:1,size:'2K',watermark:false,enable_sequential:false,prompt:APIMART_LOGO_INSTRUCTIONS,negative_prompt:'changed lettering, missing glyphs, altered logo, extra graphics, white background, opaque interior holes, shadow, watermark',image_urls:[logoDataUrl]};
 }
 

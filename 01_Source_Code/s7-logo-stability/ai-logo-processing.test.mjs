@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import sharp from 'sharp';
-import {buildAiLogoRequest,validateAiLogoOutput} from './ai-logo-processing.mjs';
+import {buildAiLogoRequest,buildApimartLogoRequest,validateAiLogoOutput} from './ai-logo-processing.mjs';
 
 test('AI Logo请求明确要求透明底黑字并保持原Logo结构',()=>{
   const request=buildAiLogoRequest('AQIDBA==',{model:'test-model'});
@@ -25,4 +25,11 @@ test('AI Logo输出必须包含透明像素和可见像素',async()=>{
 test('AI Logo输出没有透明背景时拒绝继续',async()=>{
   const png=await sharp({create:{width:4,height:4,channels:3,background:{r:255,g:255,b:255}}}).png().toBuffer();
   await assert.rejects(()=>validateAiLogoOutput(png),/透明 PNG/);
+});
+
+test('APIMart官方GPT Image模型明确请求透明PNG',()=>{
+  const request=buildApimartLogoRequest('data:image/png;base64,AQID',{model:'gpt-image-2'});
+  assert.equal(request.background,'transparent');
+  assert.equal(request.output_format,'png');
+  assert.equal(request.quality,'high');
 });

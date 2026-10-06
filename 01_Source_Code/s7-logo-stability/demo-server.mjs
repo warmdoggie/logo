@@ -7,6 +7,8 @@ import {renderLogoSet} from './index.mjs';
 import {processLogo} from './logo-processing.mjs';
 import {validateAiLogoOutput} from './ai-logo-processing.mjs';
 import {createAiLogoProcessor,getAiLogoProviderStatus} from './ai-logo-provider.mjs';
+import {pickAspectRatio} from './ai-mockup-generation.mjs';
+import {createAiMockupRenderer} from './ai-mockup-provider.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const MAX_BODY=50*1024*1024;
@@ -34,11 +36,12 @@ async function staticFile(res,path){
   }catch{return false;}
 }
 
-export function createDemoServer({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus()}={}){
+export function createDemoServer({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus(),mockupRenderer=createAiMockupRenderer()}={}){
   return createServer(async(req,res)=>{
     try{
       const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);
       if(req.method==='GET'){
+        if(url.pathname==='/healthz'){json(res,200,{ok:true,service:'s7-logo-stability'});return;}
         if(url.pathname==='/api/ai-logo/status'){json(res,200,aiStatus());return;}
         if(await staticFile(res,url.pathname))return;
         json(res,404,{error:'页面不存在'});return;
@@ -55,6 +58,25 @@ export function createDemoServer({aiProcessor=createAiLogoProcessor(),aiStatus=(
         const processed=await processLogo(Buffer.from(input.logoImage||'','base64'),{removeWhiteBackground:input.removeWhiteBackground!==false,cropTransparentBounds:input.cropTransparentBounds!==false,threshold:Number(input.threshold??24)});
         const meta=await sharp(processed).metadata();
         json(res,200,{width:meta.width,height:meta.height,dataUrl:`data:image/png;base64,${processed.toString('base64')}`});
+        return;
+      }
+      if(req.method==='POST'&&url.pathname==='/api/ai-render'){
+        const input=await body(req);
+        const baseImage=Buffer.from(input.baseImage||'','base64');
+        const logoImage=Buffer.from(input.logoImage||'','base64');
+        const basePng=await sharp(baseImage).png().toBuffer();
+        const guideSet=await renderLogoSet({baseImage:basePng,logoImage,targets:input.targets,originalColor:input.originalColor});
+        const outputs=await mockupRenderer({
+          baseImage:`data:image/png;base64,${basePng.toString('base64')}`,
+          logoImage:`data:image/png;base64,${logoImage.toString('base64')}`,
+          finishReferenceImage:input.finishReferenceImage?`data:image/png;base64,${input.finishReferenceImage}`:undefined,
+          guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`})),
+          targets:input.targets,
+          onlyVersion:input.onlyVersion,
+          originalColor:input.originalColor||'#000000',
+          size:pickAspectRatio(guideSet.width,guideSet.height)
+        });
+        json(res,200,{width:guideSet.width,height:guideSet.height,targetIds:guideSet.targetIds,layoutFingerprint:guideSet.layoutFingerprint,outputs:outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`}))});
         return;
       }
       if(req.method!=='POST'||url.pathname!=='/api/render'){

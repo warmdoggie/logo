@@ -26,17 +26,24 @@ S7 读取 `01_Source_Code/data/ai-provider.local.json`，也可以使用环境�
 {
   "enabled": true,
   "provider": "APIMART",
-  "model": "wan2.7-image-pro",
+  "model": "gpt-image-2.5-flare",
   "endpoint": "https://api.apimart.ai",
   "apiKey": "只保存在本机配置，不要提交到 Git"
 }
 ```
 
-S7 会向 APIMart 提交 `/v1/images/generations` 图片编辑任务，使用 Logo 的 base64 data URL，轮询 `/v1/tasks/{task_id}` 后下载结果。当前允许模型：`wan2.7-image-pro`、`wan2.7-image`。下载结果必须是带透明背景的 PNG，否则会直接提示失败，不会使用本地抠图算法兜底。
+S7 会向 APIMart 提交 `/v1/images/generations` 图片编辑请求，使用 Logo 的 base64 data URL，支持直接返回图片链接或异步任务后下载结果。当前允许模型：`gpt-image-2`、`wan2.7-image-pro`、`wan2.7-image`。下载结果必须是带透明背景的 PNG，否则会直接提示失败，不会使用本地抠图算法兜底。
 
 金银版本当前是确定性颜色版本，尚未加入真实金属反光。AI 材质融合会在后续阶段通过受保护遮罩接入。
 
 ## 验证
+
+Windows 上建议使用项目根目录的 `start-s7.ps1` 启动。它会读取系统代理并让 Node 的 APIMart 请求使用同一代理：
+
+```powershell
+cd C:\Users\EDY\Desktop\AI_LOGO\01_Source_Code
+powershell -ExecutionPolicy Bypass -File .\start-s7.ps1
+```
 
 在 `01_Source_Code` 目录运行：
 

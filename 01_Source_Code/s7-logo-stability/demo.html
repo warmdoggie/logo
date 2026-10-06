@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">AI LOGO · S7</p>
         <h1>Logo 稳定上样演示</h1>
-        <p>先锁定同一个布局，再输出四个独立版本。当前版本为确定性预览，不改变原图保护区域。</p>
+        <p>先拖动锁定 Logo 布局，再由 AI 输出四张自然工艺上样图。原图与构图作为锁定参考。</p>
       </div>
       <span class="badge">独立模块</span>
     </header>
@@ -22,7 +22,10 @@
         <div class="section-title"><h2>1. 上传素材</h2><span>必填</span></div>
         <label class="file-field">产品 / 彩盒原图<input id="base-image" type="file" accept="image/*" required><small id="base-name">尚未选择</small></label>
         <label class="file-field">透明 Logo<input id="logo-image" type="file" accept="image/*" required><small id="logo-name">尚未选择</small></label>
+        <label class="file-field">工艺质感参考图（可选）<input id="finish-reference-image" type="file" accept="image/*"><small id="finish-reference-name">上传真实丝印、烫金或烫银样品；只参考质感，不复制其中内容</small></label>
         <button id="process-logo" type="button" class="button secondary process-button" disabled>AI 加工 Logo（透明底黑字）</button>
+        <button id="use-saved-logo" type="button" class="text-button" hidden>使用已保存 Logo</button>
+        <button id="clear-saved-logo" type="button" class="text-button" hidden>清除已保存 Logo</button>
         <div id="processing-panel" class="processing-panel" hidden>
           <div class="processing-head"><strong>AI Logo 加工</strong><button id="cancel-processing" type="button" class="text-button">取消</button></div>
           <p id="ai-provider-status" class="hint">正在检查 AI 图片模型配置……</p>
@@ -31,11 +34,15 @@
           <p id="processing-status" class="hint">加工完成后再进行位置摆放。</p>
         </div>
 
+        <label class="color-field">当前选中 Logo 的 ORIGINAL 颜色<input id="original-color" type="color" value="#000000"><output id="original-color-value">#000000</output></label>
+        <label class="auto-contrast-field"><input id="auto-contrast" type="checkbox" checked> BLACK 自动黑白对比（深色表面改为白色）</label>
+        <p class="hint">点击画布中的 Logo 或目标卡片后再改色；每个目标独立保存。BLACK 为纯黑丝印；GOLD FOIL、SILVER FOIL 为固定的自然薄层烫金/烫银。</p>
+
         <div class="section-title targets-title"><h2>2. 上样目标</h2><button id="add-target" type="button" class="button secondary">+ 添加目标</button></div>
         <p class="hint">位置和比例使用 0–1。每个对象必须有唯一 ID。点击“复制 Logo”可复制当前上样实例，再拖动副本到第二个位置。</p>
         <div id="targets" class="targets"></div>
 
-        <button id="generate" type="button" class="button primary">生成四个版本</button>
+        <button id="generate" type="button" class="button primary">AI 生成四个自然版本</button>
         <p id="status" class="status" role="status">等待上传素材。</p>
       </section>
 
@@ -51,6 +58,24 @@
       </section>
     </div>
   </main>
+  <div id="image-preview" class="image-preview" hidden role="dialog" aria-modal="true" aria-label="图片预览">
+    <div class="image-preview-backdrop" data-close-preview></div>
+    <div class="image-preview-panel">
+      <div class="image-preview-toolbar">
+        <strong id="image-preview-title">图片预览</strong>
+        <div class="image-preview-actions">
+          <button id="zoom-out" type="button" class="preview-control" aria-label="缩小">−</button>
+          <button id="zoom-reset" type="button" class="preview-control">100%</button>
+          <button id="zoom-in" type="button" class="preview-control" aria-label="放大">+</button>
+          <button id="close-preview" type="button" class="preview-control close-preview">关闭</button>
+        </div>
+      </div>
+      <div id="image-preview-viewport" class="image-preview-viewport">
+        <img id="image-preview-image" alt="大图预览">
+      </div>
+      <p class="image-preview-hint">可使用鼠标滚轮放大或缩小</p>
+    </div>
+  </div>
   <script type="module" src="demo.js"></script>
 </body>
 </html>

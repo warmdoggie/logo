@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {pointerToNormalized,rotationFromPointer,widthRatioFromScalePointer} from './demo-geometry.mjs';
+import {clampTargetCenter,pointerToNormalized,rotationFromPointer,widthRatioFromScalePointer} from './demo-geometry.mjs';
+
+test('rotated logo center is clamped using its rendered aspect ratio',()=>{
+  const target=clampTargetCenter({x:.95,y:.05,widthRatio:.2,rotation:45},2);
+  assert.ok(target.x<.95&&target.y>.05);
+  assert.ok(target.x>=.21213203435596428&&target.x<=.7878679656440357);
+  assert.ok(target.y>=.21213203435596428&&target.y<=.7878679656440357);
+});
 
 test('把画布指针位置换算为可保存的0到1坐标',()=>{
   assert.deepEqual(pointerToNormalized(150,75,{left:50,top:25,width:200,height:100}),{x:.5,y:.5});
