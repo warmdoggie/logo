@@ -1,3 +1,4 @@
+import {readSeedLogo} from './seed-logo.mjs';
 import {test} from 'node:test';import assert from 'node:assert/strict';import {spawn} from 'node:child_process';import {once} from 'node:events';import {mkdtempSync,readFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,dirname} from 'node:path';import {fileURLToPath} from 'node:url';
 import {sharp} from './logo-pixels.mjs';
 const root=dirname(fileURLToPath(import.meta.url));
@@ -10,7 +11,7 @@ test('自动多目标多方案：真实PNG、异常隔离、去重、确认方�
  const zone=(x,name)=>({zoneType:'logo',shapeType:'RECT',name,x,y:.2,width:.25,height:.4,defaultAnchorX:x+.125,defaultAnchorY:.4,maxLogoWidthRatio:.25,maxLogoHeightRatio:.4,defaultRotation:0,allowRotation:true,orientation:'free',isDefault:x===.1,note:''});
  const automation={carriers:[{id:'body',type:'BODY',name:'本体'},{id:'carton',type:'CARTON',name:'彩盒'}],areas:[.1,.6].map((x,i)=>({id:'area'+i,carrierId:i?'carton':'body',name:i?'正面':'瓶身',zoneIndex:i,autoEligible:true,presets:[{id:'preset'+i,name:'横排',orientation:'horizontal',isDefault:true,box:{centerX:x+.125,centerY:.4,width:.15,height:.1,rotation:0}}]})),schemes:[{id:'A',name:'方案A',role:'DEFAULT',targets:[{areaId:'area0',presetId:'preset0'},{areaId:'area1',presetId:'preset1'}]},{id:'B',name:'方案B',role:'ALTERNATIVE',targets:[{areaId:'area1',presetId:'preset1'}]}]};
  await post('/api/templates/'+product.id,{baseVersion:0,changeNote:'独立验收',zones:[zone(.1,'本体'),zone(.6,'彩盒')],automation},201);
- const form=new FormData();form.set('customerName','独立自动生成验收');form.set('productIds',JSON.stringify([product.id,other.id]));form.set('logo',new Blob([readFileSync(join(root,'seed/rae-logo.png'))]),'rae.png');const task=await post('/api/tasks',form,201),id=task.id,path='/api/automatic/'+id;
+ const form=new FormData();form.set('customerName','独立自动生成验收');form.set('productIds',JSON.stringify([product.id,other.id]));form.set('logo',new Blob([readSeedLogo()]),'rae.png');const task=await post('/api/tasks',form,201),id=task.id,path='/api/automatic/'+id;
  const l=await get('/api/logo/'+id);await post('/api/logo/'+id+'/productions',{sourceLogoAssetId:l.sources[0].id,selectedElementIds:[l.sources[0].elements[0].id],colorMode:'SINGLE',backgroundRemovalMode:'NONE',tolerance:20,primaryColor:'#000000',secondaryColor:'#c4a052',pantoneNote:'',baseVersion:0},201);
  const initial=await get(path),ids=initial.items.map(i=>i.id);let page=await post(path+'/generate',{taskProductIds:ids,processType:'NORMAL_PRINT'},201);
  assert.equal(page.outputs.length,2);assert.equal(page.runs[0].status,'PARTIAL');assert.equal(page.outputs.find(o=>o.schemeId==='A').snapshot.targets.length,2);assert.equal(page.runs[0].report.filter(r=>r.status==='DESIGNER_REQUIRED').length,1);

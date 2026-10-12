@@ -1,3 +1,4 @@
+import {readSeedLogo} from './seed-logo.mjs';
 import {test} from 'node:test';import assert from 'node:assert/strict';import {spawn} from 'node:child_process';import {once} from 'node:events';import {mkdtempSync,readFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,dirname} from 'node:path';import {fileURLToPath} from 'node:url';
 import {sharp} from './logo-pixels.mjs';
 const root=dirname(fileURLToPath(import.meta.url));
@@ -12,7 +13,7 @@ test('底色改色与标签集成：锁定蒙版、原图保护、独立下载�
  const rect=(x,y,w,h)=>[{x,y},{x:x+w,y},{x:x+w,y:y+h},{x,y:y+h}];
  automation.carriers[0].surfaceMask={reviewed:true,reviewNote:'排除中央已有文字',regions:[{mode:'INCLUDE',points:rect(.05,.1,.4,.8)},{mode:'EXCLUDE',points:rect(.2,.3,.1,.1)}]};
  await post('/api/templates/'+product.id,{baseVersion:0,changeNote:'独立验收',zones:[zone(.1,'本体'),zone(.6,'彩盒')],automation},201);
- const form=new FormData();form.set('customerName','独立自动生成验收');form.set('productIds',JSON.stringify([product.id,other.id]));form.set('logo',new Blob([readFileSync(join(root,'seed/rae-logo.png'))]),'rae.png');const task=await post('/api/tasks',form,201),id=task.id,path='/api/automatic/'+id;
+ const form=new FormData();form.set('customerName','独立自动生成验收');form.set('productIds',JSON.stringify([product.id,other.id]));form.set('logo',new Blob([readSeedLogo()]),'rae.png');const task=await post('/api/tasks',form,201),id=task.id,path='/api/automatic/'+id;
  const l=await get('/api/logo/'+id);await post('/api/logo/'+id+'/productions',{sourceLogoAssetId:l.sources[0].id,selectedElementIds:[l.sources[0].elements[0].id],colorMode:'SINGLE',backgroundRemovalMode:'NONE',tolerance:20,primaryColor:'#000000',secondaryColor:'#c4a052',pantoneNote:'',baseVersion:0},201);
  const initial=await get(path),ids=initial.items.map(i=>i.id);let page=await post(path+'/generate',{taskProductIds:ids,processType:'NORMAL_PRINT'},201);
  assert.equal(page.outputs.length,2);assert.equal(page.runs[0].status,'PARTIAL');assert.equal(page.outputs.find(o=>o.schemeId==='A').snapshot.targets.length,2);assert.equal(page.runs[0].report.filter(r=>r.status==='DESIGNER_REQUIRED').length,1);
