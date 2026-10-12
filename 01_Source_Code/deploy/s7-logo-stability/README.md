@@ -6,8 +6,9 @@ installed through the FRAME deployment launcher.
 ## Isolation contract
 
 - Domain: `logo.heciai.net`
-- Loopback listener: `127.0.0.1:3237`
-- Service: `s7-logo.service`
+- Workspace listener: `127.0.0.1:3210`
+- S7 listener: `127.0.0.1:3237`
+- Services: `s7-workspace.service` and `s7-logo.service`
 - Linux user: `s7-logo`
 - Application directory: `/srv/s7-logo`
 - Protected configuration: `/etc/s7-logo`
@@ -18,7 +19,7 @@ installed through the FRAME deployment launcher.
 ## Required server-side preparation
 
 1. Create the `s7-logo` user and the isolated directories.
-2. Deploy one reviewed S7 commit to `/srv/s7-logo`.
+2. Deploy one reviewed merged-workspace commit to `/srv/s7-logo`.
 3. Copy `production.env.example` to `/etc/s7-logo/production.env`.
 4. Create `/etc/s7-logo/ai-provider.json` from the example and enter the
    APIMart key only in the protected server file.
@@ -29,7 +30,7 @@ installed through the FRAME deployment launcher.
 
 ## Safe activation order
 
-1. Start the service and verify `curl http://127.0.0.1:3237/healthz`.
+1. Start both services and verify `curl http://127.0.0.1:3210/api/health` and `curl http://127.0.0.1:3237/healthz`.
 2. Run `nginx -t`.
 3. Reload Nginx only; do not restart Nginx, FRAME, GitLab, Docker, or
    PostgreSQL.

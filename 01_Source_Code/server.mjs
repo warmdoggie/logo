@@ -19,6 +19,7 @@ import {storageManagement} from './storage-management.mjs';
 import {additionService} from './additions.mjs';
 import {batchService} from './batches.mjs';
 import {acceptanceService} from './acceptance.mjs';
+import {readSeedLogo} from './seed-logo.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const data = process.env.APP_DATA_DIR || join(root, 'data');
@@ -77,7 +78,7 @@ async function addTask(customerName, requirement, ids, logo,prepared) {
  return {id,taskCode};
 }
 if(process.env.APP_NO_SEED!=='1'&&!db.prepare("SELECT value FROM AppMeta WHERE key='seed-v1'").get()) {
- const catalog=[['L0048','持光固体唇蜜','唇蜜','png'],['F0021','双头带刷修容棒（亮面）','修容棒','jpg'],['L0039','白管锌合金头唇釉','唇釉','jpg'],['L0033','葫芦头液体唇线笔','唇线笔','jpg'],['E0001','绿色圆管眉胶','眉胶','png']];
+ const catalog=[['L0048','持光固体唇蜜','唇部','png'],['F0021','双头带刷修容棒（亮面）','脸部','jpg'],['L0039','白管锌合金头唇釉','唇部','jpg'],['L0033','葫芦头液体唇线笔','唇部','jpg'],['E0001','绿色圆管眉胶','眼部','png']];
  const created=[];
  try { transaction(()=>{
   const ids=[];
@@ -86,7 +87,7 @@ if(process.env.APP_NO_SEED!=='1'&&!db.prepare("SELECT value FROM AppMeta WHERE k
    const key=storage.put(readFileSync(join(root,'seed',`${sku}.${ext}`)),ext); created.push(key);
    const id=uid(), stamp=now(); db.prepare('INSERT INTO Product VALUES (?,?,?,?,?,?,?)').run(id,sku,name,category,key,stamp,stamp); ids.push(id);
   }
-  const key=storage.put(readFileSync(join(root,'seed','rae-logo.png')),'png'); created.push(key);
+  const key=storage.put(readSeedLogo(),'png'); created.push(key);
   const id=uid(), stamp=now(); db.prepare('INSERT INTO Task (id,taskCode,customerName,rawRequirement,status,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?)').run(id,'DEMO-RAE-001','Rae.（测试）','单色 Logo', '待处理',stamp,stamp);
   db.prepare('INSERT INTO LogoAsset VALUES (?,?,?,?,?)').run(uid(),id,'rae-logo.png',key,stamp);
   for(const p of ids)db.prepare('INSERT INTO TaskProduct VALUES (?,?,?)').run(uid(),id,p);
@@ -113,7 +114,7 @@ export const server=http.createServer(async(req,res)=>{
  const writing=!['GET','HEAD'].includes(req.method);if(writing)activeWrites++;
  res.setHeader('X-Content-Type-Options','nosniff');
  res.setHeader('Cache-Control','no-store');
- res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+ res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
  const json=(v,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(v));};
  try {
   const requestHost=(req.headers.host||'').split(':')[0];

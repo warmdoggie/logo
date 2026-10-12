@@ -161,3 +161,64 @@ test('onlyVersion builds a request for one selected finish',()=>{
   });
   assert.deepEqual(plan.map(item=>item.version),['GOLD FOIL']);
 });
+
+test('Flux uses its own reference order, aspect ratio and bbox JSON request format',()=>{
+  const plan=buildAiMockupPlan({
+    model:'flux-3-image',baseImage:'data:image/png;base64,BASE',logoImage:'data:image/png;base64,LOGO',
+    finishReferenceImage:'data:image/png;base64,FOIL_SAMPLE',maskImage:'data:image/png;base64,MASK',logoAspectRatio:.5,
+    targets:[{id:'box-front',x:.6,y:.4,widthRatio:.2,rotation:-90,quad:[
+      {x:.5,y:.3},{x:.7,y:.3},{x:.72,y:.5},{x:.48,y:.5}
+    ]}],
+    guides:[
+      {version:'ORIGINAL',dataUrl:'data:image/png;base64,GUIDE_ORIGINAL'},
+      {version:'BLACK',dataUrl:'data:image/png;base64,GUIDE_BLACK'},
+      {version:'GOLD FOIL',dataUrl:'data:image/png;base64,GUIDE_GOLD'},
+      {version:'SILVER FOIL',dataUrl:'data:image/png;base64,GUIDE_SILVER'}
+    ],originalColor:'#C54B78',size:'4:3'
+  });
+  const request=plan[2].request;
+  assert.equal(request.model,'flux-3-image');
+  assert.equal(request.aspect_ratio,'4:3');
+  assert.equal(request.resolution,'2k');
+  assert.equal(request.safety_tolerance,2);
+  assert.equal(request.grounding,false);
+  assert.equal(request.n,1);
+  assert.deepEqual(request.image_urls,[
+    'data:image/png;base64,BASE','data:image/png;base64,LOGO','data:image/png;base64,GUIDE_GOLD','data:image/png;base64,FOIL_SAMPLE'
+  ]);
+  assert.equal('size' in request,false);
+  assert.equal('negative_prompt' in request,false);
+  assert.equal(plan[2].placementGuide,'data:image/png;base64,GUIDE_GOLD');
+  assert.equal(plan[2].maskImage,'data:image/png;base64,MASK');
+  assert.match(request.prompt,/<ref_image_0>/i);
+  assert.match(request.prompt,/<ref_image_1>/i);
+  assert.match(request.prompt,/<logo_target_box-front>/i);
+  assert.match(request.prompt,/"tgt_bbox":\[300,480,500,720\]/i);
+  assert.match(request.prompt,/"from":"ref_image_1"/i);
+  assert.match(request.prompt,/"color":"#C54B78"/i);
+  assert.match(request.prompt,/"surface":"free"/i);
+  assert.match(request.prompt,/"rotation":-90/i);
+  assert.match(request.prompt,/<ref_image_2> is the exact clean placement-and-appearance reference/i);
+  assert.doesNotMatch(request.prompt,/Image 3 is the exact placement/i);
+});
+
+test('GPT keeps the existing image order and does not receive Flux-only fields',()=>{
+  const plan=buildAiMockupPlan({
+    model:'gpt-image-2.5-flare',baseImage:'data:image/png;base64,BASE',logoImage:'data:image/png;base64,LOGO',
+    guides:[
+      {version:'ORIGINAL',dataUrl:'data:image/png;base64,GUIDE_ORIGINAL'},
+      {version:'BLACK',dataUrl:'data:image/png;base64,GUIDE_BLACK'},
+      {version:'GOLD FOIL',dataUrl:'data:image/png;base64,GUIDE_GOLD'},
+      {version:'SILVER FOIL',dataUrl:'data:image/png;base64,GUIDE_SILVER'}
+    ],originalColor:'#C54B78',size:'4:3'
+  });
+  const request=plan[0].request;
+  assert.deepEqual(request.image_urls,[
+    'data:image/png;base64,LOGO','data:image/png;base64,BASE','data:image/png;base64,GUIDE_ORIGINAL'
+  ]);
+  assert.equal(request.size,'4:3');
+  assert.equal(request.resolution,'2K');
+  assert.equal('aspect_ratio' in request,false);
+  assert.equal('safety_tolerance' in request,false);
+  assert.equal('grounding' in request,false);
+});

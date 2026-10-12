@@ -1,8 +1,11 @@
 import {clampTargetCenter,pointerToNormalized,rotationFromPointer,widthRatioFromScalePointer} from './demo-geometry.mjs';
-import {cloneTarget} from './target-state.mjs';
+import {canMoveTarget,cloneTarget,rotateTargetInPlace,setTargetMoveEnabled} from './target-state.mjs';
 import {renderTintedLogoLayer} from './preview-logo-layer.mjs';
 import {chooseContrastColor} from './contrast-color.mjs';
 import {clearSavedLogo,loadSavedLogo,saveLogo} from './saved-logo.mjs';
+import {masterTargetsFromTemplate} from './product-master.mjs';
+import {triggerTransparentLogoDownload} from './transparent-logo-download.mjs';
+import {rotationGestureMode,rotationHandleLocalPosition} from './rotation-handle.mjs';
 
 const targets=document.querySelector('#targets');
 const status=document.querySelector('#status');
@@ -12,12 +15,19 @@ const resultMeta=document.querySelector('#result-meta');
 const canvas=document.querySelector('#placement-canvas');
 const previewEmpty=document.querySelector('#preview-empty');
 const processButton=document.querySelector('#process-logo');
+const chooseProductButton=document.querySelector('#choose-product');
+const productLibraryPanel=document.querySelector('#product-library-panel');
+const closeProductLibraryButton=document.querySelector('#close-product-library');
+const productLibrarySearch=document.querySelector('#product-library-search');
+const productLibraryList=document.querySelector('#product-library-list');
 const useSavedLogoButton=document.querySelector('#use-saved-logo');
 const clearSavedLogoButton=document.querySelector('#clear-saved-logo');
 const processingPanel=document.querySelector('#processing-panel');
 const originalColorInput=document.querySelector('#original-color');
 const originalColorValue=document.querySelector('#original-color-value');
 const autoContrastInput=document.querySelector('#auto-contrast');
+const mockupModel=document.querySelector('#mockup-model');
+const mockupModelHint=document.querySelector('#mockup-model-hint');
 const imagePreview=document.querySelector('#image-preview');
 const imagePreviewTitle=document.querySelector('#image-preview-title');
 const imagePreviewImage=document.querySelector('#image-preview-image');
@@ -28,13 +38,63 @@ let targetNumber=0;
 let selectedTargetId='product';
 let dragTarget=null;
 let dragMode=null;
+let rotateTimer=null;
+let rotateStartedAt=0;
+let rotatePointerId=null;
+const ROTATE_LONG_PRESS_MS=350;
 let baseData='',logoData='',logoSourceData='',finishReferenceData='';
 let baseImage=null,logoImage=null;
+let productLibraryProducts=[];
 
 const esc=value=>String(value).replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
+const S7_BASE=location.pathname==='/s7'||location.pathname.startsWith('/s7/')?'/s7':'';
+const s7Path=value=>S7_BASE&&typeof value==='string'&&value.startsWith('/')?`${S7_BASE}${value}`:value;
+const nativeFetch=window.fetch.bind(window);
+const fetch=(input,init)=>nativeFetch(typeof input==='string'?s7Path(input):input,init);
 function setStatus(message,type=''){status.textContent=message;status.className=`status ${type}`;}
 function fileData(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({dataUrl:String(reader.result),data:String(reader.result).split(',')[1]});reader.onerror=reject;reader.readAsDataURL(file);});}
 function loadImage(dataUrl){return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(Error('图片无法读取'));image.src=dataUrl;});}
+async function selectProductLegacy(product){
+  const response=await fetch(product.imageUrl);if(!response.ok)throw Error('产品标准图读取失败');
+  const loaded=await fileData(await response.blob());
+  baseData=loaded.data;baseImage=await loadImage(loaded.dataUrl);
+  document.querySelector('#base-name').textContent=`产品库：${product.sku} · ${product.name}`;
+  productLibraryPanel.hidden=true;drawPreview();setStatus(`已从产品库选择 ${product.sku}，可以继续拖动 Logo 定位。`,'success');
+}
+async function selectProduct(product){
+  if(!product.templateUrl)return selectProductLegacy(product);
+  const [imageResponse,templateResponse]=await Promise.all([fetch(product.imageUrl),fetch(product.templateUrl)]);
+  if(!imageResponse.ok)throw Error('产品标准图读取失败');
+  const loaded=await fileData(await imageResponse.blob());
+  const templatePayload=templateResponse.ok?await templateResponse.json():null;
+  baseData=loaded.data;baseImage=await loadImage(loaded.dataUrl);
+  const masterTargets=masterTargetsFromTemplate(templatePayload?.template);
+  if(masterTargets.length){
+    targets.replaceChildren();targetNumber=0;selectedTargetId=masterTargets[0].id;
+    masterTargets.forEach(addTarget);
+    document.querySelector('#selected-target').textContent=`当前：${selectedTargetId}`;
+  }
+  document.querySelector('#base-name').textContent=`产品库：${product.sku} · ${product.name}`;
+  productLibraryPanel.hidden=true;drawPreview();
+  setStatus(masterTargets.length?`已选择 ${product.sku}，已加载产品母版 V${templatePayload.template.version}：${masterTargets.length} 个 Logo 固定区域。`:`已选择 ${product.sku}，该产品尚未发布母版，可继续手动定位 Logo。`,'success');
+}
+function renderProductLibrary(){
+  const query=productLibrarySearch.value.trim().toUpperCase();
+  if(!query){productLibraryList.innerHTML='<p class="hint">请输入 SKU 或产品名称后搜索。</p>';return;}
+  const visible=productLibraryProducts.filter(product=>`${product.sku} ${product.name}`.toUpperCase().includes(query));
+  productLibraryList.innerHTML=visible.length?visible.map(product=>`<article class="product-library-item"><img src="${esc(s7Path(product.imageUrl))}" alt="${esc(product.name)}标准图"><div><strong>${esc(product.sku)}</strong><span>${esc(product.name)}${product.category?` · ${esc(product.category)}`:''}</span></div><button type="button" class="button secondary" data-product-id="${esc(product.id)}">选择</button></article>`).join(''):'<p class="hint">产品库中没有匹配的启用产品。</p>';
+  productLibraryList.querySelectorAll('[data-product-id]').forEach(button=>button.addEventListener('click',async()=>{
+    const product=productLibraryProducts.find(item=>item.id===button.dataset.productId);if(!product)return;
+    button.disabled=true;button.textContent='读取中…';
+    try{await selectProduct(product);}catch(error){button.disabled=false;button.textContent='选择';setStatus(error.message,'error');}
+  }));
+}
+async function openProductLibrary(){
+  productLibraryPanel.hidden=!productLibraryPanel.hidden;if(productLibraryPanel.hidden)return;
+  productLibraryList.textContent='正在读取产品库…';
+  try{const response=await fetch('/api/product-library');const payload=await response.json();if(!response.ok)throw Error(payload.error||'产品库读取失败');productLibraryProducts=payload;renderProductLibrary();}
+  catch(error){productLibraryList.innerHTML=`<p class="hint status error">${esc(error.message)}</p>`;}
+}
 
 function quadFromTarget(target){
   const width=target.widthRatio*canvas.width,height=logoImage?width*logoImage.naturalHeight/logoImage.naturalWidth:width,center={x:target.x*canvas.width,y:target.y*canvas.height};
@@ -62,11 +122,23 @@ function addTarget(value={}){
   const row=document.createElement('div');
   row.className='target-row';
   row.dataset.targetId=id;
+  row.dataset.masterLocked=String(value.masterLocked===true);
+  row.dataset.masterZoneId=String(value.masterZoneId||'');
+  row.dataset.moveEnabled=String(value.moveEnabled===true||value.masterLocked!==true);
   row.dataset.logoColor=value.color||'#000000';
   row.dataset.autoContrast=String(value.autoContrast!==false);
   if(value.quad)setRowQuad(row,value.quad);
-  row.innerHTML=`<div class="target-head"><strong>目标 ${targetNumber}</strong><span class="target-actions"><button type="button" class="quad-target">四点透视</button><button type="button" class="duplicate-target">复制 Logo</button><button type="button" class="remove-target">删除</button></span></div><div class="target-grid"><label>ID<input data-key="id" value="${esc(id)}" spellcheck="false"></label><label>X<input data-key="x" type="number" min="0" max="1" step=".01" value="${value.x??.5}"></label><label>Y<input data-key="y" type="number" min="0" max="1" step=".01" value="${value.y??.5}"></label><label>宽度比例<input data-key="widthRatio" type="number" min=".01" max="1" step=".01" value="${value.widthRatio??.2}"></label><label>旋转角度<input data-key="rotation" type="number" min="-180" max="180" step="1" value="${value.rotation??0}"></label><label>曲面弯曲<input data-key="curve" type="number" min="0" max="1" step=".05" value="${value.curve??0}"></label><label>光泽参考<select data-key="surface"><option value="free" ${!value.surface||value.surface==='free'?'selected':''}>自由光泽（默认）</option><option value="flat" ${value.surface==='flat'?'selected':''}>平面轻光</option><option value="cylinder" ${value.surface==='cylinder'?'selected':''}>弧面高光</option></select></label></div>`;
+  row.innerHTML=`<div class="target-head"><strong>目标 ${targetNumber}</strong><span class="target-actions"><button type="button" class="rotate-target">旋转90°</button><button type="button" class="quad-target">四点透视</button><button type="button" class="duplicate-target">复制 Logo</button><button type="button" class="remove-target">删除</button></span></div><div class="target-grid"><label>ID<input data-key="id" value="${esc(id)}" spellcheck="false"></label><label>X<input data-key="x" type="number" min="0" max="1" step=".01" value="${value.x??.5}"></label><label>Y<input data-key="y" type="number" min="0" max="1" step=".01" value="${value.y??.5}"></label><label>宽度比例<input data-key="widthRatio" type="number" min=".01" max="1" step=".01" value="${value.widthRatio??.2}"></label><label>旋转角度<input data-key="rotation" type="number" min="-180" max="180" step="1" value="${value.rotation??0}"></label><label>曲面弯曲<input data-key="curve" type="number" min="0" max="1" step=".05" value="${value.curve??0}"></label><label>光泽参考<select data-key="surface"><option value="free" ${!value.surface||value.surface==='free'?'selected':''}>自由光泽（默认）</option><option value="flat" ${value.surface==='flat'?'selected':''}>平面轻光</option><option value="cylinder" ${value.surface==='cylinder'?'selected':''}>弧面高光</option></select></label></div>`;
+  const moveButton=document.createElement('button');
+  moveButton.type='button';moveButton.className='move-target';moveButton.textContent=canMoveTarget(value)?'锁定位置':'移动位置';
+  row.querySelector('.target-actions').prepend(moveButton);
+  if(value.masterLocked){
+    row.querySelectorAll('[data-key="x"],[data-key="y"],[data-key="rotation"],[data-key="curve"],[data-key="surface"]').forEach(input=>input.disabled=true);
+    row.querySelectorAll('.quad-target,.duplicate-target,.remove-target').forEach(button=>button.disabled=true);
+  }
+  moveButton.onclick=event=>{event.stopPropagation();const target=collectTargets().find(item=>item.id===row.dataset.targetId);if(!target)return;setTargetMoveEnabled(target,!canMoveTarget(target));row.dataset.moveEnabled=String(target.moveEnabled);moveButton.textContent=canMoveTarget(target)?'锁定位置':'移动位置';refreshTargetSelection();drawPreview();setStatus(target.moveEnabled?'已开启移动：现在可以拖动这个 Logo。':'已锁定位置：需要再次点击“移动位置”才可拖动。','success');};
   row.addEventListener('click',event=>{if(event.target.closest('button'))return;selectedTargetId=row.dataset.targetId;refreshTargetSelection();drawPreview();});
+  row.querySelector('.rotate-target').onclick=event=>{event.stopPropagation();const target=collectTargets().find(item=>item.id===row.dataset.targetId);if(!target)return;rotateTargetInPlace(target,-90);updateInputs(target);updateQuad(target);selectedTargetId=target.id;refreshTargetSelection();drawPreview();setStatus('已将 Logo 原地逆时针旋转 90°，中心位置和大小保持不变。','success');};
   row.querySelector('.duplicate-target').onclick=event=>{event.stopPropagation();const source=collectTargets().find(target=>target.id===row.dataset.targetId);if(!source)return;const aspectRatio=logoImage?logoImage.naturalHeight/logoImage.naturalWidth:1;const copy=cloneTarget(source,collectTargets().map(target=>target.id),.06,aspectRatio);addTarget(copy);selectedTargetId=copy.id;refreshTargetSelection();drawPreview();setStatus(`已复制 Logo：${copy.id}，请继续拖动定位。`,'success');};
   row.querySelector('.quad-target').onclick=event=>{event.stopPropagation();const target=collectTargets().find(item=>item.id===row.dataset.targetId);if(!target)return;setRowQuad(row,target.quad||quadFromTarget(target));selectedTargetId=target.id;refreshTargetSelection();drawPreview();setStatus('已启用四点透视：拖动预览中的四个蓝点贴合当前可见表面。','success');};
   row.querySelector('.remove-target').onclick=event=>{event.stopPropagation();if(targets.children.length===1){setStatus('至少保留一个上样目标','error');return;}const wasSelected=row.dataset.targetId===selectedTargetId;row.remove();if(wasSelected)selectedTargetId=targets.firstElementChild.dataset.targetId;refreshTargetSelection();drawPreview();};
@@ -78,7 +150,7 @@ function addTarget(value={}){
   targets.append(row);refreshTargetSelection();drawPreview();
 }
 
-function collectTargets(){return [...targets.children].map(row=>({...Object.fromEntries([...row.querySelectorAll('[data-key]')].map(input=>[input.dataset.key,['id','surface'].includes(input.dataset.key)?input.value.trim():Number(input.value)])),quad:rowQuad(row)||undefined,color:row.dataset.logoColor||'#000000',autoContrast:row.dataset.autoContrast==='true'}));}
+function collectTargets(){return [...targets.children].map(row=>({...Object.fromEntries([...row.querySelectorAll('[data-key]')].map(input=>[input.dataset.key,['id','surface'].includes(input.dataset.key)?input.value.trim():Number(input.value)])),quad:rowQuad(row)||undefined,color:row.dataset.logoColor||'#000000',autoContrast:row.dataset.autoContrast==='true',masterZoneId:row.dataset.masterZoneId||undefined,masterLocked:row.dataset.masterLocked==='true',moveEnabled:row.dataset.moveEnabled==='true'}));}
 function refreshTargetSelection(){
   [...targets.children].forEach(row=>row.classList.toggle('selected',row.dataset.targetId===selectedTargetId));
   const selectedRow=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);
@@ -108,7 +180,8 @@ function rotateLocal(center,x,y,degrees){const radians=degrees*Math.PI/180;retur
 function handlePoints(target){
   const center={x:target.x*canvas.width,y:target.y*canvas.height};
   const width=target.widthRatio*canvas.width,height=logoImage?width*logoImage.naturalHeight/logoImage.naturalWidth:width;
-  return {center,scale:rotateLocal(center,width/2,height/2,target.rotation),rotation:rotateLocal(center,0,-height/2-36,target.rotation)};
+  const rotationLocal=rotationHandleLocalPosition(width,height,Math.max(24,canvas.width/120));
+  return {center,scale:rotateLocal(center,width/2,height/2,target.rotation),rotation:rotateLocal(center,rotationLocal.x,rotationLocal.y,target.rotation),rotationReferenceAngle:Math.atan2(rotationLocal.y,rotationLocal.x)*180/Math.PI};
 }
 function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
 function updateInputs(target){
@@ -160,6 +233,14 @@ function drawQuadPreview(context,layer,quad){
   }
   context.putImageData(output,left,top);
 }
+function drawRotationArrow(context,point,size,rotation){
+  context.save();context.translate(point.x,point.y);context.rotate(rotation*Math.PI/180);
+  const radius=size*.72,start=-Math.PI*.3,end=Math.PI*1.12;
+  context.strokeStyle='#5369d9';context.lineWidth=Math.max(2,size*.12);context.lineCap='round';context.beginPath();context.arc(0,0,radius,start,end);context.stroke();
+  const tip={x:Math.cos(end)*radius,y:Math.sin(end)*radius},tangent=end+Math.PI/2,head=size*.38;
+  context.fillStyle='#5369d9';context.beginPath();context.moveTo(tip.x,tip.y);context.lineTo(tip.x-Math.cos(tangent-.7)*head,tip.y-Math.sin(tangent-.7)*head);context.lineTo(tip.x-Math.cos(tangent+.7)*head,tip.y-Math.sin(tangent+.7)*head);context.closePath();context.fill();
+  context.restore();
+}
 function drawPreview(){
   if(!baseImage){canvas.width=1;canvas.height=1;previewEmpty.hidden=false;return;}
   canvas.width=baseImage.naturalWidth;canvas.height=baseImage.naturalHeight;previewEmpty.hidden=true;
@@ -176,7 +257,7 @@ function drawPreview(){
     });
     const curvedLayer=curvePreviewLogo(logoLayer,target.curve);
     if(target.quad)drawQuadPreview(context,curvedLayer,target.quad);else{context.save();context.translate(target.x*canvas.width,target.y*canvas.height);context.rotate(target.rotation*Math.PI/180);context.globalAlpha=target.id===selectedTargetId?.9:.68;context.drawImage(curvedLayer,-width/2,-height/2,width,height);context.globalAlpha=1;context.strokeStyle=target.id===selectedTargetId?'#5369d9':'#ffffff';context.lineWidth=Math.max(2,canvas.width/500);context.setLineDash(target.id===selectedTargetId?[]:[8,6]);context.strokeRect(-width/2,-height/2,width,height);context.restore();}
-    if(target.id===selectedTargetId){const handles=handlePoints(target),size=Math.max(10,canvas.width/80);context.setLineDash([]);context.strokeStyle='#5369d9';context.lineWidth=Math.max(2,canvas.width/500);context.beginPath();context.moveTo(handles.center.x,handles.center.y);context.lineTo(handles.rotation.x,handles.rotation.y);context.stroke();context.fillStyle='#5369d9';context.fillRect(handles.scale.x-size/2,handles.scale.y-size/2,size,size);context.beginPath();context.arc(handles.rotation.x,handles.rotation.y,size*.55,0,Math.PI*2);context.fill();if(target.quad){const points=target.quad.map(point=>({x:point.x*canvas.width,y:point.y*canvas.height}));context.beginPath();context.moveTo(points[0].x,points[0].y);for(const point of points.slice(1))context.lineTo(point.x,point.y);context.closePath();context.stroke();for(const point of points)context.fillRect(point.x-size/2,point.y-size/2,size,size);}}
+    if(target.id===selectedTargetId){const handles=handlePoints(target),size=Math.max(10,canvas.width/80);context.setLineDash([]);context.strokeStyle='#5369d9';context.lineWidth=Math.max(2,canvas.width/500);context.beginPath();context.moveTo(handles.center.x,handles.center.y);context.lineTo(handles.rotation.x,handles.rotation.y);context.stroke();context.fillStyle='#5369d9';context.fillRect(handles.scale.x-size/2,handles.scale.y-size/2,size,size);drawRotationArrow(context,handles.rotation,size*1.55,target.rotation);if(target.quad){const points=target.quad.map(point=>({x:point.x*canvas.width,y:point.y*canvas.height}));context.beginPath();context.moveTo(points[0].x,points[0].y);for(const point of points.slice(1))context.lineTo(point.x,point.y);context.closePath();context.stroke();for(const point of points)context.fillRect(point.x-size/2,point.y-size/2,size,size);}}
   }
 }
 
@@ -188,24 +269,46 @@ canvas.addEventListener('pointerdown',event=>{
   const quadIndex=quadDistances.findIndex(distanceToCorner=>distanceToCorner<=hitRadius);
   if(quadIndex>=0){dragTarget=selected;dragMode=`quad-${quadIndex}`;}
   else if(handles&&distance(point,handles.scale)<=hitRadius){dragTarget=selected;dragMode='scale';}
-  else if(handles&&distance(point,handles.rotation)<=hitRadius){dragTarget=selected;dragMode='rotate';}
-  else{dragTarget=targetAt(normalized);dragMode=dragTarget?'move':null;}
+  else if(handles&&distance(point,handles.rotation)<=hitRadius){
+    dragTarget=selected;dragMode='rotate-pending';rotatePointerId=event.pointerId;rotateStartedAt=Date.now();
+    if(rotateTimer!==null)clearTimeout(rotateTimer);
+    rotateTimer=setTimeout(()=>{if(dragTarget===selected&&dragMode==='rotate-pending'&&rotatePointerId===event.pointerId)dragMode='rotate';},ROTATE_LONG_PRESS_MS);
+  }
+  else{dragTarget=targetAt(normalized);if(dragTarget&&!canMoveTarget(dragTarget)){selectedTargetId=dragTarget.id;refreshTargetSelection();drawPreview();setStatus('该 Logo 的母版位置已锁定，请先点击目标卡片中的“移动位置”。','success');dragTarget=null;return;}dragMode=dragTarget?'move':null;}
   if(!dragTarget)return;selectedTargetId=dragTarget.id;canvas.setPointerCapture(event.pointerId);canvas.classList.add('dragging');refreshTargetSelection();drawPreview();
 });
 canvas.addEventListener('pointermove',event=>{
   if(!dragTarget)return;
+  if(dragMode==='rotate-pending')return;
   const normalized=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect()),point={x:normalized.x*canvas.width,y:normalized.y*canvas.height};
   if(dragMode==='move'){const offsetX=normalized.x-dragTarget.x,offsetY=normalized.y-dragTarget.y;dragTarget.x=normalized.x;dragTarget.y=normalized.y;if(dragTarget.quad){dragTarget.quad=dragTarget.quad.map(corner=>({x:Math.min(1,Math.max(0,corner.x+offsetX)),y:Math.min(1,Math.max(0,corner.y+offsetY))}));updateQuad(dragTarget);}}
   if(dragMode==='scale')dragTarget.widthRatio=widthRatioFromScalePointer(dragTarget,point,canvas.width,canvas.height);
-  if(dragMode==='rotate')dragTarget.rotation=rotationFromPointer({x:dragTarget.x*canvas.width,y:dragTarget.y*canvas.height},point);
+  if(dragMode==='rotate')dragTarget.rotation=rotationFromPointer({x:dragTarget.x*canvas.width,y:dragTarget.y*canvas.height},point,handlePoints(dragTarget).rotationReferenceAngle);
   if(!dragTarget.quad)keepTargetInsideCanvas(dragTarget);
   if(dragMode?.startsWith('quad-')){const index=Number(dragMode.slice(5));dragTarget.quad[index]={x:normalized.x,y:normalized.y};updateQuad(dragTarget);}
   updateInputs(dragTarget);drawPreview();
 });
-function endDrag(event){if(!dragTarget)return;dragTarget=null;dragMode=null;canvas.classList.remove('dragging');if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);}
+function endDrag(event){
+  if(!dragTarget)return;
+  const target=dragTarget,step=dragMode==='rotate-pending'&&event.type!=='pointercancel'&&rotationGestureMode(Date.now()-rotateStartedAt)==='step';
+  if(rotateTimer!==null){clearTimeout(rotateTimer);rotateTimer=null;}
+  if(step){rotateTargetInPlace(target,-90);updateInputs(target);updateQuad(target);refreshTargetSelection();drawPreview();setStatus('已自动将 Logo 逆时针旋转 90°。长按旋转箭头可进行自由旋转。','success');}
+  dragTarget=null;dragMode=null;rotatePointerId=null;canvas.classList.remove('dragging');if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
+}
 canvas.addEventListener('pointerup',endDrag);canvas.addEventListener('pointercancel',endDrag);
+canvas.addEventListener('contextmenu',event=>{
+  if(!baseImage||!logoImage||!logoData)return;
+  const normalized=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect());
+  if(!targetAt(normalized))return;
+  event.preventDefault();
+  triggerTransparentLogoDownload(logoData,{filename:'logo-transparent.png'});
+  setStatus('已保存透明 Logo PNG，可直接复用，无需再次调用 AI。','success');
+});
 
 document.querySelector('#add-target').onclick=()=>addTarget();
+chooseProductButton.onclick=openProductLibrary;
+closeProductLibraryButton.onclick=()=>{productLibraryPanel.hidden=true;};
+productLibrarySearch.oninput=renderProductLibrary;
 originalColorInput.oninput=()=>{const selectedRow=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);if(!selectedRow)return;selectedRow.dataset.logoColor=originalColorInput.value;originalColorValue.textContent=originalColorInput.value.toUpperCase();drawPreview();};
 autoContrastInput.onchange=()=>{const selectedRow=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);if(!selectedRow)return;selectedRow.dataset.autoContrast=String(autoContrastInput.checked);drawPreview();};
 document.querySelector('#base-image').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{const loaded=await fileData(file);baseData=loaded.data;baseImage=await loadImage(loaded.dataUrl);document.querySelector('#base-name').textContent=file.name;drawPreview();}catch(error){setStatus(error.message,'error');}};
@@ -233,6 +336,21 @@ async function loadAiProviderStatus(){
   catch{hint.textContent='无法读取 AI 图片模型配置，请检查 S7 服务。';hint.className='hint provider-missing';}
 }
 
+async function loadMockupModels(){
+  try{
+    const response=await fetch('/api/ai-models'),payload=await response.json();
+    if(!response.ok||!payload.configured||!Array.isArray(payload.models)||!payload.models.length)throw Error('尚未配置可用的 AI 成图模型');
+    mockupModel.replaceChildren(...payload.models.map(model=>{const option=document.createElement('option');option.value=model;option.textContent=model;return option;}));
+    mockupModel.value=payload.defaultModel&&payload.models.includes(payload.defaultModel)?payload.defaultModel:payload.models[0];
+    mockupModelHint.textContent=`可选模型：${payload.models.join('、')}；默认使用 ${mockupModel.value}。`;
+    mockupModel.disabled=false;
+  }catch(error){
+    mockupModel.replaceChildren(new Option('暂无可用模型',''));
+    mockupModel.disabled=true;
+    mockupModelHint.textContent=error.message||'无法读取 AI 成图模型配置。';
+  }
+}
+
 function setPreviewScale(value){
   previewScale=Math.min(4,Math.max(.25,value));
   imagePreviewImage.style.transform=`scale(${previewScale})`;
@@ -254,7 +372,7 @@ async function regenerateResult(version,card){
   if(!baseData||!logoData){setStatus('请先选择原图和透明 Logo。','error');return;}
   button.disabled=true;button.textContent='生成中…';
   try{
-    const response=await fetch('/api/ai-render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({onlyVersion:version,baseImage:baseData,logoImage:logoData,finishReferenceImage:finishReferenceData,targets:collectTargets(),originalColor:originalColorInput.value})});
+    const response=await fetch('/api/ai-render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({onlyVersion:version,model:mockupModel.value,baseImage:baseData,logoImage:logoData,finishReferenceImage:finishReferenceData,targets:collectTargets(),originalColor:originalColorInput.value})});
     const payload=await response.json();if(!response.ok)throw Error(payload.error||'重新生成失败');
     const output=payload.outputs.find(item=>item.version===version);if(!output)throw Error(`没有返回 ${version} 结果`);
     updateResultCard(card,output);setStatus(`${version} 已重新生成。`,'success');
@@ -290,13 +408,14 @@ document.addEventListener('keydown',event=>{
 
 document.querySelector('#generate').onclick=async()=>{
   if(!baseData||!logoData){setStatus('请先选择原图和透明 Logo。','error');return;}
-  setStatus('正在调用 GPT Image 2 生成四个自然上样版本，通常需要数分钟…','busy');
+  setStatus(`正在调用 ${mockupModel.value||'AI 图片模型'} 生成四个自然上样版本，通常需要数分钟…`,'busy');
   try{
-    const response=await fetch('/api/ai-render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({baseImage:baseData,logoImage:logoData,finishReferenceImage:finishReferenceData,targets:collectTargets(),originalColor:originalColorInput.value})});
-    const payload=await response.json();if(!response.ok)throw Error(payload.error||'生成失败');renderResults(payload);setStatus('GPT Image 2 已生成四个自然上样版本，请检查产品、包装文字与 Logo 是否保持保真。','success');
+    const response=await fetch('/api/ai-render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model:mockupModel.value,baseImage:baseData,logoImage:logoData,finishReferenceImage:finishReferenceData,targets:collectTargets(),originalColor:originalColorInput.value})});
+    const payload=await response.json();if(!response.ok)throw Error(payload.error||'生成失败');renderResults(payload);setStatus(`${mockupModel.value||'AI 图片模型'} 已生成四个自然上样版本，请检查产品、包装文字与 Logo 是否保持保真。`,'success');
   }catch(error){setStatus(error.message||'生成失败，请检查素材和目标设置。','error');}
 };
 
 addTarget({id:'product',x:.5,y:.5,widthRatio:.2,rotation:0,curve:0,surface:'free'});
 loadAiProviderStatus();
+loadMockupModels();
 restoreSavedLogo();

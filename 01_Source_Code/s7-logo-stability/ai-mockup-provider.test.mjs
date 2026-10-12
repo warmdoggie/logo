@@ -60,3 +60,38 @@ test('APIMart gpt-image-2.5-flare configuration is accepted for mockups',async()
     assert.equal(submitted.model,'gpt-image-2.5-flare');
   }finally{await rm(dir,{recursive:true,force:true});}
 });
+
+test('APIMart mockup requests use the configured proxy',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'s7-apimart-mockup-proxy-'));
+  try{
+    const configPath=join(dir,'ai-provider.json');
+    await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',model:'gpt-image-2',endpoint:'https://api.apimart.ai',proxyUrl:'http://127.0.0.1:7897',apiKey:'test-key'}));
+    const output=await sharp({create:{width:2,height:2,channels:3,background:{r:220,g:210,b:200}}}).png().toBuffer();
+    let dispatcher,requestHeaders;
+    const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async(url,options)=>{
+      dispatcher=options.dispatcher;
+      requestHeaders=options.headers||requestHeaders;
+      if(String(url).endsWith('/v1/images/generations'))return Response.json({data:[{url:'https://getapib.org/f/mockup.png'}]});
+      return new Response(output);
+    }});
+    await renderer({baseImage:'data:image/png;base64,BASE',logoImage:'data:image/png;base64,LOGO',guides:[
+      {version:'ORIGINAL',dataUrl:'data:image/png;base64,G1'},{version:'BLACK',dataUrl:'data:image/png;base64,G2'},
+      {version:'GOLD FOIL',dataUrl:'data:image/png;base64,G3'},{version:'SILVER FOIL',dataUrl:'data:image/png;base64,G4'}
+    ],originalColor:'#000000'});
+    assert.ok(dispatcher,'APIMart mockup transport should receive a proxy dispatcher');
+    assert.equal(new Headers(requestHeaders).get('accept-encoding'),'identity');
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('APIMart mockup rejects an invalid provider JSON response with a provider error',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'s7-apimart-invalid-json-'));
+  try{
+    const configPath=join(dir,'ai-provider.json');
+    await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',model:'gpt-image-2',endpoint:'https://api.apimart.ai',apiKey:'test-key'}));
+    const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async()=>new Response('not-json',{status:200})});
+    await assert.rejects(()=>renderer({baseImage:'data:image/png;base64,BASE',logoImage:'data:image/png;base64,LOGO',guides:[
+      {version:'ORIGINAL',dataUrl:'data:image/png;base64,G1'},{version:'BLACK',dataUrl:'data:image/png;base64,G2'},
+      {version:'GOLD FOIL',dataUrl:'data:image/png;base64,G3'},{version:'SILVER FOIL',dataUrl:'data:image/png;base64,G4'}
+    ],originalColor:'#000000'}),/APIMart 返回了无法解析的 JSON 响应/);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});

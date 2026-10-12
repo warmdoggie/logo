@@ -1,3 +1,4 @@
+import {readSeedLogo} from './seed-logo.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -19,7 +20,7 @@ test('母版发布、数据校验、不可覆盖历史、任务版本绑定、�
  assert.equal((await get(path)).template,null);
  const zones=[logo('产品本体 Logo 区',.18,.45,.07,.3,true),logo('彩盒 Logo 区',.43,.3,.08,.4),{zoneType:'no-logo',name:'接缝禁止区域',x:.17,y:.38,width:.10,height:.02,note:'验收示例'}];
  let r=await send(path,{zones,baseVersion:0,changeNote:'首次发布'});assert.equal(r.status,201);const v1=await r.json();assert.equal(v1.currentVersion,1);assert.equal(v1.template.zones.length,3);
- const f=new FormData();f.set('customerName','版本绑定验收');f.set('productIds',JSON.stringify([p.id]));f.set('rawRequirement','单色 Logo');f.set('logo',new Blob([readFileSync(join(root,'seed/rae-logo.png'))],{type:'image/png'}),'Rae.png');r=await fetch(base+'/api/tasks',{method:'POST',body:f});assert.equal(r.status,201);const task=await r.json();
+ const f=new FormData();f.set('customerName','版本绑定验收');f.set('productIds',JSON.stringify([p.id]));f.set('rawRequirement','单色 Logo');f.set('logo',new Blob([readSeedLogo()],{type:'image/png'}),'Rae.png');r=await fetch(base+'/api/tasks',{method:'POST',body:f});assert.equal(r.status,201);const task=await r.json();
  assert.equal((await get('/api/tasks/'+task.id)).products[0].boundVersion,1);
  const invalid=structuredClone(zones);invalid[1].isDefault=true;r=await send(path,{zones:invalid,baseVersion:1,changeNote:'无效'});assert.equal(r.status,400);
  invalid[1].isDefault=false;invalid[0].width=2;r=await send(path,{zones:invalid,baseVersion:1,changeNote:'无效'});assert.equal(r.status,400);

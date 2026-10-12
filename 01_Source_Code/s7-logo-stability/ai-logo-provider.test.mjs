@@ -118,6 +118,25 @@ test('APIMart uses a dedicated transparent logo model without changing the mocku
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 
+test('APIMart Logo processing uses the configured proxy',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'s7-apimart-logo-proxy-'));
+  try{
+    const configPath=join(dir,'ai-provider.json');
+    await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',model:'gpt-image-2',logoModel:'gpt-image-2.5-flare',endpoint:'https://api.apimart.ai',proxyUrl:'http://127.0.0.1:7897',apiKey:'test-key'}));
+    const png=await sharp({create:{width:2,height:2,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite([{input:Buffer.from([0,0,0,255]),raw:{width:1,height:1,channels:4},left:0,top:0}]).png().toBuffer();
+    let dispatcher,requestHeaders;
+    const processor=createAiLogoProcessor({configPath,pollIntervalMs:0,transport:async(url,options)=>{
+      dispatcher=options.dispatcher;
+      requestHeaders=options.headers||requestHeaders;
+      if(String(url).endsWith('/v1/images/generations'))return Response.json({data:[{url:'https://upload.apimart.ai/logo.png'}]});
+      return new Response(png);
+    }});
+    await processor(png);
+    assert.ok(dispatcher,'APIMart Logo transport should receive a proxy dispatcher');
+    assert.equal(new Headers(requestHeaders).get('accept-encoding'),'identity');
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
 test('APIMart Logo processing permits a five-minute async generation window',async()=>{
   const dir=await mkdtemp(join(tmpdir(),'s7-logo-timeout-'));
   const originalTimeout=AbortSignal.timeout;

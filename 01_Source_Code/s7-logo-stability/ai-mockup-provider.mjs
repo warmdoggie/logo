@@ -2,18 +2,33 @@ import {existsSync,readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import sharp from 'sharp';
 import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
+import {createApimartTransport} from './apimart-transport.mjs';
 
 const ROOT=new URL('.',import.meta.url);
 const DEFAULT_CONFIG=fileURLToPath(new URL('../data/ai-provider.local.json',ROOT));
+const SUPPORTED_MOCKUP_MODELS=['gpt-image-2','gpt-image-2.5-flare','flux-3-image'];
 
 function configAt(configPath){
   if(!existsSync(configPath))return null;
   try{
     const config=JSON.parse(readFileSync(configPath,'utf8').replace(/^\uFEFF/,''));
     const endpoint=new URL(config.endpoint);
-    if(config.enabled===false||config.provider!=='APIMART'||!['gpt-image-2','gpt-image-2.5-flare'].includes(config.model)||typeof config.apiKey!=='string'||!config.apiKey.trim()||endpoint.origin!=='https://api.apimart.ai')return null;
-    return {...config,endpoint:endpoint.toString().replace(/\/$/,''),timeoutMs:Math.max(1000,Math.min(300000,Number(config.timeoutMs)||120000))};
+    const configuredModels=Array.isArray(config.mockupModels)?config.mockupModels:[config.model];
+    const models=[...new Set(configuredModels.filter(model=>typeof model==='string'&&SUPPORTED_MOCKUP_MODELS.includes(model)))];
+    if(config.enabled===false||config.provider!=='APIMART'||!SUPPORTED_MOCKUP_MODELS.includes(config.model)||!models.includes(config.model)||typeof config.apiKey!=='string'||!config.apiKey.trim()||endpoint.origin!=='https://api.apimart.ai')return null;
+    return {...config,models,endpoint:endpoint.toString().replace(/\/$/,''),timeoutMs:Math.max(1000,Math.min(300000,Number(config.timeoutMs)||120000))};
   }catch{return null;}
+}
+
+export function getAiMockupProviderStatus(configPath=process.env.S7_AI_CONFIG||DEFAULT_CONFIG){
+  const config=configAt(configPath);
+  return {configured:!!config,provider:config?.provider||null,defaultModel:config?.model||null,models:config?.models||[]};
+}
+
+function selectedModel(config,requestedModel){
+  if(requestedModel===undefined||requestedModel===null||requestedModel==='')return config.model;
+  if(typeof requestedModel!=='string'||!config.models.includes(requestedModel))throw Error(`请求的 AI 成图模型未配置或不可用：${requestedModel}`);
+  return requestedModel;
 }
 
 function errorFrom(payload,fallback){return payload?.error?.message||payload?.message||payload?.data?.error?.message||fallback;}
@@ -32,8 +47,9 @@ async function download(urlValue,{transport,signal}){
 async function renderOne(config,plan,{transport,pollIntervalMs}){
   const signal=AbortSignal.timeout(config.timeoutMs);
   const request=async(path,options={})=>{
-    const response=await transport(config.endpoint+path,{...options,redirect:'error',signal,headers:{Authorization:`Bearer ${config.apiKey}`,'Content-Type':'application/json',...(options.headers||{})}});
-    const payload=await response.json();
+    const response=await transport(config.endpoint+path,{...options,redirect:'error',signal,headers:{Authorization:`Bearer ${config.apiKey}`,'Content-Type':'application/json','Accept-Encoding':'identity',...(options.headers||{})}});
+    let payload;
+    try{payload=await response.json();}catch{throw Error('APIMart 返回了无法解析的 JSON 响应');}
     if(!response.ok)throw Error(`APIMart 成图请求失败：${errorFrom(payload,`HTTP ${response.status}`)}`);
     return payload;
   };
@@ -57,8 +73,9 @@ async function renderOne(config,plan,{transport,pollIntervalMs}){
 export function createAiMockupRenderer({configPath=process.env.S7_AI_CONFIG||DEFAULT_CONFIG,transport=fetch,pollIntervalMs=3000}={}){
   return async input=>{
     const config=configAt(configPath);
-    if(!config)throw Error('S7 AI 成图需要配置 APIMART / gpt-image-2.5-flare');
-    const plan=buildAiMockupPlan({...input,model:config.model});
-    return Promise.all(plan.map(item=>renderOne(config,item,{transport,pollIntervalMs})));
+    if(!config)throw Error('S7 AI 成图需要配置可用的 APIMART 图片模型');
+    const plan=buildAiMockupPlan({...input,model:selectedModel(config,input.model)});
+    const requestTransport=createApimartTransport({proxyUrl:config.proxyUrl||process.env.S7_APIMART_PROXY_URL||process.env.APIMART_PROXY_URL,transport});
+    return Promise.all(plan.map(item=>renderOne(config,item,{transport:requestTransport,pollIntervalMs})));
   };
 }

@@ -1,0 +1,30 @@
+[Unit]
+Description=S7 merged workspace service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=s7-logo
+Group=s7-logo
+WorkingDirectory=/srv/s7-logo
+Environment=NODE_ENV=production
+Environment=PORT=3210
+Environment=HOST=127.0.0.1
+Environment=APP_DATA_DIR=/var/lib/s7-logo/workspace
+Environment=APP_NO_SEED=1
+Environment=APP_ALLOWED_HOSTS=logo.heciai.net,127.0.0.1,localhost
+EnvironmentFile=-/etc/s7-logo/production.env
+ExecStart=/usr/bin/node /srv/s7-logo/server.mjs
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/s7-logo /var/log/s7-logo
+StandardOutput=append:/var/log/s7-logo/workspace.log
+StandardError=append:/var/log/s7-logo/workspace-error.log
+
+[Install]
+WantedBy=multi-user.target

@@ -3,8 +3,8 @@ export function pointerToNormalized(clientX,clientY,rect){
   return {x:Math.max(0,Math.min(1,(clientX-rect.left)/rect.width)),y:Math.max(0,Math.min(1,(clientY-rect.top)/rect.height))};
 }
 
-export function rotationFromPointer(center,point){
-  const degrees=Math.atan2(point.y-center.y,point.x-center.x)*180/Math.PI+90;
+export function rotationFromPointer(center,point,referenceAngle=-90){
+  const degrees=Math.atan2(point.y-center.y,point.x-center.x)*180/Math.PI-referenceAngle;
   return Number((((degrees+180)%360+360)%360-180).toFixed(4));
 }
 

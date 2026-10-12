@@ -31,6 +31,29 @@ test('展示界面提供静态页面并生成四个预览版本',async()=>{
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
 
+test('产品库选择器读取主工作区产品并返回标准图',async()=>{
+  const productImage=await image(16,10,{r:230,g:220,b:210,alpha:1});
+  const {server,base}=await openServer({productCatalog:async()=>[{
+    id:'product-1',sku:'E0034',name:'眉胶',category:'EYEBROW',status:'ACTIVE',standardImage:'product.png',imageBytes:productImage
+  }]});
+  try{
+    const html=await fetch(base+'/');
+    assert.equal(html.status,200);
+    assert.match(await html.text(),/从产品库选择/);
+    const script=await fetch(base+'/demo.js');
+    assert.match(await script.text(),/if\(!query\)/);
+    const catalog=await fetch(base+'/api/product-library');
+    assert.equal(catalog.status,200);
+    const products=await catalog.json();
+    assert.deepEqual(products.map(({id,sku,name})=>({id,sku,name})),[{id:'product-1',sku:'E0034',name:'眉胶'}]);
+    assert.equal(products[0].imageUrl,'/api/product-library/image/product-1');
+    const selected=await fetch(base+products[0].imageUrl);
+    assert.equal(selected.status,200);
+    assert.equal(selected.headers.get('content-type'),'image/png');
+    assert.deepEqual(Buffer.from(await selected.arrayBuffer()),productImage);
+  }finally{await new Promise(resolve=>server.close(resolve));}
+});
+
 test('提供不调用外部服务的健康检查端点',async()=>{
   const {server,base}=await openServer();
   try{
@@ -84,18 +107,20 @@ test('展示界面通过AI接口生成透明底黑字Logo',async()=>{
 test('展示界面由AI生成四张自然上样成图',async()=>{
   const rendered=await image(12,8,{r:210,g:200,b:190,alpha:1});
   const {server,base}=await openServer({mockupRenderer:async input=>{
+    assert.equal(input.model,'flux-3-image');
     assert.equal(input.originalColor,'#C54B78');
     assert.equal(input.guides.length,4);
     assert.deepEqual(input.targets,[{id:'product',x:.5,y:.5,widthRatio:.2,rotation:0}]);
     assert.equal(input.baseImage.startsWith('data:image/png;base64,'),true);
     assert.equal(input.logoImage.startsWith('data:image/png;base64,'),true);
+    assert.equal(input.maskImage.startsWith('data:image/png;base64,'),true);
     assert.equal(input.finishReferenceImage,'data:image/png;base64,FINISH');
     return ['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL'].map(version=>({version,bytes:rendered}));
   }});
   try{
     const baseImage=await image(80,40,{r:240,g:230,b:220,alpha:1});
     const logo=await image(8,4,{r:0,g:0,b:0,alpha:1});
-    const response=await fetch(base+'/api/ai-render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({baseImage:baseImage.toString('base64'),logoImage:logo.toString('base64'),finishReferenceImage:'FINISH',targets:[{id:'product',x:.5,y:.5,widthRatio:.2,rotation:0}],originalColor:'#C54B78'})});
+    const response=await fetch(base+'/api/ai-render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model:'flux-3-image',baseImage:baseImage.toString('base64'),logoImage:logo.toString('base64'),finishReferenceImage:'FINISH',targets:[{id:'product',x:.5,y:.5,widthRatio:.2,rotation:0}],originalColor:'#C54B78'})});
     assert.equal(response.status,200);
     const payload=await response.json();
     assert.deepEqual(payload.outputs.map(output=>output.version),['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL']);
@@ -114,6 +139,8 @@ test('展示界面将人工定位参考交给AI生成最终四个版本',async()
     assert.match(source,/fetch\('\/api\/ai-render'/);
     assert.doesNotMatch(source,/fetch\('\/api\/render'/);
     assert.match(source,/finishReferenceImage/);
+    assert.match(source,/mockupModel\.value/);
+    assert.match(await (await fetch(base+'/')).text(),/id="mockup-model"/);
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
 

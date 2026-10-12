@@ -1,3 +1,4 @@
+import {readSeedLogo} from './seed-logo.mjs';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -11,7 +12,7 @@ test('真实上传、SKU 唯一与精确批量查找、原文件保存、关系�
  const data=mkdtempSync(join(tmpdir(),'render-assistant-test-'));let child,base;
  async function start(){child=spawn(process.execPath,[join(root,'server.mjs')],{env:{...process.env,APP_DATA_DIR:data,APP_NO_SEED:'1',PORT:'0'},stdio:['ignore','pipe','pipe']});base=await new Promise((resolve,reject)=>{let out='';child.stdout.on('data',c=>{out+=c;const m=out.match(/http:\/\/127\.0\.0\.1:\d+/);if(m)resolve(m[0]);});child.once('error',reject);child.once('exit',code=>reject(new Error('Server exited '+code)));setTimeout(()=>reject(new Error('Startup timeout')),10000).unref();});}
  async function stop(){const done=once(child,'exit');child.kill();await done;}
- const file=readFileSync(join(root,'seed','rae-logo.png'));
+ const file=readSeedLogo();
  const product=(sku,name='测试产品')=>{const f=new FormData();f.set('sku',sku);f.set('name',name);f.set('category','唇蜜');f.set('image',new Blob([file],{type:'image/png'}),'测试产品.png');return f;};
  const post=(p,body)=>fetch(base+p,{method:'POST',body});
  try{

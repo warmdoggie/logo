@@ -65,26 +65,74 @@ function promptFor(variant,{compositionMaster=false,targets,finishReference=fals
   return `Image 1 is the only logo source. ${master} Image 3 is the exact placement, perspective, color and finish reference produced from the user's manual positioning.${placementLock}${reference}${placementGeometry(targets)} Preserve Image 2 completely: product count, shape, packaging text, artwork, structure, seams, edges, camera angle, crop, perspective, background, lighting, highlights and shadows. The result must be pixel-identical to Image 2 outside the logo application areas. Do not add, remove, clean up, move, redesign, sharpen or rewrite anything except the logo application. Use Image 3 only to determine logo placement, size, rotation, surface perspective, per-placement color and finish; never copy guide artifacts, labels or borders. Do not reproduce the raster edge, flat fill or shading of Image 3: render the final logo pixels afresh from Image 1. The logo is a locked source asset: preserve every letter, glyph, mark, spacing, proportion and edge exactly; preserve holes and internal cutouts exactly. Do not redraw, re-typeset, stretch, crop, simplify or invent any part of the logo. ${PRINT_REALISM_COMMON} CURRENT VERSION ONLY: ${variant.instruction()} IMPORTANT PHYSICAL CONSTRAINT: Do not render the logo as a separate graphic layer. The logo material must share the exact surface geometry, surface normals, perspective, deformation, lighting direction and occlusion of the underlying packaging. All highlights and reflections must be caused by the original scene lighting and the substrate surface normal. Do not add a new light source specifically to illuminate the logo. Integrate Image 1 as a natural printed or foil surface treatment that follows the surface perspective shown in Image 3, with surface-aware ink absorption, restrained edge softness, natural printed surface gloss and subtle material reflection aligned to Image 2 lighting. Never render the logo as a flat vector fill: the microtexture of the substrate must remain subtly visible through the finish, while the logo edges stay crisp at normal viewing distance. No pasted rectangle, sticker effect, floating overlay, excessive shadow, glow, embossing or 3D thickness. Output one clean product image only, with no labels, captions, borders, collage, watermark or extra elements.`;
 }
 
+const FLUX_FINISH_INSTRUCTIONS={
+  ORIGINAL:`Apply the complete source Logo in its exact original color for every target. Keep the color dense, saturated and opaque. Add only subtle surface-aware printed-ink response from the existing light and substrate; do not bleach, fade, desaturate or replace the color.`,
+  BLACK:`Apply the complete source Logo as dense opaque black ink on light surfaces, or dense opaque white ink only where the target surface is dark. Keep strong color coverage and clean letter edges. Add only restrained surface-aware ink response; no gray, faded, translucent, glossy sticker or 3D effect.`,
+  'GOLD FOIL':`Apply the complete source Logo as a very thin, flush commercial gold hot-foil layer. Use restrained warm metallic reflection caused by the existing scene light and target surface normal, with natural gold midtones and darker reflected regions. No yellow flat fill, glitter, glow, embossing or 3D thickness.`,
+  'SILVER FOIL':`Apply the complete source Logo as a very thin, flush commercial silver hot-foil layer. Use restrained neutral metallic reflection caused by the existing scene light and target surface normal, with bright silver highlights and darker reflected regions. No gray flat fill, white ink, chrome, glitter, glow, embossing or 3D thickness.`
+};
+
+function fluxCoordinate(value){return Math.round(Math.max(0,Math.min(1,Number(value)||0))*1000);}
+
+function fluxTargetBox(target,logoAspectRatio=1){
+  if(Array.isArray(target?.quad)&&target.quad.length===4){
+    const xs=target.quad.map(point=>Number(point.x)),ys=target.quad.map(point=>Number(point.y));
+    return [fluxCoordinate(Math.min(...ys)),fluxCoordinate(Math.min(...xs)),fluxCoordinate(Math.max(...ys)),fluxCoordinate(Math.max(...xs))];
+  }
+  const halfWidth=Math.max(0.01,Number(target?.widthRatio||0)/2),halfHeight=halfWidth*Math.max(.01,Number(logoAspectRatio)||1);
+  return [fluxCoordinate((Number(target?.y)||0)-halfHeight),fluxCoordinate((Number(target?.x)||0)-halfWidth),fluxCoordinate((Number(target?.y)||0)+halfHeight),fluxCoordinate((Number(target?.x)||0)+halfWidth)];
+}
+
+function fluxTargetId(target,index){
+  const value=String(target?.id||`target-${index+1}`).replace(/[^A-Za-z0-9_-]+/g,'_');
+  return `logo_target_${value||index+1}`;
+}
+
+function fluxPromptFor(variant,{targets=[],logoAspectRatio=1,placementGuide=false,finishReference=false,originalColor='#000000'}={}){
+  const placements=(Array.isArray(targets)?targets:[]).map((target,index)=>{
+    const id=fluxTargetId(target,index),bbox=fluxTargetBox(target,logoAspectRatio),rotation=Number(target?.rotation||0),targetColor=String(target?.color||originalColor).trim().toUpperCase();
+    const corners=Array.isArray(target?.quad)&&target.quad.length===4?` Exact perspective corners in normalized image coordinates: ${target.quad.map(point=>`[${fluxCoordinate(point.y)},${fluxCoordinate(point.x)}]`).join(' ')}.`:'';
+    return {id,from:'ref_image_1',src_bbox:[0,0,1000,1000],tgt_bbox:bbox,color:targetColor,auto_contrast:target?.autoContrast===true,surface:String(target?.surface||'free'),curve:Number(target?.curve||0),rotation,desc:`<${id}> is the complete locked Logo from ref_image_1, applied to the packaging surface at the exact target location, rotation ${rotation.toFixed(1)} degrees clockwise, preserving every glyph, hole, proportion and spacing.${corners}`};
+  });
+  const layout=[{id:'packaging_master',from:'ref_image_0',src_bbox:[0,0,1000,1000],tgt_bbox:[0,0,1000,1000],desc:'the complete product and packaging master; preserve every non-logo pixel, text, artwork, seam, edge, material, camera angle, crop, background, light, highlight and shadow.'},...placements];
+  const placementReference=placementGuide?" <ref_image_2> is the exact clean placement-and-appearance reference for this version. Use it to preserve the Logo's visible glyph geometry, target direction, scale, color and material placement; do not copy its background or any non-logo change.":'';
+  const finishReferenceIndex=placementGuide?'ref_image_3':'ref_image_2';
+  const reference=finishReference?` ${finishReferenceIndex} is only a material reference for the requested print finish; do not copy its product, text, logo or composition.`:'';
+  return `<ref_image_0> is the only product, packaging and composition master. <ref_image_1> is the only original Logo source. Edit only the listed Logo targets and preserve the rest of ref_image_0 exactly.${placementReference}${reference} ${FLUX_FINISH_INSTRUCTIONS[variant.version]} The Logo must be physically printed or foil-stamped onto the real target surface, following its perspective, curvature, occlusion, existing light and substrate texture. Never redraw or retype the Logo. Keep every source glyph, hole, proportion, spacing and edge unchanged; only apply the explicitly requested target rotation and surface deformation. Do not mirror, stretch, crop, simplify or invent any Logo element. Do not add labels, borders, guide lines, handles, captions, watermarks or new objects. Use the following authoritative layout JSON; each bbox is [top,left,bottom,right] in 0-1000 coordinates. ${JSON.stringify(layout)}`;
+}
+
+function buildGptRequest(variant,{model,size,baseImage,compositionMaster,logoImage,guide,finishReference,targets}){
+  const useCompositionMaster=variant.version!=='ORIGINAL'&&Boolean(asDataUrl(compositionMaster));
+  return {model:model.trim(),n:1,size,resolution:'2K',prompt:promptFor(variant,{compositionMaster:useCompositionMaster,targets,finishReference:Boolean(finishReference)}),image_urls:[logoImage,useCompositionMaster?compositionMaster:baseImage,guide,...(finishReference?[finishReference]:[])]};
+}
+
+function buildFluxRequest(variant,{model,size,baseImage,logoImage,placementGuide,finishReference,targets,logoAspectRatio,originalColor}){
+  return {model:model.trim(),n:1,aspect_ratio:size,resolution:'2k',safety_tolerance:2,grounding:false,prompt:fluxPromptFor(variant,{targets,logoAspectRatio,placementGuide:Boolean(placementGuide),finishReference:Boolean(finishReference),originalColor}),image_urls:[baseImage,logoImage,...(placementGuide?[placementGuide]:[]),...(finishReference?[finishReference]:[])]};
+}
+
 export function pickAspectRatio(width,height){
   if(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)throw Error('原图尺寸无效');
   const ratio=width/height;
   return SIZES.reduce((best,size)=>Math.abs(Number(size.split(':')[0])/Number(size.split(':')[1])-ratio)<Math.abs(Number(best.split(':')[0])/Number(best.split(':')[1])-ratio)?size:best,SIZES[0]);
 }
 
-export function buildAiMockupPlan({model,baseImage,compositionMaster,logoImage,finishReferenceImage,guides,targets,originalColor,onlyVersion,size='1:1'}={}){
+export function buildAiMockupPlan({model,baseImage,compositionMaster,logoImage,finishReferenceImage,maskImage,guides,targets,originalColor,onlyVersion,logoAspectRatio=1,size='1:1'}={}){
   if(typeof model!=='string'||!model.trim())throw Error('缺少 AI 图片模型');
   if(!asDataUrl(baseImage))throw Error('缺少产品/彩盒原图');
   if(!asDataUrl(logoImage))throw Error('缺少透明 Logo 原图');
   if(!SIZES.includes(size))throw Error('AI 成图比例无效');
   color(originalColor);
   if(finishReferenceImage&&!asDataUrl(finishReferenceImage))throw Error('工艺参考图无效');
+  const mask=asDataUrl(maskImage);
   const guideByVersion=new Map((Array.isArray(guides)?guides:[]).map(item=>[item?.version,item?.dataUrl]));
   if(onlyVersion!==undefined&&!VARIANTS.some(variant=>variant.version===onlyVersion))throw Error('无效的重新生成版本');
   return VARIANTS.filter(variant=>onlyVersion===undefined||variant.version===onlyVersion).map(variant=>{
     const guide=asDataUrl(guideByVersion.get(variant.version));
     if(!guide)throw Error(`缺少 ${variant.version} 的定位参考图`);
-    const useCompositionMaster=variant.version!=='ORIGINAL'&&Boolean(asDataUrl(compositionMaster));
     const finishReference=asDataUrl(finishReferenceImage);
-    return {version:variant.version,request:{model:model.trim(),n:1,size,resolution:'2K',prompt:promptFor(variant,{compositionMaster:useCompositionMaster,targets,finishReference:Boolean(finishReference)}),image_urls:[logoImage,useCompositionMaster?compositionMaster:baseImage,guide,...(finishReference?[finishReference]:[])]}};
+    const request=model.trim()==='flux-3-image'
+      ?buildFluxRequest(variant,{model,size,baseImage,logoImage,placementGuide:guide,finishReference,targets,logoAspectRatio,originalColor})
+      :buildGptRequest(variant,{model,size,baseImage,compositionMaster,logoImage,guide,finishReference,targets});
+    return {version:variant.version,request,placementGuide:guide,maskImage:mask};
   });
 }

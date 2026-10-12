@@ -5,5 +5,6 @@
   "logoModel": "gpt-image-2.5-flare",
   "timeoutMs": 300000,
   "endpoint": "https://api.apimart.ai",
+  "proxyUrl": "",
   "apiKey": "REPLACE_ON_SERVER"
 }

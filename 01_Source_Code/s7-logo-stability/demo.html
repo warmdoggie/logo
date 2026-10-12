@@ -21,6 +21,12 @@
       <section class="panel controls">
         <div class="section-title"><h2>1. 上传素材</h2><span>必填</span></div>
         <label class="file-field">产品 / 彩盒原图<input id="base-image" type="file" accept="image/*" required><small id="base-name">尚未选择</small></label>
+        <button id="choose-product" type="button" class="button secondary product-library-button">从产品库选择</button>
+        <div id="product-library-panel" class="product-library-panel" hidden>
+          <div class="product-library-head"><strong>选择产品库标准图</strong><button id="close-product-library" type="button" class="text-button">关闭</button></div>
+          <input id="product-library-search" class="product-library-search" type="search" placeholder="搜索 SKU 或产品名称">
+          <div id="product-library-list" class="product-library-list" aria-live="polite">正在读取产品库…</div>
+        </div>
         <label class="file-field">透明 Logo<input id="logo-image" type="file" accept="image/*" required><small id="logo-name">尚未选择</small></label>
         <label class="file-field">工艺质感参考图（可选）<input id="finish-reference-image" type="file" accept="image/*"><small id="finish-reference-name">上传真实丝印、烫金或烫银样品；只参考质感，不复制其中内容</small></label>
         <button id="process-logo" type="button" class="button secondary process-button" disabled>AI 加工 Logo（透明底黑字）</button>
@@ -39,9 +45,10 @@
         <p class="hint">点击画布中的 Logo 或目标卡片后再改色；每个目标独立保存。BLACK 为纯黑丝印；GOLD FOIL、SILVER FOIL 为固定的自然薄层烫金/烫银。</p>
 
         <div class="section-title targets-title"><h2>2. 上样目标</h2><button id="add-target" type="button" class="button secondary">+ 添加目标</button></div>
-        <p class="hint">位置和比例使用 0–1。每个对象必须有唯一 ID。点击“复制 Logo”可复制当前上样实例，再拖动副本到第二个位置。</p>
+        <p class="hint">母版 Logo 默认锁定中心位置；点击目标卡片中的“移动位置”后才可拖动。每个对象必须有唯一 ID。点击“复制 Logo”可复制当前上样实例，再单独调整副本。</p>
         <div id="targets" class="targets"></div>
 
+        <label class="model-field">成图模型<select id="mockup-model" required><option value="">正在读取模型配置…</option></select><small id="mockup-model-hint">可在已配置的 APIMart 模型中选择。</small></label>
         <button id="generate" type="button" class="button primary">AI 生成四个自然版本</button>
         <p id="status" class="status" role="status">等待上传素材。</p>
       </section>
@@ -51,7 +58,7 @@
         <div class="preview-section">
           <div class="preview-title"><strong>拖动 Logo 定位</strong><span id="selected-target">未选择目标</span></div>
           <div class="canvas-wrap"><canvas id="placement-canvas" aria-label="Logo拖动定位画布"></canvas><div id="preview-empty" class="preview-empty">上传原图后，这里会显示可拖动的 Logo</div></div>
-          <p class="hint">拖动 Logo 移动；蓝色方块缩放；上方圆形手柄旋转。左侧参数会同步更新。每个副本都可以独立调整。</p>
+          <p class="hint">母版位置默认锁定；点击“移动位置”后才可拖动。蓝色方块缩放；上方圆形手柄旋转。左侧参数会同步更新。</p>
         </div>
         <div id="empty-state" class="empty-state"><strong>四个版本会显示在这里</strong><span>ORIGINAL · BLACK · GOLD FOIL · SILVER FOIL</span></div>
         <div id="results" class="results" aria-live="polite"></div>

@@ -2,6 +2,7 @@ import {existsSync,readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import sharp from 'sharp';
 import {buildAiLogoRequest,buildApimartLogoRequest,validateAiLogoOutput} from './ai-logo-processing.mjs';
+import {createApimartTransport} from './apimart-transport.mjs';
 
 const ROOT=new URL('.',import.meta.url);
 const DEFAULT_CONFIG=fileURLToPath(new URL('../data/ai-provider.local.json',ROOT));
@@ -28,7 +29,10 @@ export function createAiLogoProcessor({configPath=process.env.S7_AI_CONFIG||DEFA
   return async(source,{targetColor='#000000'}={})=>{
     const config=readConfig(configPath);
     if(!config)throw Error('S7 尚未配置可用的 AI 图片模型，请检查 data/ai-provider.local.json');
-    if(config.provider==='APIMART')return processWithApimart({...config,model:config.logoModel||config.model},source,{transport,pollIntervalMs});
+    if(config.provider==='APIMART'){
+      const requestTransport=createApimartTransport({proxyUrl:config.proxyUrl||process.env.S7_APIMART_PROXY_URL||process.env.APIMART_PROXY_URL,transport});
+      return processWithApimart({...config,model:config.logoModel||config.model},source,{transport:requestTransport,pollIntervalMs});
+    }
     const body=buildAiLogoRequest(Buffer.from(source).toString('base64'),{model:config.model,targetColor});
     let response;
     try{
@@ -48,8 +52,8 @@ export function createAiLogoProcessor({configPath=process.env.S7_AI_CONFIG||DEFA
 
 async function processWithApimart(config,source,{transport,pollIntervalMs}){
   const signal=AbortSignal.timeout(config.timeoutMs),base=config.endpoint.replace(/\/$/,''),logoPng=await sharp(source).png().toBuffer(),body=buildApimartLogoRequest(`data:image/png;base64,${logoPng.toString('base64')}`,{model:config.model});
-  const read=async(response)=>{if(!response.ok){let detail=`HTTP ${response.status}`;try{const payload=await response.json();detail=payload.error?.message||payload.message||detail;}catch{}throw Error(`APIMart ${detail}`);}return response.json();};
-  const request=async(path,options)=>read(await transport(base+path,{...options,redirect:'error',signal,headers:{Authorization:`Bearer ${config.apiKey}`,'Content-Type':'application/json',...(options?.headers||{})}}));
+  const read=async(response)=>{if(!response.ok){let detail=`HTTP ${response.status}`;try{const payload=await response.json();detail=payload.error?.message||payload.message||detail;}catch{}throw Error(`APIMart ${detail}`);}try{return await response.json();}catch{throw Error('APIMart 返回了无法解析的 JSON 响应');}};
+  const request=async(path,options)=>read(await transport(base+path,{...options,redirect:'error',signal,headers:{Authorization:`Bearer ${config.apiKey}`,'Content-Type':'application/json','Accept-Encoding':'identity',...(options?.headers||{})}}));
   try{
     const submitted=await request('/v1/images/generations',{method:'POST',body:JSON.stringify(body)}),item=submitted.data?.[0],directUrl=item?.url;
     if(typeof directUrl==='string')return {...await downloadAiImage(directUrl,{transport,signal}),provider:'APIMART',model:config.model};
