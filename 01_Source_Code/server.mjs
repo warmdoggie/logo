@@ -263,6 +263,8 @@ export const server=http.createServer(async(req,res)=>{
   if(req.method==='GET'&&['/acceptance.html','/acceptance-bootstrap.js','/acceptance-ui.js','/acceptance.css'].includes(path)) {
    const file=path.slice(1);res.setHeader('Content-Type',mime[file.slice(file.lastIndexOf('.'))]);return res.end(readFileSync(join(root,'public',file)));
   }
+  if(path==='/pantone-ui.js'&&req.method==='GET'){res.setHeader('Content-Type','text/javascript; charset=utf-8');return res.end(readFileSync(join(root,'public/pantone-ui.js')));}
+  if(path==='/pantone-colors.json'&&req.method==='GET'){res.setHeader('Content-Type','application/json; charset=utf-8');return res.end(readFileSync(join(root,'public/data/pantone-colors.json')));}
   if(req.method==='GET') {
     const assets={'/acceptance.html':'acceptance.html','/acceptance-ui.js':'acceptance-ui.js','/acceptance.css':'acceptance.css','/automatic-ui.js':'automatic-ui.js','/auto-placement.js':'auto-placement.js','/template-automation-ui.js':'template-automation-ui.js','/':'index.html','/app.js':'app.js','/style.css':'style.css','/favicon.svg':'favicon.svg','/template-editor.js':'template-editor.js','/template.css':'template.css','/logo-editor.js':'logo-editor.js','/logo.css':'logo.css','/rule-ui.js':'rule-ui.js','/rule.css':'rule.css','/workspace.js':'workspace.js','/workspace.css':'workspace.css','/batch-ui.js':'batch-ui.js','/batch.css':'batch.css','/mockup-geometry.js':'mockup-geometry.js','/zone-geometry.js':'zone-geometry.js','/task-additions.js':'task-additions.js','/additions.css':'additions.css','/ai-ui.js':'ai-ui.js','/sku-management.js':'sku-management.js','/management-ui.js':'management-ui.js','/management.css':'management.css'};
    const file=assets[path];if(!file)bad('页面不存在',404);
