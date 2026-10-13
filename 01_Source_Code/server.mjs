@@ -120,7 +120,9 @@ export const server=http.createServer(async(req,res)=>{
   const requestHost=(req.headers.host||'').split(':')[0];
   const allowedHosts=(process.env.APP_ALLOWED_HOSTS||'127.0.0.1,localhost').split(',').map(v=>v.trim()).filter(Boolean);
   if(!allowedHosts.includes(requestHost)&&!allowedHosts.includes('*'))bad('当前服务未开放此访问地址',403);
-  if(req.method!=='GET'&&req.headers.origin&&req.headers.origin!==`http://${req.headers.host}`)bad('不允许跨站提交',403);
+  const forwardedProto=String(req.headers['x-forwarded-proto']||'http').split(',')[0].trim().toLowerCase();
+  const requestOrigin=`${forwardedProto==='https'?'https':'http'}://${req.headers.host}`;
+  if(req.method!=='GET'&&req.headers.origin&&req.headers.origin!==requestOrigin)bad('不允许跨站提交',403);
   const url=new URL(req.url,`http://${req.headers.host}`), path=url.pathname;
   if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/products$/.test(path)){let data;try{data=await(await body(req)).json();}catch{bad('请求格式不正确');}return json(await additions.append(decodeURIComponent(path.split('/')[3]),data),201);}
   if(req.method==='GET'&&path==='/api/health')return json({ok:true,app:'render-assistant-local',...(process.env.APP_ACCEPTANCE_INSTANCE?{acceptanceInstance:process.env.APP_ACCEPTANCE_INSTANCE}:{})});

@@ -7,10 +7,11 @@ import {tmpdir} from 'node:os';
 import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {once} from 'node:events';
+import {request} from 'node:http';
 const root=dirname(fileURLToPath(import.meta.url));
 test('真实上传、SKU 唯一与精确批量查找、原文件保存、关系完整性和重启持久化',async()=>{
  const data=mkdtempSync(join(tmpdir(),'render-assistant-test-'));let child,base;
- async function start(){child=spawn(process.execPath,[join(root,'server.mjs')],{env:{...process.env,APP_DATA_DIR:data,APP_NO_SEED:'1',PORT:'0'},stdio:['ignore','pipe','pipe']});base=await new Promise((resolve,reject)=>{let out='';child.stdout.on('data',c=>{out+=c;const m=out.match(/http:\/\/127\.0\.0\.1:\d+/);if(m)resolve(m[0]);});child.once('error',reject);child.once('exit',code=>reject(new Error('Server exited '+code)));setTimeout(()=>reject(new Error('Startup timeout')),10000).unref();});}
+ async function start(){child=spawn(process.execPath,[join(root,'server.mjs')],{env:{...process.env,APP_DATA_DIR:data,APP_NO_SEED:'1',APP_ALLOWED_HOSTS:'logo.heciai.net,127.0.0.1,localhost',PORT:'0'},stdio:['ignore','pipe','pipe']});base=await new Promise((resolve,reject)=>{let out='';child.stdout.on('data',c=>{out+=c;const m=out.match(/http:\/\/127\.0\.0\.1:\d+/);if(m)resolve(m[0]);});child.once('error',reject);child.once('exit',code=>reject(new Error('Server exited '+code)));setTimeout(()=>reject(new Error('Startup timeout')),10000).unref();});}
  async function stop(){const done=once(child,'exit');child.kill();await done;}
  const file=readSeedLogo();
  const product=(sku,name='测试产品')=>{const f=new FormData();f.set('sku',sku);f.set('name',name);f.set('category','唇蜜');f.set('image',new Blob([file],{type:'image/png'}),'测试产品.png');return f;};
@@ -31,6 +32,7 @@ test('真实上传、SKU 唯一与精确批量查找、原文件保存、关系�
  r=await post('/api/tasks',task([]));assert.equal(r.status,400);
  const wrong=product('BAD');wrong.set('image',new Blob(['not an image'],{type:'image/png'}),'wrong.png');r=await post('/api/products',wrong);assert.equal(r.status,400);
  const large=product('BIG');large.set('image',new Blob([new Uint8Array(12*1024*1024+1)],{type:'image/png'}),'big.png');r=await post('/api/products',large);assert.equal(r.status,400);
+ r=await new Promise((resolve,reject)=>{const req=request(new URL('/api/products',base),{method:'POST',headers:{Host:'logo.heciai.net',Origin:'https://logo.heciai.net','X-Forwarded-Proto':'https','Content-Type':'multipart/form-data; boundary=test'}},resolve);req.on('error',reject);req.end('--test--\r\n');});assert.equal(r.statusCode,400);
  r=await fetch(base+'/api/products',{method:'POST',headers:{Origin:'https://example.com'},body:product('EVIL')});assert.equal(r.status,403);
  r=await fetch(base+'/files/..%2Fschema.sql');assert.equal(r.status,404);
  await stop();await start();
