@@ -6,6 +6,34 @@ import {test} from 'node:test';
 import sharp from 'sharp';
 import {createAiMockupRenderer} from './ai-mockup-provider.mjs';
 
+test('四个生图任务在任何一个完成前全部提交，GPT 和 Flux 均并行', {timeout:5000}, async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'s7-parallel-submit-'));
+  try{
+    const configPath=join(dir,'ai-provider.json');
+    const image=await sharp({create:{width:2,height:2,channels:3,background:'#fff'}}).png().toBuffer();
+    for(const model of ['gpt-image-2.5-flare','flux-3-image']){
+      await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',model,endpoint:'https://api.apimart.ai',apiKey:'test-key'}));
+      let submitted=0,release,allSubmitted;
+      const gate=new Promise(resolve=>{release=resolve;});
+      const ready=new Promise(resolve=>{allSubmitted=resolve;});
+      const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async(url)=>{
+        if(String(url).endsWith('/v1/images/generations')){
+          submitted++;if(submitted===4)allSubmitted();
+          await gate;
+          return Response.json({data:[{url:'https://getapib.org/f/parallel.png'}]});
+        }
+        return new Response(image);
+      }});
+      const rendering=renderer({model,baseImage:'data:image/png;base64,BASE',logoImage:'data:image/png;base64,LOGO',guides:['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL'].map(version=>({version,dataUrl:'data:image/png;base64,GUIDE'})),originalColor:'#000000'});
+      let timer;
+      try{
+        await Promise.race([ready,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error(`${model} 未同时提交四个任务`)),1500);})]);
+        assert.equal(submitted,4);
+      }finally{clearTimeout(timer);release();await rendering;}
+    }
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
 test('AI上样渲染器提交四个工艺请求并下载成图',async()=>{
   const dir=await mkdtemp(join(tmpdir(),'s7-ai-mockup-'));
   try{

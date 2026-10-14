@@ -10,6 +10,9 @@ Group=s7-logo
 WorkingDirectory=/srv/s7-logo
 Environment=NODE_ENV=production
 Environment=S7_PORT=3237
+Environment=APP_MULTI_USER=1
+Environment=APP_PUBLIC_ORIGIN=https://logo.heciai.net
+Environment=S7_SPACE_DIR=/var/lib/s7-logo/workspace/user-spaces
 Environment=S7_AI_CONFIG=/etc/s7-logo/ai-provider.json
 EnvironmentFile=-/etc/s7-logo/production.env
 ExecStart=/usr/bin/node /srv/s7-logo/s7-logo-stability/demo-server.mjs

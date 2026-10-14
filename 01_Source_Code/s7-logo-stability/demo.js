@@ -50,7 +50,25 @@ const esc=value=>String(value).replace(/[&<>"']/g,character=>({'&':'&amp;','<':'
 const S7_BASE=location.pathname==='/s7'||location.pathname.startsWith('/s7/')?'/s7':'';
 const s7Path=value=>S7_BASE&&typeof value==='string'&&value.startsWith('/')?`${S7_BASE}${value}`:value;
 const nativeFetch=window.fetch.bind(window);
-const fetch=(input,init)=>nativeFetch(typeof input==='string'?s7Path(input):input,init);
+let s7User=null;
+let logoStorage=localStorage;
+function requireLogin(){document.body.replaceChildren();const link=document.createElement('a');link.textContent='登录已失效，请返回主工作空间登录';link.href=S7_BASE?'/':`http://${location.hostname}:3210/`;link.target='_top';document.body.append(link);}
+const fetch=async(input,init)=>{const response=await nativeFetch(typeof input==='string'?s7Path(input):input,init);if(s7User){const session=await nativeFetch(s7Path('/api/session'));const value=session.ok?await session.json():null;if(value?.user?.id!==s7User.id){requireLogin();throw Error('登录已变更，请重新进入个人空间');}if(init?.method==='POST'&&response.ok)await refreshHistory();}return response;};
+{
+ const response=await nativeFetch(s7Path('/api/session'));
+ if(!response.ok){requireLogin();await new Promise(()=>{});}
+ const session=await response.json();s7User=session.user;
+ if(s7User){const prefix=`s7-user.${s7User.id}.`;logoStorage={getItem:key=>localStorage.getItem(prefix+key),setItem:(key,value)=>localStorage.setItem(prefix+key,value),removeItem:key=>localStorage.removeItem(prefix+key)};document.querySelector('.badge').textContent=`${s7User.username} · 个人空间`;
+  setInterval(async()=>{try{const r=await nativeFetch(s7Path('/api/session'));const v=r.ok?await r.json():null;if(v?.user?.id!==s7User.id)requireLogin();}catch{requireLogin();}},10000);
+ }
+}
+async function refreshHistory(){
+ if(!s7User)return;
+ let section=document.querySelector('#personal-history');if(!section){section=document.createElement('section');section.id='personal-history';section.className='panel';document.querySelector('main').append(section);}
+ const response=await nativeFetch(s7Path('/api/my-space/history'));if(!response.ok){section.textContent='个人生成历史暂时无法读取';return;}
+ const history=await response.json();section.innerHTML=`<h2>我的素材与生成历史</h2>${history.length?history.map(record=>`<details><summary>${esc(new Date(record.createdAt).toLocaleString())} · ${esc(record.kind)} · ${esc(record.model||'')}</summary><div class="result-grid">${record.images.map(image=>`<article><p>${esc(image.label)}</p><a href="${esc(s7Path(image.url))}" download><img src="${esc(s7Path(image.url))}" alt="${esc(image.label)}" loading="lazy" width="180"><p>下载图片</p></a>${image.label==='透明Logo'?`<button class="button secondary" data-restore-logo="${esc(image.url)}">使用此 Logo</button>`:''}</article>`).join('')}</div></details>`).join(''):'<p>生成完成后，素材和结果会保存在你的个人空间。</p>'}`;
+ for(const button of section.querySelectorAll('[data-restore-logo]'))button.onclick=async()=>{try{const r=await fetch(button.dataset.restoreLogo);if(!r.ok)throw Error('Logo读取失败');const loaded=await fileData(await r.blob());const saved={data:loaded.data,name:'个人空间透明Logo.png'};saveLogo(logoStorage,saved);await useSavedLogo(saved);setStatus('已从个人空间恢复透明Logo','success');}catch(error){setStatus(error.message,'error');}};
+}
 function setStatus(message,type=''){status.textContent=message;status.className=`status ${type}`;}
 function fileData(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({dataUrl:String(reader.result),data:String(reader.result).split(',')[1]});reader.onerror=reject;reader.readAsDataURL(file);});}
 function loadImage(dataUrl){return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(Error('图片无法读取'));image.src=dataUrl;});}
@@ -103,17 +121,17 @@ function quadFromTarget(target){
 function rowQuad(row){try{const quad=JSON.parse(row.dataset.quad||'');return Array.isArray(quad)&&quad.length===4?quad:null;}catch{return null;}}
 function setRowQuad(row,quad){row.dataset.quad=JSON.stringify(quad);}
 
-async function useSavedLogo(saved=loadSavedLogo(localStorage)){
+async function useSavedLogo(saved=loadSavedLogo(logoStorage)){
   if(!saved)throw Error('没有可使用的已保存 Logo');
   logoData=saved.data;logoSourceData=saved.sourceData||'';logoImage=await loadImage(`data:image/png;base64,${saved.data}`);processButton.disabled=false;useSavedLogoButton.hidden=false;clearSavedLogoButton.hidden=false;document.querySelector('#logo-name').textContent=`已使用：${saved.name}`;processingPanel.hidden=true;drawPreview();
 }
 
 async function restoreSavedLogo(){
   try{
-    const saved=loadSavedLogo(localStorage);
+    const saved=loadSavedLogo(logoStorage);
     if(!saved)return;
     await useSavedLogo(saved);document.querySelector('#logo-name').textContent=`已恢复：${saved.name}`;setStatus('已恢复上次加工完成的透明 Logo，无需再次生成。','success');
-  }catch{clearSavedLogo(localStorage);}
+  }catch{clearSavedLogo(logoStorage);}
 }
 
 function addTarget(value={}){
@@ -312,11 +330,11 @@ productLibrarySearch.oninput=renderProductLibrary;
 originalColorInput.oninput=()=>{const selectedRow=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);if(!selectedRow)return;selectedRow.dataset.logoColor=originalColorInput.value;originalColorValue.textContent=originalColorInput.value.toUpperCase();drawPreview();};
 autoContrastInput.onchange=()=>{const selectedRow=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);if(!selectedRow)return;selectedRow.dataset.autoContrast=String(autoContrastInput.checked);drawPreview();};
 document.querySelector('#base-image').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{const loaded=await fileData(file);baseData=loaded.data;baseImage=await loadImage(loaded.dataUrl);document.querySelector('#base-name').textContent=file.name;drawPreview();}catch(error){setStatus(error.message,'error');}};
-document.querySelector('#logo-image').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{const loaded=await fileData(file),saved=loadSavedLogo(localStorage);logoSourceData=loaded.data;if(saved?.sourceData===loaded.data){await useSavedLogo(saved);setStatus('已自动匹配并使用保存的透明 Logo，无需重新生成。','success');return;}logoData=loaded.data;logoImage=await loadImage(loaded.dataUrl);processButton.disabled=false;document.querySelector('#logo-name').textContent=file.name;drawPreview();}catch(error){setStatus(error.message,'error');}};
+document.querySelector('#logo-image').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{const loaded=await fileData(file),saved=loadSavedLogo(logoStorage);logoSourceData=loaded.data;if(saved?.sourceData===loaded.data){await useSavedLogo(saved);setStatus('已自动匹配并使用保存的透明 Logo，无需重新生成。','success');return;}logoData=loaded.data;logoImage=await loadImage(loaded.dataUrl);processButton.disabled=false;document.querySelector('#logo-name').textContent=file.name;drawPreview();}catch(error){setStatus(error.message,'error');}};
 document.querySelector('#finish-reference-image').onchange=async event=>{const file=event.target.files[0];if(!file)return;try{finishReferenceData=(await fileData(file)).data;document.querySelector('#finish-reference-name').textContent=`已选择：${file.name}（仅参考印刷/金属光泽）`;setStatus('已加入工艺质感参考图。','success');}catch(error){setStatus(error.message,'error');}};
 
 useSavedLogoButton.onclick=async()=>{try{await useSavedLogo();setStatus('已使用保存的透明 Logo，无需重新生成。','success');}catch(error){setStatus(error.message,'error');}};
-clearSavedLogoButton.onclick=()=>{clearSavedLogo(localStorage);useSavedLogoButton.hidden=true;clearSavedLogoButton.hidden=true;setStatus('已清除保存的透明 Logo；当前页面中的 Logo 仍可继续使用。','success');};
+clearSavedLogoButton.onclick=()=>{clearSavedLogo(logoStorage);useSavedLogoButton.hidden=true;clearSavedLogoButton.hidden=true;setStatus('已清除保存的透明 Logo；当前页面中的 Logo 仍可继续使用。','success');};
 
 processButton.onclick=()=>{if(logoData)processingPanel.hidden=false;};
 document.querySelector('#cancel-processing').onclick=()=>{processingPanel.hidden=true;};
@@ -326,7 +344,7 @@ document.querySelector('#apply-processing').onclick=async()=>{
   try{
     const response=await fetch('/api/ai-process-logo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({logoImage:logoData})});
     const payload=await response.json();if(!response.ok)throw Error(payload.error||'Logo加工失败');
-    logoData=payload.dataUrl.split(',')[1];logoImage=await loadImage(payload.dataUrl);saveLogo(localStorage,{data:logoData,name:'AI 已加工 Logo.png',sourceData:logoSourceData});useSavedLogoButton.hidden=false;clearSavedLogoButton.hidden=false;document.querySelector('#logo-name').textContent='AI 已加工 Logo（已保存）';processingStatus.textContent=`AI 加工完成：${payload.width} × ${payload.height}`;processingPanel.hidden=true;drawPreview();setStatus('AI Logo 已加工并保存为透明底黑字，下次打开会自动恢复。','success');
+    logoData=payload.dataUrl.split(',')[1];logoImage=await loadImage(payload.dataUrl);saveLogo(logoStorage,{data:logoData,name:'AI 已加工 Logo.png',sourceData:logoSourceData});useSavedLogoButton.hidden=false;clearSavedLogoButton.hidden=false;document.querySelector('#logo-name').textContent='AI 已加工 Logo（已保存）';processingStatus.textContent=`AI 加工完成：${payload.width} × ${payload.height}`;processingPanel.hidden=true;drawPreview();setStatus('AI Logo 已加工并保存为透明底黑字，下次打开会自动恢复。','success');
   }catch(error){processingStatus.textContent=error.message||'Logo加工失败';}
 };
 
@@ -341,7 +359,7 @@ async function loadMockupModels(){
     const response=await fetch('/api/ai-models'),payload=await response.json();
     if(!response.ok||!payload.configured||!Array.isArray(payload.models)||!payload.models.length)throw Error('尚未配置可用的 AI 成图模型');
     mockupModel.replaceChildren(...payload.models.map(model=>{const option=document.createElement('option');option.value=model;option.textContent=model;return option;}));
-    mockupModel.value=payload.defaultModel&&payload.models.includes(payload.defaultModel)?payload.defaultModel:payload.models[0];
+    mockupModel.value=payload.models.includes('flux-3-image')?'flux-3-image':payload.defaultModel&&payload.models.includes(payload.defaultModel)?payload.defaultModel:payload.models[0];
     mockupModelHint.textContent=`可选模型：${payload.models.join('、')}；默认使用 ${mockupModel.value}。`;
     mockupModel.disabled=false;
   }catch(error){
@@ -419,3 +437,4 @@ addTarget({id:'product',x:.5,y:.5,widthRatio:.2,rotation:0,curve:0,surface:'free
 loadAiProviderStatus();
 loadMockupModels();
 restoreSavedLogo();
+refreshHistory().catch(error=>setStatus(error.message,'error'));

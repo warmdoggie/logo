@@ -20,6 +20,7 @@ import {additionService} from './additions.mjs';
 import {batchService} from './batches.mjs';
 import {acceptanceService} from './acceptance.mjs';
 import {readSeedLogo} from './seed-logo.mjs';
+import {workspaceAuth,requestScope} from './workspace-auth.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const data = process.env.APP_DATA_DIR || join(root, 'data');
@@ -67,6 +68,7 @@ async function addTask(customerName, requirement, ids, logo,prepared) {
  transaction(()=>{
   for(const p of ids) if(!db.prepare('SELECT id FROM Product WHERE id=?').get(p))bad('所选产品不存在，请重新选择');
   db.prepare('INSERT INTO Task (id,taskCode,customerName,rawRequirement,status,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?)').run(id,taskCode,customerName,requirement,'待处理',stamp,stamp);
+  if(users)users.claimTask(id,requestScope.getStore().user);
   const assetId=uid();db.prepare('INSERT INTO LogoAsset VALUES (?,?,?,?,?)').run(assetId,id,logo.name,logo.key,stamp);
   logos.registerLegacy({id:assetId,taskId:id,fileName:logo.name,filePath:logo.key,createdAt:stamp},prepared);
   for(const p of ids){
@@ -95,6 +97,7 @@ if(process.env.APP_NO_SEED!=='1'&&!db.prepare("SELECT value FROM AppMeta WHERE k
  }); } catch(e) { created.forEach(k=>storage.remove(k)); throw e; }
 }
 await logos.initializeLegacy();
+const users=workspaceAuth(db,data,storage);
 function products(query='',includeInactive=false) {
  const q=query.trim().toUpperCase();
  const rows=db.prepare('SELECT p.*, (SELECT version FROM ProductTemplate WHERE productId=p.id AND isCurrent=1) AS currentVersion FROM Product p ORDER BY createdAt DESC, sku ASC').all();
@@ -110,11 +113,13 @@ async function body(req) {
  for await(const c of req) {size+=c.length;if(size>14*1024*1024)bad('上传内容太大，请使用 12 MB 以内图片',413);chunks.push(c);}
  return new Request('http://localhost',{method:'POST',headers:{'content-type':req.headers['content-type']||''},body:Buffer.concat(chunks)});
 }
-export const server=http.createServer(async(req,res)=>{
+export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
  const writing=!['GET','HEAD'].includes(req.method);if(writing)activeWrites++;
  res.setHeader('X-Content-Type-Options','nosniff');
  res.setHeader('Cache-Control','no-store');
- res.setHeader('Content-Security-Policy',"default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+ const frameHost=(req.headers.host||'').split(':')[0];
+ const s7FrameSource=['127.0.0.1','localhost'].includes(frameHost)?` http://${frameHost}:3237`:'';
+ res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-src 'self'${s7FrameSource}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`);
  const json=(v,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(v));};
  try {
   const requestHost=(req.headers.host||'').split(':')[0];
@@ -124,11 +129,28 @@ export const server=http.createServer(async(req,res)=>{
   const requestOrigin=`${forwardedProto==='https'?'https':'http'}://${req.headers.host}`;
   if(req.method!=='GET'&&req.headers.origin&&req.headers.origin!==requestOrigin)bad('不允许跨站提交',403);
   const url=new URL(req.url,`http://${req.headers.host}`), path=url.pathname;
+  if(path==='/api/auth/config'&&req.method==='GET')return json({enabled:!!users});
+  if(path==='/account-ui.js'&&req.method==='GET'){res.setHeader('Content-Type','text/javascript; charset=utf-8');return res.end(readFileSync(join(root,'public/account-ui.js')));}
+  if(path==='/account.css'&&req.method==='GET'){res.setHeader('Content-Type','text/css; charset=utf-8');return res.end(readFileSync(join(root,'public/account.css')));}
+  let workspaceUser;
+  if(users&&path.startsWith('/api/auth/')){
+   const input=async()=>{try{return await(await body(req)).json();}catch{bad('请求格式不正确');}};
+   if(path==='/api/auth/login'&&req.method==='POST')return json(users.login(req,res,await input()));
+   if(path==='/api/auth/logout'&&req.method==='POST')return json(users.logout(req,res));
+   workspaceUser=users.requireUser(req);
+   if(path==='/api/auth/session'&&req.method==='GET')return json(workspaceUser);
+   users.requireAdmin(workspaceUser);
+   if(path==='/api/auth/users'&&req.method==='GET')return json(users.users());
+   if(path==='/api/auth/users'&&req.method==='POST'){const v=await input();return json(users.createUser(v.username,v.password),201);}
+   if(/^\/api\/auth\/users\/[^/]+$/.test(path)&&req.method==='POST')return json(users.updateUser(workspaceUser,path.split('/')[4],await input()));
+   bad('账号接口不存在',404);
+  }
+  if(users&&path!=='/api/health'&&(path.startsWith('/api/')||path.startsWith('/files/'))){workspaceUser=users.requireUser(req);users.guard(workspaceUser,path,req.method);requestScope.getStore().user=workspaceUser;}
   if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/products$/.test(path)){let data;try{data=await(await body(req)).json();}catch{bad('请求格式不正确');}return json(await additions.append(decodeURIComponent(path.split('/')[3]),data),201);}
   if(req.method==='GET'&&path==='/api/health')return json({ok:true,app:'render-assistant-local',...(process.env.APP_ACCEPTANCE_INSTANCE?{acceptanceInstance:process.env.APP_ACCEPTANCE_INSTANCE}:{})});
   if(path==='/api/acceptance'&&req.method==='GET')return json(acceptance.snapshot());
   if(path==='/api/acceptance/run'&&req.method==='POST')return json(acceptance.start());
-  const actor=auth.actor(req),input=async()=>{try{return await(await body(req)).json();}catch{bad('请求格式不正确');}};
+  const actor=workspaceUser?{...workspaceUser,role:workspaceUser.role==='ADMIN'?'ADMIN':'DESIGNER'}:auth.actor(req),input=async()=>{try{return await(await body(req)).json();}catch{bad('请求格式不正确');}};
   if(path.startsWith('/api/transparent/')){
    const [,,,id,action]=path.split('/');
    if(req.method==='GET'&&!action)return json({...transparent.page(id),actor});
@@ -163,8 +185,8 @@ export const server=http.createServer(async(req,res)=>{
    if(req.method==='POST')return json(auth.login(await input(),res));
    if(req.method==='DELETE')return json(auth.logout(req,res));
   }
-  if(path==='/api/render'&&req.method==='POST')return json(await mockups.render(await input()),201);
-  if(path==='/api/batch-summary'&&req.method==='GET'){const all=[];for(const t of db.prepare('SELECT id FROM Task').all()){const r=await batches.results(t.id);all.push({taskId:t.id,counts:r.counts,total:r.results.length,allComplete:r.allComplete});}return json(all);}
+  if(path==='/api/render'&&req.method==='POST'){const value=await input();if(users)users.ownTask(workspaceUser,value.taskId);return json(await mockups.render(value),201);}
+  if(path==='/api/batch-summary'&&req.method==='GET'){const all=[];for(const t of db.prepare('SELECT id FROM Task').all().filter(t=>!users||users.visibleTasks(workspaceUser).includes(t.id))){const r=await batches.results(t.id);all.push({taskId:t.id,counts:r.counts,total:r.results.length,allComplete:r.allComplete});}return json(all);}
   if(path.startsWith('/api/batch/')){const [, , ,taskId,action,id]=path.split('/');
    if(req.method==='GET'&&!action)return json(await batches.page(taskId));
    if(req.method==='GET'&&action==='results')return json(await batches.results(taskId));
@@ -247,14 +269,14 @@ export const server=http.createServer(async(req,res)=>{
    const codes=[...new Set(raw.split(/[\s,，;；]+/).filter(Boolean).map(x=>x.toUpperCase()))]; if(codes.length>200)bad('每次最多查询 200 个 SKU');
    const found=[],missing=[]; for(const c of codes) {const p=db.prepare('SELECT * FROM Product WHERE sku=?').get(c);p&&management.info(p.id).status==='ACTIVE'?found.push(p):missing.push(c);} return json({found,missing});
   }
-  if(req.method==='GET'&&path==='/api/tasks'){const rows=db.prepare('SELECT t.*, (SELECT COUNT(*) FROM TaskProduct tp WHERE tp.taskId=t.id AND NOT EXISTS (SELECT 1 FROM TaskProductLifecycle l WHERE l.taskProductId=tp.id AND l.lifecycle=\'REMOVED\')) AS productCount FROM Task t ORDER BY t.createdAt DESC').all().map(t=>({...t,management:management.lifecycle(t.id)})),filter=url.searchParams.get('lifecycle');return json(rows.filter(t=>filter==='ALL'||(filter?t.management.lifecycle===filter:t.management.lifecycle!=='ARCHIVED')));}
+  if(req.method==='GET'&&path==='/api/tasks'){const visible=users?new Set(users.visibleTasks(workspaceUser)):null;const rows=db.prepare('SELECT t.*, (SELECT COUNT(*) FROM TaskProduct tp WHERE tp.taskId=t.id AND NOT EXISTS (SELECT 1 FROM TaskProductLifecycle l WHERE l.taskProductId=tp.id AND l.lifecycle=\'REMOVED\')) AS productCount FROM Task t ORDER BY t.createdAt DESC').all().filter(t=>!visible||visible.has(t.id)).map(t=>({...t,management:management.lifecycle(t.id)})),filter=url.searchParams.get('lifecycle');return json(rows.filter(t=>filter==='ALL'||(filter?t.management.lifecycle===filter:t.management.lifecycle!=='ARCHIVED')));}
   if(req.method==='GET'&&path.startsWith('/api/tasks/'))return json(detail(path.slice(11)));
   if(req.method==='POST'&&path==='/api/tasks') {
    const form=await(await body(req)).formData(); const customer=field(form.get('customerName'),'客户名称',120), requirement=field(form.get('rawRequirement')||'','客户要求',5000,false);
    let values; try{values=JSON.parse(form.get('productIds'));}catch{bad('请选择产品');}
    if(!Array.isArray(values)||!values.length||values.length>200||values.some(x=>typeof x!=='string'))bad('请选择 1–200 个产品');
    const ids=[...new Set(values)];for(const id of ids)if(!db.prepare('SELECT id FROM Product WHERE id=?').get(id))bad('所选产品不存在，请重新选择');
-   const logo=await upload(form.get('logo'));let prepared;try{prepared=await logos.prepareSource(logo.key,logo.name);return json(await addTask(customer,requirement,ids,logo,prepared),201);}catch(e){storage.remove(logo.key);if(prepared)storage.remove(prepared.previewPath);throw e;}
+   const logo=await upload(form.get('logo'));let prepared;try{prepared=await logos.prepareSource(logo.key,logo.name);const task=await addTask(customer,requirement,ids,logo,prepared);return json(task,201);}catch(e){storage.remove(logo.key);if(prepared)storage.remove(prepared.previewPath);throw e;}
   }
   if(req.method==='GET'&&path.startsWith('/files/')) {
    const key=path.slice(7);let bytes;try{bytes=storage.get(key);}catch{bad('文件不存在',404);}
@@ -275,7 +297,7 @@ export const server=http.createServer(async(req,res)=>{
   }
   bad('接口不存在',404);
  }catch(e){ if(!e.status)console.error(e);json({error:e.status?e.message:'保存或读取失败，请重试；若持续失败请检查运行日志'},e.status||500); }finally{if(writing)activeWrites--;}
-});
+}));
 const bindHost=process.env.HOST||'127.0.0.1';
 server.listen(Number(process.env.PORT||3210),bindHost,()=>console.log(`AI效果图智能助理 http://${bindHost==='0.0.0.0'?'127.0.0.1':bindHost}:${server.address().port}`));
 server.on('error',e=>{console.error(e.code==='EADDRINUSE'?'端口已占用：请使用已启动的页面，或设置 PORT 后重试。':e);process.exit(1);});

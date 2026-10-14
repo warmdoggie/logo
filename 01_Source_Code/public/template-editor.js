@@ -13,7 +13,7 @@ export async function renderTemplate(main,productId,helpers){
  const requestedVersion=new URLSearchParams(location.hash.split('?')[1]||'').get('version');
  const payload=await api('/api/templates/'+encodeURIComponent(productId)+(requestedVersion?'?version='+encodeURIComponent(requestedVersion):''));
  if(!isCurrent())return;
- const readonly=!!payload.template&&payload.template.version!==payload.currentVersion;
+ const readonly=helpers.readOnly||!!payload.template&&payload.template.version!==payload.currentVersion;
  let zones=structuredClone(payload.template?.zones||[]),selected=zones[0]?.id||null,mode='select',drag=null,pendingPoints=[],selectedNode=0;
  let automationInitial=payload.template?.automation||null,automationUI=null;
  const draftKey='template-editor-draft:'+productId+':'+payload.currentVersion;let restored=false;try{const saved=JSON.parse(localStorage.getItem(draftKey)||'null');if(!readonly&&saved?.image===(payload.template?.standardImage||payload.product.standardImage)&&Array.isArray(saved.zones)){zones=saved.zones;automationInitial=saved.automation||automationInitial;selected=zones[0]?.id||null;restored=true;}}catch{}
