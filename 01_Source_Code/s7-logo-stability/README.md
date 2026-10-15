@@ -1,6 +1,6 @@
 # S7 Logo Stability
 
-独立的确定性 Logo 上样模块。当前阶段只负责建立一个固定布局，并从同一布局输出四个版本：
+集成在主工作区中的 Logo 上样模块，通过主服务 `/s7/` 路径提供页面和 API，与主工作区共用登录会话和产品图库；每个用户的任务草稿、素材和结果仍保存在独立空间。模块从同一布局输出四个版本：
 
 - `ORIGINAL`
 - `BLACK`
@@ -16,7 +16,7 @@
 - 交互：画布支持移动、缩放和旋转，左侧参数会同步更新。
 - Logo 加工：界面只使用 AI 图片模型重新生成透明底、纯黑字 Logo；模型结果必须带透明像素和可见 Logo，镂空区域不再由本地算法猜测。
 - 多位置上样：每个目标都是一个独立 Logo 实例；点击“复制 Logo”可复制当前实例并自动错开位置，之后可单独移动、缩放和旋转。
-- 隔离：暂不接入 `server.mjs`、SQLite、旧工作台或现有批量流程。
+- 服务：由 `server.mjs` 在 3210 端口直接挂载，不需要单独运行 3237 端口的服务。
 
 ## AI Logo 加工配置
 
@@ -47,11 +47,11 @@ S7 通过主工作区的 `/api/templates/:productId` 读取产品当前已发布
 
 没有已发布母版的产品仍可在 S7 中手动定位；产品标准图发生变化并需要重新确认母版时，S7 不会继续使用旧区域。
 
-Windows 上建议使用项目根目录的 `start-s7.ps1` 启动。它会读取系统代理并让 Node 的 APIMart 请求使用同一代理：
+Windows 上通过项目根目录的 `start-workspace.ps1` 启动主工作区，之后从左侧导航打开 S7；旧的 `start-s7.ps1` 入口也会转到主工作区启动脚本：
 
 ```powershell
-cd C:\Users\EDY\Desktop\AI_LOGO\01_Source_Code
-powershell -ExecutionPolicy Bypass -File .\start-s7.ps1
+cd C:\Users\EDY\Desktop\AI_LOGO
+powershell -ExecutionPolicy Bypass -File .\start-workspace.ps1
 ```
 
 在 `01_Source_Code` 目录运行：

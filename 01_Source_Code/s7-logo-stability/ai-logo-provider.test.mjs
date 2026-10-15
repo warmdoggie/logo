@@ -22,6 +22,9 @@ test('AI Logo服务适配器发送透明底黑字请求并接收PNG',async()=>{
     assert.equal(sent.body.targetColor,'#000000');
     assert.equal(result.width,6);
     assert.equal(result.height,4);
+    await processor(png,{targetColor:'original'});
+    assert.equal(sent.body.targetColor,'original');
+    assert.match(sent.body.prompt,/preserve the original visible logo colors/i);
     assert.equal(getAiLogoProviderStatus(configPath).configured,true);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
@@ -94,10 +97,11 @@ test('APIMart gpt-image-2 direct image response is downloaded',async()=>{
     const png=await sharp({create:{width:2,height:2,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite([{input:Buffer.from([0,0,0,255]),raw:{width:1,height:1,channels:4},left:0,top:0}]).png().toBuffer();
     let submitted;
     const processor=createAiLogoProcessor({configPath,pollIntervalMs:0,transport:async(url,options)=>{if(String(url).endsWith('/v1/images/generations')){submitted=JSON.parse(options.body);return Response.json({data:[{url:'https://upload.apimart.ai/logo.png'}]});}return new Response(png);}});
-    const result=await processor(png);
+    const result=await processor(png,{targetColor:'original'});
     assert.equal(submitted.size,'1:1');
     assert.equal(submitted.resolution,'2K');
     assert.equal('enable_sequential' in submitted,false);
+    assert.match(submitted.prompt,/preserve the original visible logo colors/i);
     assert.equal(result.provider,'APIMART');
     assert.equal(result.model,'gpt-image-2');
   }finally{await rm(dir,{recursive:true,force:true});}

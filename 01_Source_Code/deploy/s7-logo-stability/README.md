@@ -1,14 +1,14 @@
 # S7 Logo Stability deployment assets
 
-These files are for the isolated S7 service on the shared ECS. They must not be
+These files are for the isolated logo workspace on the shared ECS. They must not be
 installed through the FRAME deployment launcher.
 
 ## Isolation contract
 
 - Domain: `logo.heciai.net`
 - Workspace listener: `127.0.0.1:3210`
-- S7 listener: `127.0.0.1:3237`
-- Services: `s7-workspace.service` and `s7-logo.service`
+- S7 is mounted at `/s7/` by the workspace listener on `127.0.0.1:3210`
+- Service: `s7-workspace.service` (one process serves the workspace and S7)
 - Linux user: `s7-logo`
 - Application directory: `/srv/s7-logo`
 - Protected configuration: `/etc/s7-logo`
@@ -30,11 +30,12 @@ installed through the FRAME deployment launcher.
 
 ## Safe activation order
 
-1. Start both services and verify `curl http://127.0.0.1:3210/api/health` and `curl http://127.0.0.1:3237/healthz`.
+1. Restart `s7-workspace.service` and verify `curl http://127.0.0.1:3210/api/health` and `curl http://127.0.0.1:3210/s7/healthz`.
 2. Run `nginx -t`.
-3. Reload Nginx only; do not restart Nginx, FRAME, GitLab, Docker, or
+3. Reload Nginx and verify the workspace and S7 module through the public domain.
+4. After verification, disable the retired `s7-logo.service` with `systemctl disable --now s7-logo.service`.
+   Do not restart FRAME, GitLab, Docker, or
    PostgreSQL.
-4. Verify `https://logo.heciai.net/` with the separate Basic Auth account.
 
 The deployment assets do not contain a real credential, certificate key, or
 server address.

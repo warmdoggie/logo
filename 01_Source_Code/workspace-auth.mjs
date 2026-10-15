@@ -68,6 +68,7 @@ export function workspaceAuth(db,data,storage,{enabled=process.env.APP_MULTI_USE
   const match=path.match(/^\/api\/(?:tasks|logo|transparent|automatic|batch|workspace|rule-review|task-products)\/([^/]+)/)||path.match(/^\/api\/(?:ai\/tasks|manage\/tasks)\/([^/]+)/);
   if(match)return ownTask(user,decodeURIComponent(match[1]));
   if(path.startsWith('/api/logo-rule-facts/')){const row=db.prepare('SELECT taskId FROM ProductionLogo WHERE id=?').get(decodeURIComponent(path.split('/')[3]));return ownTask(user,row?.taskId||'');}
+  if(path==='/api/logo-library'||path.startsWith('/api/logo-library/'))return;
   if(path==='/api/rule-auth'){if(method!=='GET')fail('请使用工作空间账号登录，不能切换规则账号',403);return;}
   if(path.startsWith('/api/manage/products/')){requireAdmin(user);return;}
   if(path==='/api/tasks'||path==='/api/batch-summary'||path==='/api/ai/status'||path==='/api/render')return;

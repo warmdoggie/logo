@@ -31,7 +31,7 @@ export function createAiLogoProcessor({configPath=process.env.S7_AI_CONFIG||DEFA
     if(!config)throw Error('S7 尚未配置可用的 AI 图片模型，请检查 data/ai-provider.local.json');
     if(config.provider==='APIMART'){
       const requestTransport=createApimartTransport({proxyUrl:config.proxyUrl||process.env.S7_APIMART_PROXY_URL||process.env.APIMART_PROXY_URL,transport});
-      return processWithApimart({...config,model:config.logoModel||config.model},source,{transport:requestTransport,pollIntervalMs});
+      return processWithApimart({...config,model:config.logoModel||config.model},source,{transport:requestTransport,pollIntervalMs,targetColor});
     }
     const body=buildAiLogoRequest(Buffer.from(source).toString('base64'),{model:config.model,targetColor});
     let response;
@@ -50,8 +50,8 @@ export function createAiLogoProcessor({configPath=process.env.S7_AI_CONFIG||DEFA
   };
 }
 
-async function processWithApimart(config,source,{transport,pollIntervalMs}){
-  const signal=AbortSignal.timeout(config.timeoutMs),base=config.endpoint.replace(/\/$/,''),logoPng=await sharp(source).png().toBuffer(),body=buildApimartLogoRequest(`data:image/png;base64,${logoPng.toString('base64')}`,{model:config.model});
+async function processWithApimart(config,source,{transport,pollIntervalMs,targetColor}){
+  const signal=AbortSignal.timeout(config.timeoutMs),base=config.endpoint.replace(/\/$/,''),logoPng=await sharp(source).png().toBuffer(),body=buildApimartLogoRequest(`data:image/png;base64,${logoPng.toString('base64')}`,{model:config.model,targetColor});
   const read=async(response)=>{if(!response.ok){let detail=`HTTP ${response.status}`;try{const payload=await response.json();detail=payload.error?.message||payload.message||detail;}catch{}throw Error(`APIMart ${detail}`);}try{return await response.json();}catch{throw Error('APIMart 返回了无法解析的 JSON 响应');}};
   const request=async(path,options)=>read(await transport(base+path,{...options,redirect:'error',signal,headers:{Authorization:`Bearer ${config.apiKey}`,'Content-Type':'application/json','Accept-Encoding':'identity',...(options?.headers||{})}}));
   try{

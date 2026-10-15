@@ -11,13 +11,47 @@ export async function authenticateWorkspace(req){
 }
 export function userSpace(root){
  const directory=user=>join(root,safe(user.id));
- async function save(user,{kind,model,images}){
-  const parent=directory(user),id=randomUUID(),pending=join(parent,'.'+id),target=join(parent,id);await mkdir(pending,{recursive:true});
-  try{const entries=[];for(let i=0;i<images.length;i++){const image=images[i],name=`image-${i}.png`;await writeFile(join(pending,name),image.bytes,{flag:'wx'});entries.push({name,label:image.label,url:`/api/my-space/image/${id}/${name}`});}
-   const record={id,kind,model:model||null,createdAt:new Date().toISOString(),images:entries};await writeFile(join(pending,'record.json'),JSON.stringify(record),{flag:'wx'});await rename(pending,target);return record;
-  }catch(error){await rm(pending,{recursive:true,force:true});throw error;}
+ const taskFile=(user,id)=>join(directory(user),'tasks',safe(id),'task.json');
+ const updates=new Map();
+ async function serialized(file,operation){const previous=updates.get(file)||Promise.resolve(),current=previous.catch(()=>{}).then(operation);updates.set(file,current);try{return await current;}finally{if(updates.get(file)===current)updates.delete(file);}}
+ async function task(user,id){try{return JSON.parse(await readFile(taskFile(user,id),'utf8'));}catch(e){if(e.code==='ENOENT')fail('任务不存在',404);throw e;}}
+ function title(value){if(typeof value!=='string'||!value.trim()||value.trim().length>80)fail('任务名称需为 1–80 个字',400);return value.trim();}
+ async function createTask(user,input){const stamp=new Date().toISOString(),record={id:randomUUID(),title:title(input.title),createdAt:stamp,updatedAt:stamp,revision:0,state:{}};const file=taskFile(user,record.id);await mkdir(join(file,'..'),{recursive:true});await writeFile(file,JSON.stringify(record),{flag:'wx'});return record;}
+ async function tasks(user){let names;try{names=await readdir(join(directory(user),'tasks'));}catch(e){if(e.code==='ENOENT')return [];throw e;}const list=await Promise.all(names.map(id=>task(user,id)));return list.map(({state,...summary})=>summary).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));}
+ async function updateTask(user,id,input){
+  const file=taskFile(user,id);return serialized(file,async()=>{
+   const record=await task(user,id);if(input.revision!==record.revision)fail('任务已在其他页面更新，请刷新后继续',409);
+   if(input.state!==undefined){if(!input.state||typeof input.state!=='object'||Array.isArray(input.state))fail('任务草稿格式不正确',400);record.state=input.state;}
+   if(input.title!==undefined)record.title=title(input.title);
+   if(input.state!==undefined)record.revision++;record.updatedAt=new Date().toISOString();const temporary=file+'.'+randomUUID();
+   try{await writeFile(temporary,JSON.stringify(record),{flag:'wx'});await rename(temporary,file);}catch(e){await rm(temporary,{force:true});throw e;}return record;
+  });
  }
- async function history(user){let names;try{names=await readdir(directory(user));}catch(e){if(e.code==='ENOENT')return [];throw e;}const records=[];for(const name of names){if(!/^[a-f0-9-]{36}$/.test(name))continue;records.push(JSON.parse(await readFile(join(directory(user),name,'record.json'),'utf8')));}return records.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));}
- async function image(user,id,name){safe(id);if(!/^image-\d+\.png$/.test(name))fail('文件不存在',404);try{return await readFile(join(directory(user),id,name));}catch(e){if(e.code==='ENOENT')fail('文件不存在',404);throw e;}}
- return {save,history,image};
+ async function deleteTask(user,id){
+  const file=taskFile(user,id),folder=join(directory(user),'tasks',safe(id));return serialized(file,async()=>{
+   if((await readGeneration(user,id))?.status==='running')fail('任务正在生成，请完成后再删除',409);
+   await task(user,id);let names;try{names=await readdir(directory(user));}catch(e){if(e.code==='ENOENT')names=[];else throw e;}
+   for(const name of names){if(!/^[a-f0-9-]{36}$/.test(name))continue;const recordFile=join(directory(user),name,'record.json');let record;try{record=JSON.parse(await readFile(recordFile,'utf8'));}catch(e){if(e.code==='ENOENT')continue;throw e;}if(record.taskId===id)await rm(join(directory(user),name),{recursive:true,force:true});}
+   await rm(folder,{recursive:true,force:true});
+  });
+ }
+ async function save(user,{taskId,kind,model,images}){
+  const persist=async()=>{
+  if(taskId)await task(user,taskId);
+  const parent=directory(user),id=randomUUID(),pending=join(parent,'.'+id),target=join(parent,id);await mkdir(pending,{recursive:true});
+  try{const entries=[];for(let i=0;i<images.length;i++){const image=images[i],name=`image-${i}.png`;await writeFile(join(pending,name),image.bytes,{flag:'wx'});entries.push({name,label:image.label,url:taskId?`/api/my-space/tasks/${taskId}/image/${id}/${name}`:`/api/my-space/image/${id}/${name}`});}
+   const record={id,taskId:taskId||null,kind,model:model||null,createdAt:new Date().toISOString(),images:entries};await writeFile(join(pending,'record.json'),JSON.stringify(record),{flag:'wx'});await rename(pending,target);return record;
+  }catch(error){await rm(pending,{recursive:true,force:true});throw error;}
+  };
+  return taskId?serialized(taskFile(user,taskId),persist):persist();
+ }
+ async function history(user,taskId){if(taskId)await task(user,taskId);let names;try{names=await readdir(directory(user));}catch(e){if(e.code==='ENOENT')return [];throw e;}const records=[];for(const name of names){if(!/^[a-f0-9-]{36}$/.test(name))continue;const record=JSON.parse(await readFile(join(directory(user),name,'record.json'),'utf8'));if((record.taskId||null)===(taskId||null))records.push(record);}return records.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));}
+ async function image(user,id,name,taskId){safe(id);if(!/^image-\d+\.png$/.test(name))fail('文件不存在',404);if(taskId)await task(user,taskId);try{const record=JSON.parse(await readFile(join(directory(user),id,'record.json'),'utf8'));if((record.taskId||null)!==(taskId||null))fail('文件不存在',404);return await readFile(join(directory(user),id,name));}catch(e){if(e.code==='ENOENT')fail('文件不存在',404);throw e;}}
+ async function readGeneration(user,id){await task(user,id);try{return JSON.parse(await readFile(join(taskFile(user,id),'..','generation.json'),'utf8'));}catch(e){if(e.code==='ENOENT')return null;throw e;}}
+ function generation(user,id){return serialized(taskFile(user,id),()=>readGeneration(user,id));}
+ async function updateGeneration(user,id,change){return serialized(taskFile(user,id),async()=>{
+  const record=await change(await readGeneration(user,id)),file=join(taskFile(user,id),'..','generation.json'),temporary=file+'.'+randomUUID();
+  try{await writeFile(temporary,JSON.stringify(record),{flag:'wx'});await rename(temporary,file);}catch(e){await rm(temporary,{force:true});throw e;}return record;
+ });}
+ return {save,history,image,task,tasks,createTask,updateTask,deleteTask,generation,updateGeneration};
 }

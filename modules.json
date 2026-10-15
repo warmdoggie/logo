@@ -4,11 +4,11 @@
       "id": "s7-logo-stability",
       "name": "S7 Logo Stability",
       "source": "01_Source_Code/s7-logo-stability",
-      "startScript": "01_Source_Code/start-s7.ps1",
-      "localUrl": "http://127.0.0.1:3237/",
+      "startScript": "start-workspace.ps1",
+      "localUrl": "http://127.0.0.1:3210/#/modules/s7-logo-stability",
       "productionUrl": "https://logo.heciai.net/",
-      "isolated": true,
-      "notes": "独立端口和服务，不接入主 server.mjs、SQLite 或旧批量流程。"
+      "isolated": false,
+      "notes": "由主工作区同一进程和端口提供页面与 API；任务素材按用户隔离，产品图库共享。"
     }
   ]
 }

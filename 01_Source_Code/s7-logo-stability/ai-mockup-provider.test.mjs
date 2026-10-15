@@ -6,6 +6,30 @@ import {test} from 'node:test';
 import sharp from 'sharp';
 import {createAiMockupRenderer} from './ai-mockup-provider.mjs';
 
+test('Flux 生成后通过 mask 锁定 Logo 区域，框选外恢复原图',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'s7-flux-mask-lock-'));
+  try{
+    const configPath=join(dir,'ai-provider.json');
+    await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',model:'flux-3-image',endpoint:'https://api.apimart.ai',apiKey:'test-key'}));
+    const base=await sharp({create:{width:2,height:1,channels:4,background:{r:10,g:20,b:30,alpha:1}}}).png().toBuffer();
+    const generated=await sharp({create:{width:2,height:1,channels:4,background:{r:220,g:30,b:40,alpha:1}}}).png().toBuffer();
+    const guide=await sharp({create:{width:2,height:1,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite([{input:await sharp({create:{width:1,height:1,channels:4,background:{r:50,g:100,b:150,alpha:1}}}).png().toBuffer(),left:0,top:0}]).png().toBuffer();
+    const mask=await sharp({create:{width:2,height:1,channels:3,background:{r:0,g:0,b:0}}}).composite([{input:await sharp({create:{width:1,height:1,channels:3,background:{r:255,g:255,b:255}}}).png().toBuffer(),left:0,top:0}]).png().toBuffer();
+    let submitted;
+    const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async(url,options)=>{
+      if(String(url).endsWith('/v1/images/generations')){submitted=JSON.parse(options.body);return Response.json({data:[{url:'https://getapib.org/f/masked.png'}]});}
+      return new Response(generated);
+    }});
+    const result=await renderer({model:'flux-3-image',onlyVersion:'ORIGINAL',baseImage:`data:image/png;base64,${base.toString('base64')}`,logoImage:'data:image/png;base64,LOGO',maskImage:`data:image/png;base64,${mask.toString('base64')}`,guides:[{version:'ORIGINAL',dataUrl:`data:image/png;base64,${guide.toString('base64')}`}],originalColor:'#000000'});
+    const output=await sharp(result[0].bytes).ensureAlpha().raw().toBuffer();
+    const original=await sharp(base).ensureAlpha().raw().toBuffer();
+    const guidePixels=await sharp(guide).ensureAlpha().raw().toBuffer();
+    assert.equal('mask_url' in submitted,false);
+    assert.deepEqual([...output.subarray(0,4)],[...guidePixels.subarray(0,4)]);
+    assert.deepEqual([...output.subarray(4,8)],[...original.subarray(4,8)]);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
 test('四个生图任务在任何一个完成前全部提交，GPT 和 Flux 均并行', {timeout:5000}, async()=>{
   const dir=await mkdtemp(join(tmpdir(),'s7-parallel-submit-'));
   try{
@@ -86,6 +110,29 @@ test('APIMart gpt-image-2.5-flare configuration is accepted for mockups',async()
       {version:'GOLD FOIL',dataUrl:'data:image/png;base64,G3'},{version:'SILVER FOIL',dataUrl:'data:image/png;base64,G4'}
     ],originalColor:'#000000'});
     assert.equal(submitted.model,'gpt-image-2.5-flare');
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('四张成图逐张报告提交、生成、保存，单张失败不丢失已完成版本',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'s7-ai-mockup-progress-'));
+  try{
+    const configPath=join(dir,'ai-provider.json');
+    await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',model:'flux-3-image',endpoint:'https://api.apimart.ai',apiKey:'test-key'}));
+    const output=await sharp({create:{width:4,height:4,channels:3,background:'#fff'}}).png().toBuffer();
+    const events=[],results=[];
+    const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async(url,options)=>{
+      if(String(url).endsWith('/v1/images/generations')){
+        const plan=JSON.parse(options.body);
+        if(plan.prompt.includes('neutral metallic reflection'))throw Error('one version failed');
+        return Response.json({data:[{url:'https://getapib.org/f/progress.png'}]});
+      }
+      return new Response(output);
+    }});
+    const result=await renderer({baseImage:'data:image/png;base64,BASE',logoImage:'data:image/png;base64,LOGO',guides:['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL'].map(version=>({version,dataUrl:'data:image/png;base64,GUIDE'})),originalColor:'#000000',onStage:(version,stage)=>events.push(`${version}:${stage}`),onOutput:output=>results.push(output.version)});
+    assert.deepEqual(result.map(item=>item.version),['ORIGINAL','BLACK','GOLD FOIL']);
+    for(const version of ['ORIGINAL','BLACK','GOLD FOIL'])assert.deepEqual(events.filter(event=>event.startsWith(`${version}:`)).map(event=>event.split(':')[1]),['submitting','generating','saving']);
+    assert.ok(events.includes('SILVER FOIL:failed'));
+    assert.deepEqual(results.sort(),['BLACK','GOLD FOIL','ORIGINAL']);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 

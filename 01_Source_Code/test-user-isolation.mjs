@@ -48,6 +48,13 @@ test('用户登录、账号管理、任务和文件隔离、共享图库以及�
   const catalog=await(await call('/api/products',bob)).json();assert.equal(catalog.length,1);
   assert.equal((await call('/api/manage/products/'+product.id,bob)).status,403);
   assert.equal((await call('/files/'+catalog[0].standardImage,alice)).status,200);
+  const logoForm=new FormData();logoForm.set('file',new Blob([image]),'brand-logo.png');logoForm.set('name','品牌 Logo V1');const savedLogo=await call('/api/logo-library',alice,logoForm);assert.equal(savedLogo.status,201);const logo=await savedLogo.json();assert.equal(logo.name,'品牌 Logo V1');
+  assert.equal((await(await call('/api/logo-library',alice)).json()).length,1);assert.deepEqual(await(await call('/api/logo-library',bob)).json(),[]);
+  assert.equal((await call(logo.imageUrl,alice)).status,200);assert.equal((await call(logo.imageUrl,bob)).status,404);
+  const renamed=await call('/api/logo-library/'+logo.id,alice,{name:'新品牌名称'},'PATCH');assert.equal(renamed.status,200);assert.equal((await renamed.json()).name,'新品牌名称');
+  assert.equal((await call('/api/logo-library/'+logo.id,bob,{name:'越权修改'},'PATCH')).status,404);
+  assert.equal((await call('/api/logo-library/'+logo.id,bob,undefined,'DELETE')).status,404);
+  assert.equal((await call('/api/logo-library/'+logo.id,alice,undefined,'DELETE')).status,200);
   const task=new FormData();task.set('customerName','Alice私有');task.set('productIds',JSON.stringify([product.id]));task.set('logo',new Blob([image]),'private.png');
   const created=await call('/api/tasks',alice,task);assert.equal(created.status,201);const {id}=await created.json();
   const detail=await(await call('/api/tasks/'+id,alice)).json();assert.equal((await(await call('/api/tasks',bob)).json()).length,0);

@@ -3,6 +3,7 @@ import {transparentMasterService} from './transparent-masters.mjs';
 import {aiService} from './ai-renderer.mjs';
 import {taskProductService,activeSql} from './task-products.mjs';
 import http from 'node:http';
+import sharp from 'sharp';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -21,6 +22,8 @@ import {batchService} from './batches.mjs';
 import {acceptanceService} from './acceptance.mjs';
 import {readSeedLogo} from './seed-logo.mjs';
 import {workspaceAuth,requestScope} from './workspace-auth.mjs';
+import {logoLibrary} from './logo-library.mjs';
+import {createDemoHandler} from './s7-logo-stability/demo-server.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const data = process.env.APP_DATA_DIR || join(root, 'data');
@@ -33,6 +36,7 @@ if(!db.prepare('PRAGMA table_info(Task)').all().some(c=>c.name==='activeProducti
 
 db.exec(readFileSync(join(root,'ai-schema.sql'),'utf8'));
 const storage = new LocalStorage(join(data, 'uploads'));
+const logoAssets=logoLibrary(db,storage,()=>requestScope.getStore()?.user?.id||'local');
 for(const [name,type] of [['shapeType',"TEXT DEFAULT 'RECT'"],['rotation','REAL DEFAULT 0'],['pointsJson','TEXT']])if(!db.prepare('PRAGMA table_info(TemplateZone)').all().some(c=>c.name===name))db.exec('ALTER TABLE TemplateZone ADD COLUMN '+name+' '+type);
 const templates = templateService(db,storage);
 const logos=logoService(db,storage);
@@ -98,6 +102,7 @@ if(process.env.APP_NO_SEED!=='1'&&!db.prepare("SELECT value FROM AppMeta WHERE k
 }
 await logos.initializeLegacy();
 const users=workspaceAuth(db,data,storage);
+const s7Handler=createDemoHandler({authenticate:users?req=>users.requireUser(req):null,spaceDir:process.env.S7_SPACE_DIR||join(data,'user-spaces')});
 function products(query='',includeInactive=false) {
  const q=query.trim().toUpperCase();
  const rows=db.prepare('SELECT p.*, (SELECT version FROM ProductTemplate WHERE productId=p.id AND isCurrent=1) AS currentVersion FROM Product p ORDER BY createdAt DESC, sku ASC').all();
@@ -117,9 +122,7 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
  const writing=!['GET','HEAD'].includes(req.method);if(writing)activeWrites++;
  res.setHeader('X-Content-Type-Options','nosniff');
  res.setHeader('Cache-Control','no-store');
- const frameHost=(req.headers.host||'').split(':')[0];
- const s7FrameSource=['127.0.0.1','localhost'].includes(frameHost)?` http://${frameHost}:3237`:'';
- res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-src 'self'${s7FrameSource}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`);
+ res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`);
  const json=(v,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(v));};
  try {
   const requestHost=(req.headers.host||'').split(':')[0];
@@ -129,6 +132,11 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
   const requestOrigin=`${forwardedProto==='https'?'https':'http'}://${req.headers.host}`;
   if(req.method!=='GET'&&req.headers.origin&&req.headers.origin!==requestOrigin)bad('不允许跨站提交',403);
   const url=new URL(req.url,`http://${req.headers.host}`), path=url.pathname;
+  if(path==='/s7'||path.startsWith('/s7/')){
+   const originalUrl=req.url;req.url=req.url.replace(/^\/s7(?=\/|\?|$)/,'')||'/';
+   res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'`);
+   try{return await s7Handler(req,res);}finally{req.url=originalUrl;}
+  }
   if(path==='/api/auth/config'&&req.method==='GET')return json({enabled:!!users});
   if(path==='/account-ui.js'&&req.method==='GET'){res.setHeader('Content-Type','text/javascript; charset=utf-8');return res.end(readFileSync(join(root,'public/account-ui.js')));}
   if(path==='/account.css'&&req.method==='GET'){res.setHeader('Content-Type','text/css; charset=utf-8');return res.end(readFileSync(join(root,'public/account.css')));}
@@ -151,6 +159,18 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
   if(path==='/api/acceptance'&&req.method==='GET')return json(acceptance.snapshot());
   if(path==='/api/acceptance/run'&&req.method==='POST')return json(acceptance.start());
   const actor=workspaceUser?{...workspaceUser,role:workspaceUser.role==='ADMIN'?'ADMIN':'DESIGNER'}:auth.actor(req),input=async()=>{try{return await(await body(req)).json();}catch{bad('请求格式不正确');}};
+  if(path==='/api/logo-library'&&req.method==='GET')return json(logoAssets.list());
+  if(path==='/api/logo-library'&&req.method==='POST'){
+   const form=await(await body(req)).formData(),file=form.get('file');
+   if(!file||typeof file.arrayBuffer!=='function'||!file.size)bad('请选择 Logo 图片');
+   if(file.size>12*1024*1024)bad('Logo 图片不能超过 12 MB',413);
+   const bytes=Buffer.from(await file.arrayBuffer());let meta;try{meta=await sharp(bytes).metadata();}catch{bad('Logo 图片格式无法读取');}
+   if(!['png','jpeg','webp'].includes(meta.format))bad('请上传 PNG、JPG 或 WebP 图片');
+   if(!meta.width||!meta.height||meta.width*meta.height>16000000)bad('Logo 图片尺寸不能超过 1600 万像素');
+   const saved=logoAssets.add({name:String(form.get('name')||file.name||'Logo.png'),bytes:await sharp(bytes).png().toBuffer()});return json(saved,201);
+  }
+  const logoLibraryMatch=path.match(/^\/api\/logo-library\/([^/]+)(?:\/(image))?$/);
+  if(logoLibraryMatch){const id=decodeURIComponent(logoLibraryMatch[1]);if(req.method==='GET'&&logoLibraryMatch[2]){res.setHeader('Content-Type','image/png');return res.end(logoAssets.image(id));}if(req.method==='PATCH'&&!logoLibraryMatch[2])return json(logoAssets.rename(id,(await input()).name));if(req.method==='DELETE'&&!logoLibraryMatch[2]){logoAssets.remove(id);return json({ok:true});}bad('Logo 库接口不存在',404);}
   if(path.startsWith('/api/transparent/')){
    const [,,,id,action]=path.split('/');
    if(req.method==='GET'&&!action)return json({...transparent.page(id),actor});

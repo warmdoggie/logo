@@ -31,7 +31,8 @@ test('四个AI上样版本使用锁定原图和对应定位参考图',()=>{
   assert.match(plan[1].request.prompt,/pure black/i);
   assert.match(plan[1].request.prompt,/pure-white reverse logo/i);
   assert.match(plan[2].request.prompt,/thin gold foil/i);
-  assert.match(plan[2].request.prompt,/varies across individual glyphs/i);
+  assert.match(plan[2].request.prompt,/几乎不可察觉的压印边缘变化/);
+  assert.match(plan[2].request.prompt,/不应看到明显高低差、斜面亮边或投影/);
   assert.match(plan[3].request.prompt,/thin silver foil/i);
   assert.match(plan[0].request.prompt,/physically plausible printed packaging photographed with a real camera/i);
   assert.match(plan[0].request.prompt,/锐度不一致/);
@@ -40,6 +41,9 @@ test('四个AI上样版本使用锁定原图和对应定位参考图',()=>{
   assert.match(plan[2].request.prompt,/very thin metallic hot-stamped gold foil physically bonded to the packaging surface/i);
   assert.doesNotMatch(plan[2].request.prompt,/thin reflective metallic silver hot-stamped foil/i);
   assert.match(plan[3].request.prompt,/thin reflective metallic silver hot-stamped foil/i);
+  assert.match(plan[3].request.prompt,/soft, narrow silver-white specular highlight that transitions continuously through a dense neutral-silver midtone into graphite-gray reflected shadow/i);
+  assert.match(plan[3].request.prompt,/Keep the silver finish opaque, crisp and legible against the package/i);
+  assert.doesNotMatch(plan[2].request.prompt,/soft, narrow silver-white specular highlight/i);
   assert.doesNotMatch(plan[3].request.prompt,/very thin metallic hot-stamped gold foil physically bonded/i);
 });
 
@@ -132,7 +136,7 @@ test('manual angle is a hard placement lock and each finish uses an explicit pri
   assert.match(plan[3].request.prompt,/PRINT PROCESS: real silver hot foil stamping/i);
 });
 
-test('metallic print reflection stays soft and surface-driven rather than chrome-like',()=>{
+test('foil prompts stay nearly flat with restrained surface reflection rather than chrome-like relief',()=>{
   const plan=buildAiMockupPlan({
     model:'gpt-image-2',baseImage:'data:image/png;base64,BASE',logoImage:'data:image/png;base64,LOGO',
     guides:[
@@ -143,10 +147,11 @@ test('metallic print reflection stays soft and surface-driven rather than chrome
     ],originalColor:'#2F6FD6'
   });
   assert.match(plan[0].request.prompt,/restrained low-gloss surface reflection/i);
-  assert.match(plan[2].request.prompt,/low-intensity, soft and continuous surface reflection/i);
-  assert.match(plan[2].request.prompt,/no sharp internal highlight bands/i);
-  assert.match(plan[3].request.prompt,/no alternating white\/gray segments inside letters/i);
-  assert.match(plan[3].request.prompt,/no chrome, mirror finish, or hard white streaks/i);
+  assert.match(plan[2].request.prompt,/nearly flush with the package/i);
+  assert.match(plan[2].request.prompt,/不应看到明显高低差、斜面亮边或投影/);
+  assert.match(plan[3].request.prompt,/nearly flat/i);
+  assert.match(plan[3].request.prompt,/不出现明显高低差、斜面亮边或接触投影/);
+  assert.match(plan[3].request.prompt,/never becoming harsh segmented bands or mirror chrome/i);
 });
 
 test('onlyVersion builds a request for one selected finish',()=>{
@@ -177,6 +182,7 @@ test('Flux uses its own reference order, aspect ratio and bbox JSON request form
     ],originalColor:'#C54B78',size:'4:3'
   });
   const request=plan[2].request;
+  const silverRequest=plan[3].request;
   assert.equal(request.model,'flux-3-image');
   assert.equal(request.aspect_ratio,'4:3');
   assert.equal(request.resolution,'2k');
@@ -199,6 +205,9 @@ test('Flux uses its own reference order, aspect ratio and bbox JSON request form
   assert.match(request.prompt,/"surface":"free"/i);
   assert.match(request.prompt,/"rotation":-90/i);
   assert.match(request.prompt,/<ref_image_2> is the exact clean placement-and-appearance reference/i);
+  assert.match(silverRequest.prompt,/soft, narrow silver-white specular highlight that transitions continuously through a dense neutral-silver midtone into graphite-gray reflected shadow/i);
+  assert.match(silverRequest.prompt,/Keep the silver finish opaque, crisp and legible against the package/i);
+  assert.doesNotMatch(request.prompt,/soft, narrow silver-white specular highlight/i);
   assert.doesNotMatch(request.prompt,/Image 3 is the exact placement/i);
 });
 

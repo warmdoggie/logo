@@ -14,6 +14,14 @@ test('AI Logo请求明确要求透明底黑字并保持原Logo结构',()=>{
   assert.match(request.prompt,/exact|preserve/i);
 });
 
+test('AI Logo加工支持保留原色并输出透明PNG',()=>{
+  const request=buildAiLogoRequest('AQIDBA==',{model:'test-model',targetColor:'original'});
+  assert.equal(request.targetColor,'original');
+  assert.equal(request.transparentBackground,true);
+  assert.match(request.prompt,/preserve the original visible logo colors/i);
+  assert.doesNotMatch(request.prompt,/solid pure black/i);
+});
+
 test('AI Logo输出必须包含透明像素和可见像素',async()=>{
   const raw=Buffer.alloc(6*4*4);
   for(let y=1;y<3;y++)for(let x=1;x<5;x++){const i=(y*6+x)*4;raw[i]=0;raw[i+1]=0;raw[i+2]=0;raw[i+3]=255;}
@@ -32,4 +40,11 @@ test('APIMart官方GPT Image模型明确请求透明PNG',()=>{
   assert.equal(request.background,'transparent');
   assert.equal(request.output_format,'png');
   assert.equal(request.quality,'high');
+});
+
+test('APIMart Logo加工可选择保留原色',()=>{
+  const request=buildApimartLogoRequest('data:image/png;base64,AQID',{model:'gpt-image-2',targetColor:'original'});
+  assert.equal(request.background,'transparent');
+  assert.match(request.prompt,/preserve the original visible logo colors/i);
+  assert.doesNotMatch(request.prompt,/solid pure black/i);
 });

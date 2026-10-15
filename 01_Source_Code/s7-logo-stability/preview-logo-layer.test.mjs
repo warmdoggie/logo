@@ -25,3 +25,10 @@ test('Logo 改色只发生在独立图层，不清空产品预览画布',()=>{
     ['composite','source-over']
   ]);
 });
+
+test('Logo 预览可保留原始图像颜色',()=>{
+  const calls=[];
+  const layer={getContext(){return {drawImage:(...args)=>calls.push(['drawImage',...args])};}};
+  renderTintedLogoLayer({createCanvas:(width,height)=>Object.assign(layer,{width,height}),logoImage:{id:'colored-logo'},width:32,height:16});
+  assert.deepEqual(calls,[['drawImage',{id:'colored-logo'},0,0,32,16]]);
+});

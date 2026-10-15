@@ -1,3 +1,4 @@
+import {selectGenerationVersions} from './generation-versions.mjs';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {dirname,join,resolve} from 'node:path';
@@ -10,11 +11,12 @@ import {createAiLogoProcessor,getAiLogoProviderStatus} from './ai-logo-provider.
 import {pickAspectRatio} from './ai-mockup-generation.mjs';
 import {createAiMockupRenderer,getAiMockupProviderStatus} from './ai-mockup-provider.mjs';
 import {authenticateWorkspace,userSpace} from './user-space.mjs';
+import {createGenerationJobs} from './generation-jobs.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const MAX_BODY=50*1024*1024;
 const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
-const PUBLIC_FILES=new Set(['demo.html','demo.js','demo.css','demo-geometry.mjs','target-state.mjs','preview-logo-layer.mjs','contrast-color.mjs','saved-logo.mjs','product-master.mjs','transparent-logo-download.mjs','rotation-handle.mjs']);
+const PUBLIC_FILES=new Set(['tasks.html','tasks.js','tasks.css','task-draft.mjs','generation-client.mjs','generation-versions.mjs','demo.html','demo.js','demo.css','demo-geometry.mjs','target-state.mjs','preview-logo-layer.mjs','contrast-color.mjs','saved-logo.mjs','product-master.mjs','transparent-logo-download.mjs','rotation-handle.mjs']);
 const PRODUCT_LIBRARY_URL=process.env.S7_PRODUCT_LIBRARY_URL||'http://127.0.0.1:3210/api/products?includeInactive=0';
 
 function json(res,status,payload){
@@ -68,6 +70,22 @@ function productLibraryView(products){
   }));
 }
 
+async function saveWorkspaceLogo(req,bytes,name){
+  const form=new FormData();form.set('file',new Blob([bytes],{type:'image/png'}),name);
+  const response=await fetch((process.env.S7_WORKSPACE_URL||'http://127.0.0.1:3210')+'/api/logo-library',{method:'POST',headers:{cookie:req.headers.cookie||''},body:form,signal:AbortSignal.timeout(20000)});
+  const result=await response.json();if(!response.ok)throw Error(result.error||`Logo 库保存失败（HTTP ${response.status}）`);return result;
+}
+
+async function loadWorkspaceLogoLibrary(req){
+  const response=await fetch((process.env.S7_WORKSPACE_URL||'http://127.0.0.1:3210')+'/api/logo-library',{headers:{cookie:req?.headers.cookie||''},signal:AbortSignal.timeout(10000)});
+  const logos=await response.json();if(!response.ok)throw Object.assign(Error(logos.error||`Logo 库读取失败（HTTP ${response.status}）`),{status:response.status});if(!Array.isArray(logos))throw Error('Logo 库返回格式不正确');return logos;
+}
+
+async function loadWorkspaceLogoImage(req,id){
+  const response=await fetch((process.env.S7_WORKSPACE_URL||'http://127.0.0.1:3210')+`/api/logo-library/${encodeURIComponent(id)}/image`,{headers:{cookie:req?.headers.cookie||''},signal:AbortSignal.timeout(10000)});
+  if(!response.ok){let payload={};try{payload=await response.json();}catch{}throw Object.assign(Error(payload.error||`Logo 图片读取失败（HTTP ${response.status}）`),{status:response.status});}return Buffer.from(await response.arrayBuffer());
+}
+
 async function productImage(product,req){
   if(product.imageBytes)return {bytes:Buffer.from(product.imageBytes),contentType:'image/png'};
   if(product.imageDataUrl){
@@ -82,9 +100,10 @@ async function productImage(product,req){
   return {bytes:Buffer.from(await response.arrayBuffer()),contentType:response.headers.get('content-type')||'application/octet-stream'};
 }
 
-export function createDemoServer({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus(),aiMockupStatus=()=>getAiMockupProviderStatus(),mockupRenderer=createAiMockupRenderer(),productCatalog=loadProductCatalog,productTemplate=loadProductTemplate,authenticate=process.env.APP_MULTI_USER==='1'?authenticateWorkspace:null,spaceDir=process.env.S7_SPACE_DIR||join(ROOT,'..','data','user-spaces')}={}){
+export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus(),aiMockupStatus=()=>getAiMockupProviderStatus(),mockupRenderer=createAiMockupRenderer(),productCatalog=loadProductCatalog,productTemplate=loadProductTemplate,logoCatalog=loadWorkspaceLogoLibrary,logoImage=loadWorkspaceLogoImage,saveLogoToLibrary=saveWorkspaceLogo,authenticate=process.env.APP_MULTI_USER==='1'?authenticateWorkspace:null,spaceDir=process.env.S7_SPACE_DIR||join(ROOT,'..','data','user-spaces')}={}){
   const spaces=userSpace(spaceDir);
-  return createServer(async(req,res)=>{
+  const jobs=createGenerationJobs(spaces);
+  return async(req,res)=>{
     try{
       const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);
       if(req.method==='GET'&&url.pathname==='/healthz'){json(res,200,{ok:true,service:'s7-logo-stability'});return;}
@@ -92,7 +111,21 @@ export function createDemoServer({aiProcessor=createAiLogoProcessor(),aiStatus=(
       const ensureUser=async()=>{if(user&&(await authenticate(req)).id!==user.id)throw Object.assign(Error('登录已变更，请重新登录'),{status:401});};
       if(authenticate&&req.method!=='GET'&&req.headers.origin){const own=`http://${req.headers.host}`,workspace=process.env.APP_PUBLIC_ORIGIN||'http://127.0.0.1:3210';if(![own,workspace].includes(req.headers.origin))throw Object.assign(Error('不允许跨站提交'),{status:403});}
       if(req.method==='GET'&&url.pathname==='/api/session'){json(res,200,{enabled:!!authenticate,user});return;}
-      if(user&&req.method==='GET'&&url.pathname==='/api/my-space/history'){json(res,200,await spaces.history(user));return;}
+      if(user&&url.pathname==='/api/my-space/tasks'){
+        if(req.method==='GET'){const tasks=await spaces.tasks(user);json(res,200,await Promise.all(tasks.map(async task=>({...task,generation:await jobs.read(user,task.id)}))));return;}
+        if(req.method==='POST'){json(res,201,await spaces.createTask(user,await body(req)));return;}
+      }
+      const taskMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)$/);
+      if(user&&taskMatch){
+        if(req.method==='GET'){json(res,200,await spaces.task(user,taskMatch[1]));return;}
+        if(req.method==='PUT'){json(res,200,await spaces.updateTask(user,taskMatch[1],await body(req)));return;}
+        if(req.method==='DELETE'){await ensureUser();if((await jobs.read(user,taskMatch[1]))?.status==='running')throw Object.assign(Error('任务正在生成，请完成后再删除'),{status:409});await spaces.deleteTask(user,taskMatch[1]);res.writeHead(204);res.end();return;}
+      }
+      const generationMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/generation$/);
+      if(user&&req.method==='GET'&&generationMatch){json(res,200,await jobs.read(user,generationMatch[1]));return;}
+      const taskImageMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/image\/([^/]+)\/([^/]+)$/);
+      if(user&&req.method==='GET'&&taskImageMatch){const bytes=await spaces.image(user,taskImageMatch[2],taskImageMatch[3],taskImageMatch[1]);res.writeHead(200,{'content-type':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
+      if(user&&req.method==='GET'&&url.pathname==='/api/my-space/history'){json(res,200,await spaces.history(user,url.searchParams.get('taskId')));return;}
       const imageMatch=url.pathname.match(/^\/api\/my-space\/image\/([^/]+)\/([^/]+)$/);
       if(user&&req.method==='GET'&&imageMatch){const bytes=await spaces.image(user,imageMatch[1],imageMatch[2]);res.writeHead(200,{'content-type':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
       if(req.method==='GET'){
@@ -101,6 +134,16 @@ export function createDemoServer({aiProcessor=createAiLogoProcessor(),aiStatus=(
         if(url.pathname==='/api/ai-models'){json(res,200,aiMockupStatus());return;}
         if(url.pathname==='/api/product-library'){
           json(res,200,productLibraryView(await productCatalog(req)));return;
+        }
+        if(url.pathname==='/api/logo-library'){
+          const logos=await logoCatalog(req);
+          json(res,200,logos.map(logo=>({...logo,imageUrl:`/api/logo-library/${encodeURIComponent(String(logo.id))}/image`})));
+          return;
+        }
+        const logoImageMatch=url.pathname.match(/^\/api\/logo-library\/([^/]+)\/image$/);
+        if(logoImageMatch){
+          const bytes=await logoImage(req,decodeURIComponent(logoImageMatch[1]));
+          res.writeHead(200,{'content-type':'image/png','cache-control':'private, no-store'});res.end(bytes);return;
         }
         const productImageMatch=url.pathname.match(/^\/api\/product-library\/image\/([^/]+)$/);
         if(productImageMatch){
@@ -117,34 +160,88 @@ export function createDemoServer({aiProcessor=createAiLogoProcessor(),aiStatus=(
           if(!product)throw Error('产品不存在');
           json(res,200,await productTemplate(product,req));return;
         }
-        if(await staticFile(res,url.pathname))return;
+        if(await staticFile(res,authenticate&&url.pathname==='/'?'/tasks.html':url.pathname))return;
         json(res,404,{error:'页面不存在'});return;
       }
       if(req.method==='POST'&&url.pathname==='/api/ai-process-logo'){
         const input=await body(req);
-        const processed=await aiProcessor(Buffer.from(input.logoImage||'','base64'),{targetColor:'#000000'});
+        const targetColor=input.targetColor??'#000000';
+        if(!['#000000','original'].includes(targetColor))throw Object.assign(Error('Logo 加工颜色选项无效'),{status:400});
+        if(user&&input.taskId)await spaces.task(user,input.taskId);
+        const processed=await aiProcessor(Buffer.from(input.logoImage||'','base64'),{targetColor});
         const output=await validateAiLogoOutput(processed?.bytes||processed);
         await ensureUser();
-        if(user)await spaces.save(user,{kind:'Logo加工',model:processed?.model,images:[{label:'上传的Logo',bytes:await sharp(Buffer.from(input.logoImage||'','base64')).png().toBuffer()},{label:'透明Logo',bytes:output.bytes}]});
-        json(res,200,{width:output.width,height:output.height,provider:processed?.provider||null,model:processed?.model||null,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`});
+        const logoName=targetColor==='original'?'AI 加工 Logo（保留原色）.png':'AI 加工 Logo（黑色）.png';
+        if(user)await spaces.save(user,{taskId:input.taskId,kind:targetColor==='original'?'Logo加工（保留原色）':'Logo加工（黑色）',model:processed?.model,images:[{label:'上传的Logo',bytes:await sharp(Buffer.from(input.logoImage||'','base64')).png().toBuffer()},{label:'透明Logo',bytes:output.bytes}]});
+        let logoLibrary=null,logoLibraryError=null;try{logoLibrary=await saveLogoToLibrary(req,output.bytes,logoName);}catch(error){logoLibraryError=error.message||'Logo 库保存失败';}
+        json(res,200,{width:output.width,height:output.height,provider:processed?.provider||null,model:processed?.model||null,targetColor,logoLibrary,logoLibraryError,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`});
         return;
       }
       if(req.method==='POST'&&url.pathname==='/api/process-logo'){
         const input=await body(req);
+        if(user&&input.taskId)await spaces.task(user,input.taskId);
         const processed=await processLogo(Buffer.from(input.logoImage||'','base64'),{removeWhiteBackground:input.removeWhiteBackground!==false,cropTransparentBounds:input.cropTransparentBounds!==false,threshold:Number(input.threshold??24)});
         const meta=await sharp(processed).metadata();
         await ensureUser();
-        if(user)await spaces.save(user,{kind:'Logo处理',images:[{label:'透明Logo',bytes:processed}]});
+        if(user)await spaces.save(user,{taskId:input.taskId,kind:'Logo处理',images:[{label:'透明Logo',bytes:processed}]});
         json(res,200,{width:meta.width,height:meta.height,dataUrl:`data:image/png;base64,${processed.toString('base64')}`});
         return;
       }
       if(req.method==='POST'&&url.pathname==='/api/ai-render'){
         const input=await body(req);
+        const selectedVersions=selectGenerationVersions(input);
+        if(user&&input.taskId)await spaces.task(user,input.taskId);
         const baseImage=Buffer.from(input.baseImage||'','base64');
         const logoImage=Buffer.from(input.logoImage||'','base64');
         const basePng=await sharp(baseImage).png().toBuffer();
         const logoMeta=await sharp(logoImage).metadata();
         const guideSet=await renderLogoSet({baseImage:basePng,logoImage,targets:input.targets,originalColor:input.originalColor});
+        if(input.background===true){
+          if(!user||!input.taskId)throw Object.assign(Error('后台生成需要登录并选择任务'),{status:400});
+          const record=await jobs.start(user,input.taskId,{model:input.model,onlyVersion:input.onlyVersion,selectedVersions,width:guideSet.width,height:guideSet.height,targetIds:guideSet.targetIds,layoutFingerprint:guideSet.layoutFingerprint},callbacks=>mockupRenderer({
+            baseImage:`data:image/png;base64,${basePng.toString('base64')}`,logoImage:`data:image/png;base64,${logoImage.toString('base64')}`,
+            maskImage:`data:image/png;base64,${guideSet.mask.toString('base64')}`,model:input.model,
+            guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`})),
+            targets:input.targets,onlyVersion:input.onlyVersion,selectedVersions,originalColor:input.originalColor||'#000000',
+            logoAspectRatio:logoMeta.width&&logoMeta.height?logoMeta.height/logoMeta.width:1,size:pickAspectRatio(guideSet.width,guideSet.height),...callbacks
+          }));
+          json(res,202,record);return;
+        }
+        const progressStream=req.headers.accept?.includes('text/event-stream')===true;
+        if(progressStream){
+          res.writeHead(200,{'content-type':'text/event-stream; charset=utf-8','cache-control':'no-cache, no-transform','connection':'keep-alive','x-accel-buffering':'no'});
+          res.flushHeaders?.();
+          const send=(event,payload)=>{if(!res.destroyed&&!res.writableEnded)res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);};
+          const savedRecords=[];
+          send('started',{width:guideSet.width,height:guideSet.height,targetIds:guideSet.targetIds,layoutFingerprint:guideSet.layoutFingerprint});
+          let outputs=[];
+          try{
+            outputs=await mockupRenderer({
+              baseImage:`data:image/png;base64,${basePng.toString('base64')}`,
+              logoImage:`data:image/png;base64,${logoImage.toString('base64')}`,
+              finishReferenceImage:input.finishReferenceImage?`data:image/png;base64,${input.finishReferenceImage}`:undefined,
+              maskImage:`data:image/png;base64,${guideSet.mask.toString('base64')}`,
+              model:input.model,guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`})),
+              targets:input.targets,onlyVersion:input.onlyVersion,selectedVersions,originalColor:input.originalColor||'#000000',
+              logoAspectRatio:logoMeta.width&&logoMeta.height?logoMeta.height/logoMeta.width:1,size:pickAspectRatio(guideSet.width,guideSet.height),
+              onStage:async(version,stage,error)=>send('stage',{version,stage,error:error?.message}),
+              onOutput:async output=>{
+                await ensureUser();
+                const savedRecord=user?await spaces.save(user,{taskId:input.taskId,kind:'AI上样',model:input.model,images:[{label:output.version,bytes:output.bytes}]}):null;
+                if(savedRecord)savedRecords.push(savedRecord);savedRecords.push({version:output.version});
+                send('output',{version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`,savedImage:savedRecord?.images?.[0]||null});
+              }
+            });
+            for(const output of outputs)if(!savedRecords.some(record=>record.version===output.version)){
+              await ensureUser();const savedRecord=user?await spaces.save(user,{taskId:input.taskId,kind:'AI上样',model:input.model,images:[{label:output.version,bytes:output.bytes}]}):null;
+              if(savedRecord)savedRecords.push(savedRecord);savedRecords.push({version:output.version});
+              send('output',{version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`,savedImage:savedRecord?.images?.[0]||null});
+            }
+            send('done',{outputs:outputs.map(output=>output.version),failures:selectedVersions.length-outputs.length});
+          }catch(error){send('fatal',{error:error.message||'生成失败'});}
+          finally{if(!res.writableEnded)res.end();}
+          return;
+        }
         const outputs=await mockupRenderer({
           baseImage:`data:image/png;base64,${basePng.toString('base64')}`,
           logoImage:`data:image/png;base64,${logoImage.toString('base64')}`,
@@ -153,33 +250,38 @@ export function createDemoServer({aiProcessor=createAiLogoProcessor(),aiStatus=(
           model:input.model,
           guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`})),
           targets:input.targets,
-          onlyVersion:input.onlyVersion,
+          onlyVersion:input.onlyVersion,selectedVersions,
           originalColor:input.originalColor||'#000000',
           logoAspectRatio:logoMeta.width&&logoMeta.height?logoMeta.height/logoMeta.width:1,
           size:pickAspectRatio(guideSet.width,guideSet.height)
         });
         await ensureUser();
-        if(user)await spaces.save(user,{kind:'AI上样',model:input.model,images:[{label:'产品原图',bytes:basePng},{label:'Logo素材',bytes:await sharp(logoImage).png().toBuffer()},...(input.finishReferenceImage?[{label:'工艺参考',bytes:await sharp(Buffer.from(input.finishReferenceImage,'base64')).png().toBuffer()}]:[]),...outputs.map(output=>({label:output.version,bytes:output.bytes}))]});
-        json(res,200,{width:guideSet.width,height:guideSet.height,targetIds:guideSet.targetIds,layoutFingerprint:guideSet.layoutFingerprint,outputs:outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`}))});
+        const savedRecord=user?await spaces.save(user,{taskId:input.taskId,kind:'AI上样',model:input.model,images:[{label:'产品原图',bytes:basePng},{label:'Logo素材',bytes:await sharp(logoImage).png().toBuffer()},...(input.finishReferenceImage?[{label:'工艺参考',bytes:await sharp(Buffer.from(input.finishReferenceImage,'base64')).png().toBuffer()}]:[]),...outputs.map(output=>({label:output.version,bytes:output.bytes}))]}):null;
+        json(res,200,{savedRecord,width:guideSet.width,height:guideSet.height,targetIds:guideSet.targetIds,layoutFingerprint:guideSet.layoutFingerprint,outputs:outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`}))});
         return;
       }
       if(req.method!=='POST'||url.pathname!=='/api/render'){
         json(res,404,{error:'接口不存在'});return;
       }
       const input=await body(req);
+        if(user&&input.taskId)await spaces.task(user,input.taskId);
       const result=await renderLogoSet({
         baseImage:Buffer.from(input.baseImage||'', 'base64'),
         logoImage:Buffer.from(input.logoImage||'', 'base64'),
         targets:input.targets
       });
       await ensureUser();
-        if(user)await spaces.save(user,{kind:'二维上样',images:result.outputs.map(output=>({label:output.version,bytes:output.bytes}))});
+        if(user)await spaces.save(user,{taskId:input.taskId,kind:'二维上样',images:result.outputs.map(output=>({label:output.version,bytes:output.bytes}))});
       json(res,200,{width:result.width,height:result.height,targetIds:result.targetIds,layoutFingerprint:result.layoutFingerprint,outputs:result.outputs.map(output=>({version:output.version,layoutFingerprint:output.layoutFingerprint,bounds:output.bounds,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`}))});
     }catch(error){
       const message=error instanceof SyntaxError?'请求必须是有效JSON':/unsupported image format|Input buffer/i.test(error.message||'')?'图片格式无法读取，请上传 PNG、JPG 或 WebP 图片':error.message||'生成失败';
       json(res,error.status||400,{error:message});
     }
-  });
+  };
+}
+
+export function createDemoServer(options={}){
+  return createServer(createDemoHandler(options));
 }
 
 if(process.argv[1]===fileURLToPath(import.meta.url)){

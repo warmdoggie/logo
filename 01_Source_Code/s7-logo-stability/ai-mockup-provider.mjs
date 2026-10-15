@@ -3,6 +3,7 @@ import {fileURLToPath} from 'node:url';
 import sharp from 'sharp';
 import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
 import {createApimartTransport} from './apimart-transport.mjs';
+import {lockOutsideLogo} from './mockup-lock.mjs';
 
 const ROOT=new URL('.',import.meta.url);
 const DEFAULT_CONFIG=fileURLToPath(new URL('../data/ai-provider.local.json',ROOT));
@@ -44,7 +45,14 @@ async function download(urlValue,{transport,signal}){
   return bytes;
 }
 
-async function renderOne(config,plan,{transport,pollIntervalMs}){
+async function preserveFluxOutsideMask(plan,generatedImage){
+  if(plan.request.model!=='flux-3-image'||!plan.maskImage||!plan.placementGuide)return generatedImage;
+  const imageBytes=value=>Buffer.from(value.slice(value.indexOf(',')+1),'base64');
+  return lockOutsideLogo({baseImage:imageBytes(plan.baseImage),generatedImage,guideImage:imageBytes(plan.placementGuide),maskImage:imageBytes(plan.maskImage),feather:0,useGeneratedLighting:plan.version==='GOLD FOIL'||plan.version==='SILVER FOIL',foilFinish:plan.version==='GOLD FOIL'?'gold':undefined});
+}
+
+async function renderOne(config,plan,{transport,pollIntervalMs,onStage}){
+  const stage=async(value,error)=>{try{await onStage?.(plan.version,value,error);}catch{}};
   const signal=AbortSignal.timeout(config.timeoutMs);
   const request=async(path,options={})=>{
     const response=await transport(config.endpoint+path,{...options,redirect:'error',signal,headers:{Authorization:`Bearer ${config.apiKey}`,'Content-Type':'application/json','Accept-Encoding':'identity',...(options.headers||{})}});
@@ -53,9 +61,11 @@ async function renderOne(config,plan,{transport,pollIntervalMs}){
     if(!response.ok)throw Error(`APIMart 成图请求失败：${errorFrom(payload,`HTTP ${response.status}`)}`);
     return payload;
   };
+  await stage('submitting');
   const submitted=await request('/v1/images/generations',{method:'POST',body:JSON.stringify(plan.request)});
   const first=submitted.data?.[0]||submitted.data;
-  if(typeof first?.url==='string')return {version:plan.version,bytes:await download(first.url,{transport,signal})};
+  await stage('generating');
+  if(typeof first?.url==='string'){await stage('saving');const generated=await download(first.url,{transport,signal});return {version:plan.version,bytes:await preserveFluxOutsideMask(plan,generated)};}
   const taskId=first?.task_id||first?.id;
   if(typeof taskId!=='string')throw Error('APIMart 未返回成图任务编号');
   for(;;){
@@ -64,7 +74,9 @@ async function renderOne(config,plan,{transport,pollIntervalMs}){
     const task=status.data;
     if(task?.status==='completed'){
       const value=task.result?.images?.[0]?.url;
-      return {version:plan.version,bytes:await download(Array.isArray(value)?value[0]:value,{transport,signal})};
+      await stage('saving');
+      const generated=await download(Array.isArray(value)?value[0]:value,{transport,signal});
+      return {version:plan.version,bytes:await preserveFluxOutsideMask(plan,generated)};
     }
     if(['failed','cancelled'].includes(task?.status))throw Error(`APIMart ${plan.version} 成图失败：${errorFrom(task,task.status)}`);
   }
@@ -76,6 +88,17 @@ export function createAiMockupRenderer({configPath=process.env.S7_AI_CONFIG||DEF
     if(!config)throw Error('S7 AI 成图需要配置可用的 APIMART 图片模型');
     const plan=buildAiMockupPlan({...input,model:selectedModel(config,input.model)});
     const requestTransport=createApimartTransport({proxyUrl:config.proxyUrl||process.env.S7_APIMART_PROXY_URL||process.env.APIMART_PROXY_URL,transport});
-    return Promise.all(plan.map(item=>renderOne(config,item,{transport:requestTransport,pollIntervalMs})));
+    const onStage=input.onStage,onOutput=input.onOutput;
+    const settled=await Promise.allSettled(plan.map(async item=>{
+      try{
+        const output=await renderOne(config,item,{transport:requestTransport,pollIntervalMs,onStage});
+        await onOutput?.(output);
+        return output;
+      }catch(error){try{await onStage?.(item.version,'failed',error);}catch{}throw error;}
+    }));
+    const outputs=settled.filter(item=>item.status==='fulfilled').map(item=>item.value);
+    if(typeof onStage==='function'||typeof onOutput==='function')return outputs;
+    const failure=settled.find(item=>item.status==='rejected');if(failure)throw failure.reason;
+    return outputs;
   };
 }

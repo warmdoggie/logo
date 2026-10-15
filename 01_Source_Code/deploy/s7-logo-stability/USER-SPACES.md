@@ -4,7 +4,7 @@
 
 本地通过仓库根目录 `start-workspace.ps1` 启动。首次启用后，初始管理员账号写入数据目录的 `workspace-admin.txt`；首次登录后在账号管理重设密码。不要分享或提交该文件。
 
-已有的单用户/验收脚本保留原行为。启用隔离必须在主服务和 S7 服务同时设置 `APP_MULTI_USER=1`，不能只升级前端。普通用户无法调用全局存储清理和验收接口。
+已有的单用户/验收脚本保留原行为。启用隔离时主服务使用 `APP_MULTI_USER=1`；S7 由主服务直接挂载并共用这份登录会话。普通用户无法调用全局存储清理和验收接口。
 
 ## 数据
 
@@ -18,8 +18,9 @@
 
 1. 备份 `/var/lib/s7-logo/workspace/assistant.sqlite`（使用 SQLite 在线备份或停服备份，不能单独复制运行中的主数据库而遗漏 WAL）及 uploads。
 2. 部署经过验证的代码；保留现有 Basic Auth 作为额外入口保护。
-3. 在 `/etc/s7-logo/production.env` 增加 production.env.example 中的 APP_MULTI_USER、APP_PUBLIC_ORIGIN、S7_WORKSPACE_URL、S7_SPACE_DIR；确保两服务均读取该文件。
-4. 若更新了 systemd unit，先执行 `systemctl daemon-reload`；只重启 `s7-workspace.service` 和 `s7-logo.service`，检查 `/api/health` 和 `/s7/healthz`。
-5. 从数据目录安全取得初始管理员账号，创建两名测试用户，验证任务、文件直链、S7 历史隔离以及产品共享，再向用户开放。
+3. 在 `/etc/s7-logo/production.env` 增加 production.env.example 中的 `S7_AI_CONFIG`、`APP_MULTI_USER`、`APP_PUBLIC_ORIGIN`、`S7_WORKSPACE_URL` 和 `S7_SPACE_DIR`。
+4. 若更新了 systemd unit，先执行 `systemctl daemon-reload`；重启 `s7-workspace.service`，检查 `/api/health` 和 `/s7/healthz`。
+5. 验证工作区和 S7 模块登录正常后，停用旧的 `s7-logo.service`：`systemctl disable --now s7-logo.service`。
+6. 从数据目录安全取得初始管理员账号，创建两名测试用户，验证任务、文件直链、S7 历史隔离以及产品共享，再向用户开放。
 
 切勿关闭 APP_MULTI_USER 回退到旧模式后继续让多用户访问。数据库与 user-spaces 都必须纳入日常备份。
