@@ -7,6 +7,33 @@ import sharp from 'sharp';
 import {createDemoServer} from './demo-server.mjs';
 import {userSpace} from './user-space.mjs';
 
+test('regenerating multiple edited schemes retains untouched and previous images until replacements finish',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'s7-edited-'));
+ const image=await sharp({create:{width:30,height:20,channels:4,background:'#777'}}).png().toBuffer();
+ let release,entered,hold=false;
+ const gate=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
+ const server=createDemoServer({spaceDir:dir,authenticate:async()=>({id:'alice'}),mockupRenderer:async input=>{
+  if(hold){entered();await gate;}
+  const outputs=input.selectedVersions.map(version=>({version,bytes:image}));
+  for(const output of outputs)await input.onOutput(output);return outputs;
+ }});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+ const call=async(path,data)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}${path}`,{method:data?'POST':'GET',headers:{'content-type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});assert.ok(r.ok);return r.json();};
+ try{
+  const task=await call('/api/my-space/tasks',{title:'Edited schemes'}),path=`/api/my-space/tasks/${task.id}/generation`;
+  const input={taskId:task.id,background:true,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',x:.5,y:.5,widthRatio:.2}]};
+  const wait=async()=>{for(let i=0;i<150;i++){const record=await call(path);if(record.status!=='running')return record;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('not completed');};
+  await call('/api/ai-render',{...input,schemeSignatures:{ORIGINAL:'original-v1',BLACK:'black-v1'}});const before=await wait();
+  hold=true;
+  await call('/api/ai-render',{...input,selectedVersions:['BLACK','GOLD FOIL'],preserveResults:true,schemeSignatures:{BLACK:'black-v2','GOLD FOIL':'gold-v2'}});
+  await started;const during=await call(path);assert.equal(during.outputs.length,4);
+  release();const after=await wait();assert.equal(after.outputs.length,4);
+  assert.equal(after.outputs.find(o=>o.version==='ORIGINAL').dataUrl,before.outputs.find(o=>o.version==='ORIGINAL').dataUrl);
+  assert.equal(after.outputs.find(o=>o.version==='BLACK').schemeSignature,'black-v2');
+  assert.equal(after.outputs.find(o=>o.version==='ORIGINAL').schemeSignature,'original-v1');
+ }finally{release();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});}
+});
+
 test('三版本任务只记录所选阶段，恢复和单张重试保留三张结果',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'s7-selection-'));
  const image=await sharp({create:{width:20,height:20,channels:4,background:'#777'}}).png().toBuffer();

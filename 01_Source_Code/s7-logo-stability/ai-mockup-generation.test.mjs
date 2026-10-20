@@ -2,6 +2,15 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
 
+test('silver prompts describe subtle foil thickness rather than zero relief',()=>{
+ for(const model of ['gpt-image-2','flux-3-image']){
+  const [plan]=buildAiMockupPlan({model,baseImage:'data:image/png;base64,BASE',logoImage:'data:image/png;base64,LOGO',onlyVersion:'SILVER FOIL',originalColor:'#000000',targets:[{id:'tube',x:.5,y:.5,widthRatio:.2}],guides:[{version:'SILVER FOIL',dataUrl:'data:image/png;base64,GUIDE'}]});
+  assert.match(plan.request.prompt,/subtle foil thickness/i);
+  assert.match(plan.request.prompt,/light-facing edge.*opposite edge/i);
+  assert.doesNotMatch(plan.request.prompt,/zero apparent relief|零可见厚度/i);
+ }
+});
+
 test('四个AI上样版本使用锁定原图和对应定位参考图',()=>{
   const plan=buildAiMockupPlan({
     model:'gpt-image-2',
@@ -41,9 +50,9 @@ test('四个AI上样版本使用锁定原图和对应定位参考图',()=>{
   assert.match(plan[2].request.prompt,/very thin metallic hot-stamped gold foil physically bonded to the packaging surface/i);
   assert.doesNotMatch(plan[2].request.prompt,/thin reflective metallic silver hot-stamped foil/i);
   assert.match(plan[3].request.prompt,/thin reflective metallic silver hot-stamped foil/i);
-  assert.match(plan[3].request.prompt,/soft, narrow silver-white specular highlight that transitions continuously through a dense neutral-silver midtone into graphite-gray reflected shadow/i);
+  assert.match(plan[3].request.prompt,/broad, gentle silver-white reflection that transitions smoothly into neutral silver midtones with only subpixel-thin edge shading/i);
   assert.match(plan[3].request.prompt,/Keep the silver finish opaque, crisp and legible against the package/i);
-  assert.doesNotMatch(plan[2].request.prompt,/soft, narrow silver-white specular highlight/i);
+  assert.doesNotMatch(plan[2].request.prompt,/broad, gentle silver-white reflection/i);
   assert.doesNotMatch(plan[3].request.prompt,/very thin metallic hot-stamped gold foil physically bonded/i);
 });
 
@@ -201,13 +210,13 @@ test('Flux uses its own reference order, aspect ratio and bbox JSON request form
   assert.match(request.prompt,/<logo_target_box-front>/i);
   assert.match(request.prompt,/"tgt_bbox":\[300,480,500,720\]/i);
   assert.match(request.prompt,/"from":"ref_image_1"/i);
-  assert.match(request.prompt,/"color":"#C54B78"/i);
+  assert.match(request.prompt,/"color":"#C4A052"/i);
   assert.match(request.prompt,/"surface":"free"/i);
   assert.match(request.prompt,/"rotation":-90/i);
   assert.match(request.prompt,/<ref_image_2> is the exact clean placement-and-appearance reference/i);
-  assert.match(silverRequest.prompt,/soft, narrow silver-white specular highlight that transitions continuously through a dense neutral-silver midtone into graphite-gray reflected shadow/i);
+  assert.match(silverRequest.prompt,/broad, gentle silver-white reflection that transitions smoothly into neutral silver midtones with only subpixel-thin edge shading/i);
   assert.match(silverRequest.prompt,/Keep the silver finish opaque, crisp and legible against the package/i);
-  assert.doesNotMatch(request.prompt,/soft, narrow silver-white specular highlight/i);
+  assert.doesNotMatch(request.prompt,/broad, gentle silver-white reflection/i);
   assert.doesNotMatch(request.prompt,/Image 3 is the exact placement/i);
 });
 

@@ -15,6 +15,10 @@ export function masterTargetsFromTemplate(template){
     const x=Number.isFinite(zone.defaultAnchorX)?zone.defaultAnchorX:zone.x+zone.width/2;
     const y=Number.isFinite(zone.defaultAnchorY)?zone.defaultAnchorY:zone.y+zone.height/2;
     const quad=zoneQuad(zone);
+    const area=template.automation?.areas?.find(area=>area.zoneId!=null?String(area.zoneId)===String(zone.id):area.zoneIndex===zones.indexOf(zone));
+    const carrier=template.automation?.carriers?.find(carrier=>carrier.id===area?.carrierId);
+    const faceName=`${zone.name||''} ${area?.name||''}`;
+    const carton=carrier?.type==='CARTON'||/彩盒|纸盒|carton/i.test(faceName);
     return {
       id:`master-${zone.id||index+1}`,
       x:clamp(Number(x),0,1),
@@ -23,6 +27,7 @@ export function masterTargetsFromTemplate(template){
       rotation:normalizeAngle(Number(zone.defaultRotation||0)+(zone.orientation==='vertical'?90:0)),
       curve:0,
       surface:'free',
+      ...(carton?{carrierType:/背|back/i.test(faceName)?'CARTON_BACK':'CARTON_FRONT',printFinish:'INK',preserveOriginalColor:true}:{}),
       ...(quad?{quad}:{}),
       masterZoneId:String(zone.id||index+1),
       masterLocked:true

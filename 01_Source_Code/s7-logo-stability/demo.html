@@ -14,7 +14,7 @@
         <button id="choose-product" type="button" class="button secondary product-library-button">从产品库选择</button>
         <small id="base-name" class="hint">尚未选择产品</small>
         <div id="product-library-panel" class="product-library-panel" hidden>
-          <div class="product-library-head"><strong>选择产品库标准图</strong><button id="close-product-library" type="button" class="text-button">关闭</button></div>
+          <div class="product-library-head"><strong>选择产品库标准图</strong><div><button id="close-product-library" type="button" class="text-button">关闭</button></div></div>
           <input id="product-library-search" class="product-library-search" type="search" placeholder="搜索 SKU 或产品名称">
           <div id="product-library-list" class="product-library-list" aria-live="polite">正在读取产品库…</div>
         </div>
@@ -24,7 +24,7 @@
           <input id="logo-library-search" class="product-library-search" type="search" placeholder="搜索 Logo 名称">
           <div id="logo-library-list" class="product-library-list" aria-live="polite">正在读取 Logo 库…</div>
         </div>
-        <label class="file-field">透明 Logo<input id="logo-image" type="file" accept="image/*"><span id="selected-logo-preview" class="selected-logo-preview" hidden><img id="selected-logo-thumbnail" alt="当前选中的 Logo"><small id="logo-name">尚未选择</small></span></label>
+        <div class="file-field">透明 Logo<input id="logo-image" type="file" accept="image/*" hidden><span id="selected-logo-preview" class="selected-logo-preview" hidden><img id="selected-logo-thumbnail" alt="当前选中的 Logo"><small id="logo-name">尚未选择</small></span></div>
         <button id="process-logo" type="button" class="button secondary process-button" disabled>AI 加工 Logo（透明底）</button>
         <button id="use-saved-logo" type="button" class="text-button" hidden>使用已保存 Logo</button>
         <button id="clear-saved-logo" type="button" class="text-button" hidden>清除已保存 Logo</button>
@@ -32,21 +32,24 @@
           <div class="processing-head"><strong>AI Logo 加工</strong><button id="cancel-processing" type="button" class="text-button">取消</button></div>
           <p id="ai-provider-status" class="hint">正在检查 AI 图片模型配置……</p>
           <p class="hint">AI 会重新生成完整透明底 Logo；可选择保留原色或转换为黑色。镂空区域保持透明。</p>
-          <fieldset class="logo-output-color"><legend>加工后颜色</legend><label><input type="radio" name="logo-output-color" value="original">保留原色</label><label><input type="radio" name="logo-output-color" value="black" checked>黑色</label></fieldset>
+          <fieldset class="logo-output-color"><legend>加工后颜色</legend><label><input type="radio" name="logo-output-color" value="original" checked>保留原色</label><label><input type="radio" name="logo-output-color" value="black">黑色</label></fieldset>
           <button id="apply-processing" type="button" class="button primary">调用 AI 加工</button>
           <p id="processing-status" class="hint">加工完成后再进行位置摆放。</p>
         </div>
 
-        <label class="color-field">当前选中 Logo 的 ORIGINAL 颜色<input id="original-color" type="color" value="#000000"><output id="original-color-value">#000000</output></label>
-        <label class="auto-contrast-field"><input id="auto-contrast" type="checkbox" checked> BLACK 自动黑白对比（深色表面改为白色）</label>
-        <p class="hint">点击画布中的 Logo 或目标卡片后再改色；每个目标独立保存。BLACK 为纯黑丝印；GOLD FOIL、SILVER FOIL 为固定的自然薄层烫金/烫银。</p>
+        <div class="scheme-editor-heading"><span>当前方案</span><strong id="active-scheme-title">原色方案</strong></div>
+        <div class="placement-scope"><span>摆放调整范围</span><div class="scope-buttons"><button type="button" data-scope="shared" aria-pressed="true">同步全部方案</button><button type="button" data-scope="current" aria-pressed="false">仅当前方案</button></div><button type="button" id="restore-shared" class="text-button" hidden>恢复公共摆放</button></div>
+        <label class="color-field">当前区域的印刷颜色<input id="original-color" type="color" value="#000000"><output id="original-color-value">#000000</output></label>
+        <label id="original-colors-field" class="check-line"><input id="keep-original-colors" type="checkbox">使用 Logo 原色</label>
+        <label class="auto-contrast-field"><input id="auto-contrast" type="checkbox" checked> 根据底色自动使用黑色或白色 Logo</label>
+        <select id="preview-version" hidden aria-label="当前预览方案"><option value="ORIGINAL">原色</option><option value="BLACK">黑色</option><option value="GOLD FOIL">烫金</option><option value="SILVER FOIL">烫银</option></select>
 
         <div class="section-title targets-title"><h2>2. 上样目标</h2><button id="add-target" type="button" class="button secondary">+ 添加目标</button></div>
-        <p class="hint">母版 Logo 默认锁定中心位置；点击目标卡片中的“移动位置”后才可拖动。每个对象必须有唯一 ID。点击“复制 Logo”可复制当前上样实例，再单独调整副本。</p>
         <div id="targets" class="targets"></div>
+        <button id="copy-appearance" type="button" class="button secondary">当前区域效果应用到其他方案…</button>
 
-        <label class="model-field">成图模型<select id="mockup-model" required><option value="">正在读取模型配置…</option></select><small id="mockup-model-hint">可在已配置的 APIMart 模型中选择。</small></label>
-        <fieldset id="generation-versions" class="generation-versions">
+        <label class="model-field">成图模型<select id="mockup-model" required><option value="">正在读取模型配置…</option></select></label>
+        <fieldset id="generation-versions" class="generation-versions" hidden>
           <legend>选择生成版本</legend>
           <label><input type="checkbox" value="ORIGINAL" checked> 原色</label>
           <label><input type="checkbox" value="BLACK" checked> 黑色</label>
@@ -55,21 +58,25 @@
           <small class="hint">默认全选，取消任意一项即可生成三张；至少选择一项。</small>
         </fieldset>
         <button id="generate" type="button" class="button primary">AI 生成 4 个版本</button>
+        <button id="generate-modified" type="button" class="button secondary regenerate-modified" hidden>重新生成已修改方案</button>
         <p id="status" class="status" role="status">等待上传素材。</p>
       </section>
 
       <section class="panel results-panel">
-        <div class="section-title"><h2>3. 结果预览</h2><span id="result-meta">尚未生成</span></div>
+        <div class="section-title"><h2>3. 效果方案</h2><span id="result-meta">选择方案查看和调整</span></div>
+        <div id="multi-product-tabs" class="multi-product-tabs" aria-label="批量包材"></div>
+        <div id="multi-product-output" class="multi-product-output" aria-live="polite" hidden></div>
+        <div id="results" class="results scheme-grid" aria-live="polite"></div>
         <div class="preview-section">
-          <div class="preview-title"><strong>拖动 Logo 定位</strong><span id="selected-target">未选择目标</span></div>
+          <div class="preview-title"><strong id="canvas-scheme-title">原色方案 · 编辑预览</strong><span id="selected-target">未选择目标</span></div>
           <div class="canvas-wrap"><canvas id="placement-canvas" aria-label="Logo拖动定位画布"></canvas><div id="preview-empty" class="preview-empty">上传原图后，这里会显示可拖动的 Logo</div></div>
-          <p class="hint">母版位置默认锁定；点击“移动位置”后才可拖动。蓝色方块缩放；上方圆形手柄旋转。左侧参数会同步更新。</p>
+          <p class="hint">母版位置默认锁定；点击“移动位置”后才可拖动。蓝色方块缩放；上方圆形手柄旋转。</p>
         </div>
-        <div id="empty-state" class="empty-state"><strong>所选版本会显示在这里</strong><span>ORIGINAL · BLACK · GOLD FOIL · SILVER FOIL</span></div>
-        <div id="results" class="results" aria-live="polite"></div>
+        <div id="empty-state" hidden></div>
       </section>
     </div>
   </main>
+  <dialog id="copy-scheme-dialog" class="copy-scheme-dialog"><form method="dialog"><h3>应用当前区域效果</h3><p id="copy-region-name"></p><div id="copy-scheme-options"></div><div class="dialog-actions"><button class="button secondary" value="cancel">取消</button><button class="button primary" id="confirm-copy" value="apply">应用所选方案</button></div></form></dialog>
   <div id="image-preview" class="image-preview" hidden role="dialog" aria-modal="true" aria-label="图片预览">
     <div class="image-preview-backdrop" data-close-preview></div>
     <div class="image-preview-panel">

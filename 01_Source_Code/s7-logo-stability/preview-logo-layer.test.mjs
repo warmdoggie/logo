@@ -2,6 +2,17 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {renderTintedLogoLayer} from './preview-logo-layer.mjs';
 
+test('foil preview uses a directional highlight inside the logo alpha while ink stays solid',()=>{
+  for(const finish of ['flat','gold','silver']){
+    const stops=[];let fill;
+    const gradient={addColorStop:(position,color)=>stops.push([position,color])};
+    const context={drawImage(){},fillRect(){},createLinearGradient:()=>gradient,set fillStyle(value){fill=value;}};
+    renderTintedLogoLayer({createCanvas:(width,height)=>({width,height,getContext:()=>context}),logoImage:{},width:100,height:50,color:'#C54B78',finish});
+    if(finish==='flat'){assert.equal(fill,'#C54B78');assert.equal(stops.length,0);}
+    else {assert.equal(fill,gradient);assert.ok(stops.length>=3);assert.notEqual(stops[0][1],stops[1][1]);}
+  }
+});
+
 test('Logo 改色只发生在独立图层，不清空产品预览画布',()=>{
   const calls=[];
   const layer={

@@ -1,12 +1,14 @@
 import {createHash} from 'node:crypto';
 import sharp from 'sharp';
+import {schemeTargets} from './schemes.mjs';
 import {chooseContrastColor} from './contrast-color.mjs';
+import {normalizeTargetPrint,resolveTargetPrint} from './target-print.mjs';
 
 const VARIANTS=[
-  {version:'ORIGINAL',color:null,finish:'flat'},
-  {version:'BLACK',color:{r:0,g:0,b:0},finish:'flat'},
-  {version:'GOLD FOIL',color:{r:196,g:160,b:82},finish:'gold'},
-  {version:'SILVER FOIL',color:{r:191,g:195,b:201},finish:'silver'}
+  {version:'ORIGINAL'},
+  {version:'BLACK'},
+  {version:'GOLD FOIL'},
+  {version:'SILVER FOIL'}
 ];
 
 const fail=message=>{throw new Error(message);};
@@ -37,7 +39,7 @@ function normalizeTargets(targets,width,height){
     if(quad!==null&&(!Array.isArray(quad)||quad.length!==4||quad.some(point=>!point||!Number.isFinite(point.x)||!Number.isFinite(point.y)||point.x<0||point.x>1||point.y<0||point.y>1)))fail(`目标 ${target.id} 的四点透视无效`);
     if(target.widthRatio<=0||target.widthRatio>1||target.x<0||target.x>1||target.y<0||target.y>1)fail(`目标 ${target.id} 的位置或比例无效`);
     if(target.color!==undefined&&target.color!==null)hexColor(target.color);
-    return {id:target.id,x:target.x,y:target.y,widthRatio:target.widthRatio,rotation,surface,curve,quad,color:target.color??null,autoContrast:target.autoContrast===true};
+    return {id:target.id,x:target.x,y:target.y,widthRatio:target.widthRatio,rotation,surface,curve,quad,color:target.color??null,autoContrast:target.autoContrast===true,preserveOriginalColor:target.preserveOriginalColor===true,...normalizeTargetPrint(target)};
   });
 }
 
@@ -164,7 +166,7 @@ async function applySurfaceLighting(prepared,baseRaw,imageWidth,finish,target){
   return {...prepared,input:await sharp(data,{raw:{width:info.width,height:info.height,channels:4}}).png().toBuffer()};
 }
 
-export async function renderLogoSet({baseImage,logoImage,targets,originalColor}){
+export async function renderLogoSet({baseImage,logoImage,targets,originalColor,schemes}){
   if(!baseImage||!logoImage)fail('必须提供产品/彩盒原图和透明Logo');
   const baseMeta=await sharp(baseImage).metadata();
   const logoMeta=await sharp(logoImage).metadata();
@@ -172,14 +174,15 @@ export async function renderLogoSet({baseImage,logoImage,targets,originalColor})
   if(!baseMeta.width||!baseMeta.height)fail('原图尺寸无效');
   const normalized=normalizeTargets(targets,baseMeta.width,baseMeta.height);
   const selectedOriginalColor=hexColor(originalColor);
-  const layout={width:baseMeta.width,height:baseMeta.height,targets:normalized};
+  const layout={width:baseMeta.width,height:baseMeta.height,targets:normalized,...(schemes?{schemes}:{})};
   const layoutFingerprint=fingerprint(layout);
   const outputs=[];
   const maskLayers=[];
   for(const variant of VARIANTS){
-    const layers=[];
+    const layers=[],foilLayers=[],goldLayers=[];
     const bounds=[];
-    for(const target of normalized){
+    const variantTargets=normalizeTargets(schemeTargets({targets,schemes},variant.version),baseMeta.width,baseMeta.height);
+    for(const target of variantTargets){
       const autoColor=target.autoContrast?chooseContrastColor({
         data:baseRaw.data,width:baseRaw.info.width,height:baseRaw.info.height,
         left:target.x*baseMeta.width-target.widthRatio*baseMeta.width/2,
@@ -187,15 +190,19 @@ export async function renderLogoSet({baseImage,logoImage,targets,originalColor})
         boxWidth:target.widthRatio*baseMeta.width,
         boxHeight:target.widthRatio*baseMeta.width*logoMeta.height/logoMeta.width
       }):null;
-      const targetColor=variant.version==='ORIGINAL'?hexColor(target.color)||selectedOriginalColor:variant.version==='BLACK'&&target.autoContrast?hexColor(autoColor):variant.color;
-      const variantLogo=await recolorLogo(logoImage,targetColor,variant.finish);
-      const prepared=await applySurfaceLighting(await prepareLogo(variantLogo,target,baseMeta.width,baseMeta.height),baseRaw.data,baseMeta.width,variant.finish,target);
+      const print=resolveTargetPrint(target,variant.version,originalColor,autoColor);
+      const targetColor=hexColor(print.color)||(print.version==='ORIGINAL'&&!target.preserveOriginalColor?selectedOriginalColor:null);
+      const variantLogo=await recolorLogo(logoImage,targetColor,print.finish);
+      const prepared=await applySurfaceLighting(await prepareLogo(variantLogo,target,baseMeta.width,baseMeta.height),baseRaw.data,baseMeta.width,print.finish,target);
       layers.push({input:prepared.input,left:prepared.bounds.left,top:prepared.bounds.top});
-      if(variant.version==='ORIGINAL')maskLayers.push({input:prepared.input,left:prepared.bounds.left,top:prepared.bounds.top});
+      if(print.finish!=='flat')foilLayers.push(layers.at(-1));
+      if(print.finish==='gold')goldLayers.push(layers.at(-1));
+      maskLayers.push(layers.at(-1));
       bounds.push(prepared.bounds);
     }
     const bytes=await sharp(baseImage).ensureAlpha().composite(layers).png().toBuffer();
-    outputs.push({version:variant.version,layoutFingerprint,bounds,bytes});
+    const makeMask=async entries=>sharp({create:{width:baseMeta.width,height:baseMeta.height,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite(entries).extractChannel(3).png().toBuffer();
+    outputs.push({version:variant.version,layoutFingerprint,bounds,bytes,mask:await makeMask(layers),foilMask:await makeMask(foilLayers),goldMask:await makeMask(goldLayers)});
   }
   const mask=await sharp({create:{width:baseMeta.width,height:baseMeta.height,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite(maskLayers).extractChannel(3).png().toBuffer();
   return {width:baseMeta.width,height:baseMeta.height,targetIds:normalized.map(t=>t.id),layoutFingerprint,mask,outputs};

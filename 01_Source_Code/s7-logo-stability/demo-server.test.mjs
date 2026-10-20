@@ -45,7 +45,7 @@ test('S7 内嵌任务页隐藏重复说明并压缩顶部留白',async()=>{
     assert.match(app,/classList\.toggle\('s7-module'/);
     const styles=await readFile(new URL('../public/style.css',import.meta.url),'utf8');
     assert.match(styles,/\.s7-module \.topbar\{display:none\}/);
-    assert.match(styles,/\.s7-module main\{padding-top:8px\}/);
+    assert.match(styles,/\.s7-module main\{max-width:none;margin:0;padding:0\}/);
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
 
@@ -58,8 +58,8 @@ test('素材区只从商品库选择产品，并提供 Logo 库选择入口',asy
     assert.match(html,/id="choose-logo-library"[^>]*>从 Logo 库选择/);
     assert.match(html,/id="logo-image"/);
     assert.match(html,/id="selected-logo-thumbnail"/);
-    assert.match(html,/name="logo-output-color" value="original"/);
-    assert.match(html,/name="logo-output-color" value="black" checked/);
+    assert.match(html,/name="logo-output-color" value="original" checked/);
+    assert.match(html,/name="logo-output-color" value="black"/);
     const script=await(await fetch(base+'/demo.js')).text();
     assert.match(script,/logoLibraryPath=value=>S7_BASE\?new URL\(value,location\.origin\)\.href:s7Path\(value\)/);
   }finally{await new Promise(resolve=>server.close(resolve));}
@@ -226,36 +226,6 @@ test('展示界面将人工定位参考交给AI生成最终四个版本',async()
     assert.match(source,/background:true/);
     assert.match(source,/mockupModel\.value/);
     assert.match(await (await fetch(base+'/')).text(),/id="mockup-model"/);
-  }finally{await new Promise(resolve=>server.close(resolve));}
-});
-
-test('上样目标可明确选择彩盒平面或圆管曲面',async()=>{
-  const {server,base}=await openServer();
-  try{
-    const script=await fetch(base+'/demo.js');
-    const source=await script.text();
-    assert.match(source,/data-key="surface"/);
-    assert.match(source,/value="cylinder"/);
-  }finally{await new Promise(resolve=>server.close(resolve));}
-});
-
-test('上样目标默认使用自由光泽参考，不强制指定材质类别',async()=>{
-  const {server,base}=await openServer();
-  try{
-    const script=await fetch(base+'/demo.js');
-    const source=await script.text();
-    assert.match(source,/value="free"/);
-    assert.match(source,/自由光泽/);
-  }finally{await new Promise(resolve=>server.close(resolve));}
-});
-
-test('平面上样目标提供四点透视编辑入口',async()=>{
-  const {server,base}=await openServer();
-  try{
-    const script=await fetch(base+'/demo.js');
-    const source=await script.text();
-    assert.match(source,/quad-target/);
-    assert.match(source,/quadFromTarget/);
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
 

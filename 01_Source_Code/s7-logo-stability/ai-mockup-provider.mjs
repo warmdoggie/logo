@@ -1,5 +1,7 @@
 import {existsSync,readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
+import {setTimeout as delay} from 'node:timers/promises';
 import sharp from 'sharp';
 import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
 import {createApimartTransport} from './apimart-transport.mjs';
@@ -8,6 +10,14 @@ import {lockOutsideLogo} from './mockup-lock.mjs';
 const ROOT=new URL('.',import.meta.url);
 const DEFAULT_CONFIG=fileURLToPath(new URL('../data/ai-provider.local.json',ROOT));
 const SUPPORTED_MOCKUP_MODELS=['gpt-image-2','gpt-image-2.5-flare','flux-3-image'];
+let imageDownloadTail=Promise.resolve();
+
+function queueImageDownload(url,{transport,timeoutMs}){
+  const run=()=>download(url,{transport,signal:AbortSignal.timeout(timeoutMs)});
+  const next=imageDownloadTail.then(run,run);
+  imageDownloadTail=next.then(()=>undefined,()=>undefined);
+  return next;
+}
 
 function configAt(configPath){
   if(!existsSync(configPath))return null;
@@ -45,41 +55,87 @@ async function download(urlValue,{transport,signal}){
   return bytes;
 }
 
-async function preserveFluxOutsideMask(plan,generatedImage){
-  if(plan.request.model!=='flux-3-image'||!plan.maskImage||!plan.placementGuide)return generatedImage;
+async function preservePrintSurface(plan,generatedImage){
+  if(!plan.maskImage||!plan.placementGuide)return generatedImage;
   const imageBytes=value=>Buffer.from(value.slice(value.indexOf(',')+1),'base64');
-  return lockOutsideLogo({baseImage:imageBytes(plan.baseImage),generatedImage,guideImage:imageBytes(plan.placementGuide),maskImage:imageBytes(plan.maskImage),feather:0,useGeneratedLighting:plan.version==='GOLD FOIL'||plan.version==='SILVER FOIL',foilFinish:plan.version==='GOLD FOIL'?'gold':undefined});
+  return lockOutsideLogo({baseImage:imageBytes(plan.baseImage),generatedImage,guideImage:imageBytes(plan.placementGuide),maskImage:imageBytes(plan.maskImage),foilMaskImage:plan.foilMaskImage?imageBytes(plan.foilMaskImage):undefined,goldMaskImage:plan.goldMaskImage?imageBytes(plan.goldMaskImage):undefined,surfaceResponse:!!plan.foilMaskImage,feather:0,useGeneratedLighting:!!plan.foilMaskImage||plan.version==='GOLD FOIL'||plan.version==='SILVER FOIL',foilFinish:plan.goldMaskImage||plan.version==='GOLD FOIL'?'gold':undefined});
 }
 
-async function renderOne(config,plan,{transport,pollIntervalMs,onStage}){
+async function hasMaskPixels(dataUrl){
+  if(!dataUrl)return false;
+  const bytes=Buffer.from(dataUrl.slice(dataUrl.indexOf(',')+1),'base64');
+  const pixels=await sharp(bytes).greyscale().raw().toBuffer();
+  return pixels.some(value=>value>0);
+}
+
+async function renderSilverLocally(plan,{onStage}){
+  if(plan.version!=='SILVER FOIL'||!plan.foilMaskImage||await hasMaskPixels(plan.goldMaskImage))return null;
+  try{await onStage?.(plan.version,'generating');}catch{}
+  const imageBytes=value=>Buffer.from(value.slice(value.indexOf(',')+1),'base64');
+  const bytes=await preservePrintSurface(plan,imageBytes(plan.baseImage));
+  try{await onStage?.(plan.version,'saving');}catch{}
+  return {version:plan.version,bytes};
+}
+
+async function renderOne(config,plan,{transport,pollIntervalMs,onStage,onCheckpoint,resumeTasks}){
   const stage=async(value,error)=>{try{await onStage?.(plan.version,value,error);}catch{}};
   const signal=AbortSignal.timeout(config.timeoutMs);
+  const requestHash=createHash('sha256').update(JSON.stringify([config.endpoint,config.apiKey,plan])).digest('hex');
+  let remote=resumeTasks?.[plan.version]?.requestHash===requestHash?{...resumeTasks[plan.version]}:{requestHash};
+  const checkpoint=async patch=>{remote={...remote,...patch};await onCheckpoint?.(plan.version,remote);};
   const request=async(path,options={})=>{
     const response=await transport(config.endpoint+path,{...options,redirect:'error',signal,headers:{Authorization:`Bearer ${config.apiKey}`,'Content-Type':'application/json','Accept-Encoding':'identity',...(options.headers||{})}});
     let payload;
-    try{payload=await response.json();}catch{throw Error('APIMart 返回了无法解析的 JSON 响应');}
-    if(!response.ok)throw Error(`APIMart 成图请求失败：${errorFrom(payload,`HTTP ${response.status}`)}`);
+    try{payload=await response.json();}catch{
+      if(!response.ok)throw Object.assign(Error(`APIMart 成图请求失败：HTTP ${response.status}`),{status:response.status});
+      throw Error('APIMart 返回了无法解析的 JSON 响应');
+    }
+    if(!response.ok)throw Object.assign(Error(`APIMart 成图请求失败：${errorFrom(payload,`HTTP ${response.status}`)}`),{status:response.status});
     return payload;
   };
-  await stage('submitting');
-  const submitted=await request('/v1/images/generations',{method:'POST',body:JSON.stringify(plan.request)});
-  const first=submitted.data?.[0]||submitted.data;
-  await stage('generating');
-  if(typeof first?.url==='string'){await stage('saving');const generated=await download(first.url,{transport,signal});return {version:plan.version,bytes:await preserveFluxOutsideMask(plan,generated)};}
-  const taskId=first?.task_id||first?.id;
-  if(typeof taskId!=='string')throw Error('APIMart 未返回成图任务编号');
-  for(;;){
-    if(pollIntervalMs>0)await new Promise(resolve=>setTimeout(resolve,pollIntervalMs));
-    const status=await request(`/v1/tasks/${encodeURIComponent(taskId)}?language=zh`);
-    const task=status.data;
-    if(task?.status==='completed'){
-      const value=task.result?.images?.[0]?.url;
-      await stage('saving');
-      const generated=await download(Array.isArray(value)?value[0]:value,{transport,signal});
-      return {version:plan.version,bytes:await preserveFluxOutsideMask(plan,generated)};
+  if(!remote.taskId&&!remote.imageUrl){
+    await stage('submitting');
+    const submitted=await request('/v1/images/generations',{method:'POST',body:JSON.stringify(plan.request)});
+    const first=submitted.data?.[0]||submitted.data;
+    if(typeof first?.url==='string')await checkpoint({imageUrl:first.url});
+    else{
+      const taskId=first?.task_id||first?.id;
+      if(typeof taskId!=='string')throw Error('APIMart 未返回成图任务编号');
+      await checkpoint({taskId});
     }
-    if(['failed','cancelled'].includes(task?.status))throw Error(`APIMart ${plan.version} 成图失败：${errorFrom(task,task.status)}`);
   }
+  await stage('generating');
+  try{
+    while(!remote.imageUrl){
+      signal.throwIfAborted();
+      if(pollIntervalMs>0)await delay(pollIntervalMs,undefined,{signal});
+      let status;
+      try{status=await request(`/v1/tasks/${encodeURIComponent(remote.taskId)}?language=zh`);}
+      catch(error){
+        if(!signal.aborted&&(error.code==='APIMART_NETWORK_ERROR'||[408,429,500,502,503,504].includes(error.status))){
+          await checkpoint({lastError:error.diagnostic||{status:error.status,message:error.message}});
+          continue;
+        }
+        throw error;
+      }
+      const task=status.data;
+      if(task?.status==='completed'){
+        const value=task.result?.images?.[0]?.url,imageUrl=Array.isArray(value)?value[0]:value;
+        if(typeof imageUrl!=='string')throw Error('APIMart 未返回成图地址');
+        await checkpoint({imageUrl});
+      }
+      if(['failed','cancelled'].includes(task?.status)){
+        await onCheckpoint?.(plan.version,null);
+        throw Error(`APIMart ${plan.version} 成图失败：${errorFrom(task,task.status)}`);
+      }
+    }
+  }catch(error){
+    if(signal.aborted)throw Object.assign(new Error('APIMart 查询等待超时，上游任务已保留，可继续获取结果',{cause:error}),{code:'APIMART_PENDING',diagnostic:remote.lastError});
+    throw error;
+  }
+  await stage('saving');
+  const generated=await queueImageDownload(remote.imageUrl,{transport,timeoutMs:config.timeoutMs});
+  return {version:plan.version,bytes:await preservePrintSurface(plan,generated)};
 }
 
 export function createAiMockupRenderer({configPath=process.env.S7_AI_CONFIG||DEFAULT_CONFIG,transport=fetch,pollIntervalMs=3000}={}){
@@ -91,7 +147,8 @@ export function createAiMockupRenderer({configPath=process.env.S7_AI_CONFIG||DEF
     const onStage=input.onStage,onOutput=input.onOutput;
     const settled=await Promise.allSettled(plan.map(async item=>{
       try{
-        const output=await renderOne(config,item,{transport:requestTransport,pollIntervalMs,onStage});
+        const localOutput=await renderSilverLocally(item,{onStage});
+        const output=localOutput||await renderOne(config,item,{transport:requestTransport,pollIntervalMs,onStage,onCheckpoint:input.onCheckpoint,resumeTasks:input.resumeTasks});
         await onOutput?.(output);
         return output;
       }catch(error){try{await onStage?.(item.version,'failed',error);}catch{}throw error;}

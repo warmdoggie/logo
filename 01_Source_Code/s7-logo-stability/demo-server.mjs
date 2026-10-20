@@ -1,4 +1,4 @@
-import {selectGenerationVersions} from './generation-versions.mjs';
+import {generationVersions,selectGenerationVersions} from './generation-versions.mjs';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {dirname,join,resolve} from 'node:path';
@@ -12,11 +12,13 @@ import {pickAspectRatio} from './ai-mockup-generation.mjs';
 import {createAiMockupRenderer,getAiMockupProviderStatus} from './ai-mockup-provider.mjs';
 import {authenticateWorkspace,userSpace} from './user-space.mjs';
 import {createGenerationJobs} from './generation-jobs.mjs';
+import {createSchemes} from './schemes.mjs';
+import {masterTargetsFromTemplate} from './product-master.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const MAX_BODY=50*1024*1024;
 const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
-const PUBLIC_FILES=new Set(['tasks.html','tasks.js','tasks.css','task-draft.mjs','generation-client.mjs','generation-versions.mjs','demo.html','demo.js','demo.css','demo-geometry.mjs','target-state.mjs','preview-logo-layer.mjs','contrast-color.mjs','saved-logo.mjs','product-master.mjs','transparent-logo-download.mjs','rotation-handle.mjs']);
+const PUBLIC_FILES=new Set(['tasks.html','tasks.js','tasks.css','task-draft.mjs','generation-client.mjs','generation-versions.mjs','demo.html','demo.js','demo.css','demo-geometry.mjs','target-state.mjs','target-print.mjs','schemes.mjs','preview-logo-layer.mjs','contrast-color.mjs','saved-logo.mjs','product-master.mjs','transparent-logo-download.mjs','rotation-handle.mjs']);
 const PRODUCT_LIBRARY_URL=process.env.S7_PRODUCT_LIBRARY_URL||'http://127.0.0.1:3210/api/products?includeInactive=0';
 
 function json(res,status,payload){
@@ -24,6 +26,8 @@ function json(res,status,payload){
   res.writeHead(status,{'content-type':'application/json; charset=utf-8','content-length':Buffer.byteLength(body)});
   res.end(body);
 }
+
+function event(res,name,payload){if(!res.destroyed&&!res.writableEnded)res.write(`event: ${name}\ndata: ${JSON.stringify(payload)}\n\n`);}
 
 async function body(req){
   const chunks=[];let size=0;
@@ -177,6 +181,51 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
         json(res,200,{width:output.width,height:output.height,provider:processed?.provider||null,model:processed?.model||null,targetColor,logoLibrary,logoLibraryError,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`});
         return;
       }
+      if(req.method==='POST'&&url.pathname==='/api/ai-render-multi'){
+        const input=await body(req),productIds=input.productIds;
+        if(!Array.isArray(productIds)||productIds.length<2||productIds.some(id=>typeof id!=='string')||new Set(productIds).size!==productIds.length)throw Object.assign(Error('请选择至少两个且不重复的产品包材'),{status:400});
+        const layouts=input.productLayouts??[];
+        if(!Array.isArray(layouts)||layouts.some(layout=>!layout||!productIds.includes(layout.productId))||new Set(layouts.map(layout=>layout.productId)).size!==layouts.length)throw Object.assign(Error('产品方案与所选包材不匹配'),{status:400});
+        const layoutByProduct=new Map(layouts.map(layout=>[layout.productId,layout]));
+        const logoImage=Buffer.from(input.logoImage||'','base64');
+        if(!logoImage.length)throw Object.assign(Error('请先选择 Logo'),{status:400});
+        const logoMeta=await sharp(logoImage).metadata();if(!logoMeta.width||!logoMeta.height)throw Object.assign(Error('Logo 图片无法读取'),{status:400});
+        if(user&&input.taskId)await spaces.task(user,input.taskId);
+        const catalog=await productCatalog(req),products=productIds.map(id=>catalog.find(product=>String(product?.id)===id));
+        if(products.some(product=>!product||product.status==='INACTIVE'))throw Object.assign(Error('所选产品中有已删除或停用的包材，请刷新产品库'),{status:400});
+        const model=input.model,originalColor=input.originalColor||'#000000';
+        res.writeHead(200,{'content-type':'text/event-stream; charset=utf-8','cache-control':'no-cache, no-transform','connection':'keep-alive','x-accel-buffering':'no'});res.flushHeaders?.();
+        event(res,'started',{total:products.length});
+        let completed=0,failed=0;
+        for(const product of products){
+          const productInfo={id:String(product.id),sku:String(product.sku||''),name:String(product.name||'')};
+          event(res,'product-start',{product:productInfo});
+          try{
+            await ensureUser();
+            const edited=layoutByProduct.get(productInfo.id);
+            const templatePayload=edited?null:await productTemplate(product,req),targets=edited?edited.targets:masterTargetsFromTemplate(templatePayload?.template);
+            if(!Array.isArray(targets)||!targets.length)throw Error(`${productInfo.sku} 尚无有效的产品 Logo 区域`);
+            const source=await productImage(product,req),basePng=await sharp(source.bytes).png().toBuffer(),schemes=edited?edited.schemes:createSchemes(targets).schemes;
+            if(!Array.isArray(schemes))throw Error(`${productInfo.sku} 的效果方案无效`);
+            const guideSet=await renderLogoSet({baseImage:basePng,logoImage,targets,schemes,originalColor});
+            const failures=[];
+            const outputs=await mockupRenderer({
+              baseImage:`data:image/png;base64,${basePng.toString('base64')}`,logoImage:`data:image/png;base64,${logoImage.toString('base64')}`,
+              finishReferenceImage:input.finishReferenceImage?`data:image/png;base64,${input.finishReferenceImage}`:undefined,
+              maskImage:`data:image/png;base64,${guideSet.mask.toString('base64')}`,model,
+              guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`,maskDataUrl:`data:image/png;base64,${output.mask.toString('base64')}`,foilMaskDataUrl:`data:image/png;base64,${output.foilMask.toString('base64')}`,goldMaskDataUrl:`data:image/png;base64,${output.goldMask.toString('base64')}`})),
+              targets,schemes,selectedVersions:generationVersions,originalColor,
+              logoAspectRatio:logoMeta.height/logoMeta.width,size:pickAspectRatio(guideSet.width,guideSet.height),
+              onStage:async(version,stage,error)=>{if(stage==='failed')failures.push({version,error:error?.message||'生成失败'});event(res,'stage',{product:productInfo,version,stage,error:error?.message});}
+            });
+            if(!outputs.length)throw Error(failures.map(item=>`${item.version}：${item.error}`).join('；')||'四种印刷效果均未生成成功');
+            const complete=generationVersions.every(version=>outputs.some(output=>output.version===version)),images=outputs.map(output=>({label:`${productInfo.sku} · ${output.version}`,bytes:output.bytes}));
+            await ensureUser();const savedRecord=user?await spaces.save(user,{taskId:input.taskId,kind:'多包材印刷效果',model,images}):null;
+            if(complete)completed++;else failed++;const savedImages=savedRecord?.images.map(image=>({label:image.label,url:image.url}))||images.map(image=>({label:image.label,dataUrl:`data:image/png;base64,${image.bytes.toString('base64')}`}));event(res,'product-done',{product:productInfo,outputs:outputs.map(output=>output.version),images:savedImages,complete,failures});
+          }catch(error){failed++;event(res,'product-error',{product:productInfo,error:error.message||'生成失败'});}
+        }
+        event(res,'done',{completed,failed,total:products.length});if(!res.writableEnded)res.end();return;
+      }
       if(req.method==='POST'&&url.pathname==='/api/process-logo'){
         const input=await body(req);
         if(user&&input.taskId)await spaces.task(user,input.taskId);
@@ -195,14 +244,14 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
         const logoImage=Buffer.from(input.logoImage||'','base64');
         const basePng=await sharp(baseImage).png().toBuffer();
         const logoMeta=await sharp(logoImage).metadata();
-        const guideSet=await renderLogoSet({baseImage:basePng,logoImage,targets:input.targets,originalColor:input.originalColor});
+        const guideSet=await renderLogoSet({baseImage:basePng,logoImage,targets:input.targets,schemes:input.schemes,originalColor:input.originalColor});
         if(input.background===true){
           if(!user||!input.taskId)throw Object.assign(Error('后台生成需要登录并选择任务'),{status:400});
-          const record=await jobs.start(user,input.taskId,{model:input.model,onlyVersion:input.onlyVersion,selectedVersions,width:guideSet.width,height:guideSet.height,targetIds:guideSet.targetIds,layoutFingerprint:guideSet.layoutFingerprint},callbacks=>mockupRenderer({
+          const record=await jobs.start(user,input.taskId,{model:input.model,onlyVersion:input.onlyVersion,selectedVersions,schemeSignatures:input.schemeSignatures,preserveResults:input.preserveResults===true,width:guideSet.width,height:guideSet.height,targetIds:guideSet.targetIds,layoutFingerprint:guideSet.layoutFingerprint},callbacks=>mockupRenderer({
             baseImage:`data:image/png;base64,${basePng.toString('base64')}`,logoImage:`data:image/png;base64,${logoImage.toString('base64')}`,
             maskImage:`data:image/png;base64,${guideSet.mask.toString('base64')}`,model:input.model,
-            guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`})),
-            targets:input.targets,onlyVersion:input.onlyVersion,selectedVersions,originalColor:input.originalColor||'#000000',
+            guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`,maskDataUrl:`data:image/png;base64,${output.mask.toString('base64')}`,foilMaskDataUrl:`data:image/png;base64,${output.foilMask.toString('base64')}`,goldMaskDataUrl:`data:image/png;base64,${output.goldMask.toString('base64')}`})),
+            targets:input.targets,schemes:input.schemes,onlyVersion:input.onlyVersion,selectedVersions,originalColor:input.originalColor||'#000000',
             logoAspectRatio:logoMeta.width&&logoMeta.height?logoMeta.height/logoMeta.width:1,size:pickAspectRatio(guideSet.width,guideSet.height),...callbacks
           }));
           json(res,202,record);return;
@@ -221,8 +270,8 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
               logoImage:`data:image/png;base64,${logoImage.toString('base64')}`,
               finishReferenceImage:input.finishReferenceImage?`data:image/png;base64,${input.finishReferenceImage}`:undefined,
               maskImage:`data:image/png;base64,${guideSet.mask.toString('base64')}`,
-              model:input.model,guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`})),
-              targets:input.targets,onlyVersion:input.onlyVersion,selectedVersions,originalColor:input.originalColor||'#000000',
+              model:input.model,guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`,maskDataUrl:`data:image/png;base64,${output.mask.toString('base64')}`,foilMaskDataUrl:`data:image/png;base64,${output.foilMask.toString('base64')}`,goldMaskDataUrl:`data:image/png;base64,${output.goldMask.toString('base64')}`})),
+              targets:input.targets,schemes:input.schemes,onlyVersion:input.onlyVersion,selectedVersions,originalColor:input.originalColor||'#000000',
               logoAspectRatio:logoMeta.width&&logoMeta.height?logoMeta.height/logoMeta.width:1,size:pickAspectRatio(guideSet.width,guideSet.height),
               onStage:async(version,stage,error)=>send('stage',{version,stage,error:error?.message}),
               onOutput:async output=>{
@@ -248,8 +297,8 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
           finishReferenceImage:input.finishReferenceImage?`data:image/png;base64,${input.finishReferenceImage}`:undefined,
           maskImage:`data:image/png;base64,${guideSet.mask.toString('base64')}`,
           model:input.model,
-          guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`})),
-          targets:input.targets,
+          guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`,maskDataUrl:`data:image/png;base64,${output.mask.toString('base64')}`,foilMaskDataUrl:`data:image/png;base64,${output.foilMask.toString('base64')}`,goldMaskDataUrl:`data:image/png;base64,${output.goldMask.toString('base64')}`})),
+          targets:input.targets,schemes:input.schemes,
           onlyVersion:input.onlyVersion,selectedVersions,
           originalColor:input.originalColor||'#000000',
           logoAspectRatio:logoMeta.width&&logoMeta.height?logoMeta.height/logoMeta.width:1,
@@ -268,7 +317,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
       const result=await renderLogoSet({
         baseImage:Buffer.from(input.baseImage||'', 'base64'),
         logoImage:Buffer.from(input.logoImage||'', 'base64'),
-        targets:input.targets
+        targets:input.targets,schemes:input.schemes
       });
       await ensureUser();
         if(user)await spaces.save(user,{taskId:input.taskId,kind:'二维上样',images:result.outputs.map(output=>({label:output.version,bytes:output.bytes}))});

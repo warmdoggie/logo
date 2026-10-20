@@ -5,6 +5,56 @@ import {join} from 'node:path';
 import {test} from 'node:test';
 import sharp from 'sharp';
 import {createAiMockupRenderer} from './ai-mockup-provider.mjs';
+import {renderLogoSet} from './index.mjs';
+
+test('GPT and Flux preserve thin silver and surface-aware black ink in the same image',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'s7-print-surface-'));
+  try{
+    const configPath=join(dir,'ai-provider.json'),dataUrl=bytes=>`data:image/png;base64,${bytes.toString('base64')}`;
+    const base=await sharp({create:{width:64,height:32,channels:4,background:'#c9aaa0'}}).png().toBuffer();
+    const logo=await sharp(Buffer.from('<svg width="24" height="12"><path fill="black" fill-rule="evenodd" d="M0 0H24V12H0Z M7 3V9H17V3Z"/></svg>')).png().toBuffer();
+    const targets=[{id:'body',x:.25,y:.5,widthRatio:.35,printFinish:'VERSION'},{id:'carton',x:.75,y:.5,widthRatio:.35,carrierType:'CARTON_FRONT',printFinish:'INK',color:'#000000'}];
+    const set=await renderLogoSet({baseImage:base,logoImage:logo,targets,originalColor:'#000000'});
+    const guide=set.outputs.find(o=>o.version==='SILVER FOIL');
+    const generated=await sharp({create:{width:64,height:32,channels:4,background:'#ffffff'}}).png().toBuffer();
+    let expected;
+    for(const model of ['flux-3-image','gpt-image-2.5-flare']){
+      await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',model,endpoint:'https://api.apimart.ai',apiKey:'test-key'}));
+      const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async url=>String(url).endsWith('/v1/images/generations')?Response.json({data:[{url:'https://getapib.org/f/surface.png'}]}):new Response(generated)});
+      const [result]=await renderer({model,originalColor:'#000000',onlyVersion:'SILVER FOIL',baseImage:dataUrl(base),logoImage:dataUrl(logo),targets,guides:[{version:'SILVER FOIL',dataUrl:dataUrl(guide.bytes),maskDataUrl:dataUrl(guide.mask),foilMaskDataUrl:dataUrl(guide.foilMask),goldMaskDataUrl:dataUrl(guide.goldMask)}]});
+      const output=await sharp(result.bytes).ensureAlpha().raw().toBuffer(),original=await sharp(base).ensureAlpha().raw().toBuffer();
+      const mask=await sharp(guide.mask).greyscale().raw().toBuffer(),foil=await sharp(guide.foilMask).greyscale().raw().toBuffer();
+      let inkCount=0,silverCount=0;
+      for(let i=0;i<mask.length;i++){
+        if(mask[i]===0)assert.deepEqual(output.subarray(i*4,i*4+4),original.subarray(i*4,i*4+4));
+        if(mask[i]!==255)continue;
+        if(foil[i]){silverCount++;assert.ok(output[i*4]>120&&output[i*4]<255);}
+        else{inkCount++;assert.ok(output[i*4]>0&&output[i*4]<=22);}
+      }
+      assert.ok(inkCount>0&&silverCount>0);
+      if(expected)assert.deepEqual(output,expected);else expected=output;
+    }
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
+test('silver without a gold target renders locally and skips the moderated provider request',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'s7-local-silver-'));
+  try{
+    const configPath=join(dir,'ai-provider.json');
+    await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',model:'flux-3-image',endpoint:'https://api.apimart.ai',apiKey:'test-key'}));
+    const base=await sharp({create:{width:48,height:32,channels:4,background:'#c9aaa0'}}).png().toBuffer();
+    const logo=await sharp(Buffer.from('<svg width="20" height="8"><text x="0" y="7" font-size="8">LOGO</text></svg>')).png().toBuffer();
+    const targets=[{id:'body',x:.5,y:.5,widthRatio:.4,printFinish:'VERSION'}];
+    const set=await renderLogoSet({baseImage:base,logoImage:logo,targets,originalColor:'#000000'});
+    const silver=set.outputs.find(item=>item.version==='SILVER FOIL');
+    let calls=0;const stages=[];
+    const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async()=>{calls++;throw Error('silver must not be sent to APIMart');}});
+    const [result]=await renderer({model:'flux-3-image',onlyVersion:'SILVER FOIL',baseImage:`data:image/png;base64,${base.toString('base64')}`,logoImage:`data:image/png;base64,${logo.toString('base64')}`,targets,originalColor:'#000000',guides:[{version:'SILVER FOIL',dataUrl:`data:image/png;base64,${silver.bytes.toString('base64')}`,maskDataUrl:`data:image/png;base64,${silver.mask.toString('base64')}`,foilMaskDataUrl:`data:image/png;base64,${silver.foilMask.toString('base64')}`,goldMaskDataUrl:`data:image/png;base64,${silver.goldMask.toString('base64')}`}],onStage:(_version,stage)=>stages.push(stage)});
+    assert.equal(calls,0);
+    assert.ok(!result.bytes.equals(base));
+    assert.deepEqual(stages,['generating','saving']);
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
 
 test('Flux 生成后通过 mask 锁定 Logo 区域，框选外恢复原图',async()=>{
   const dir=await mkdtemp(join(tmpdir(),'s7-flux-mask-lock-'));

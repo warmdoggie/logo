@@ -144,12 +144,14 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
   if(users&&path.startsWith('/api/auth/')){
    const input=async()=>{try{return await(await body(req)).json();}catch{bad('请求格式不正确');}};
    if(path==='/api/auth/login'&&req.method==='POST')return json(users.login(req,res,await input()));
+   if(path==='/api/auth/register'&&req.method==='POST')return json(users.register(req,await input()),201);
    if(path==='/api/auth/logout'&&req.method==='POST')return json(users.logout(req,res));
    workspaceUser=users.requireUser(req);
    if(path==='/api/auth/session'&&req.method==='GET')return json(workspaceUser);
    users.requireAdmin(workspaceUser);
    if(path==='/api/auth/users'&&req.method==='GET')return json(users.users());
    if(path==='/api/auth/users'&&req.method==='POST'){const v=await input();return json(users.createUser(v.username,v.password),201);}
+   if(/^\/api\/auth\/users\/[^/]+\/review$/.test(path)&&req.method==='POST')return json(users.reviewUser(workspaceUser,path.split('/')[4],(await input()).decision));
    if(/^\/api\/auth\/users\/[^/]+$/.test(path)&&req.method==='POST')return json(users.updateUser(workspaceUser,path.split('/')[4],await input()));
    bad('账号接口不存在',404);
   }
