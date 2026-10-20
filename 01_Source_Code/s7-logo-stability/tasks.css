@@ -2,3 +2,4 @@
 .task-row{display:grid;grid-template-columns:minmax(0,1fr)auto;gap:6px;align-items:stretch}
 .task-sidebar .task-delete{padding:8px;background:#fff1f0;border:1px solid #ffd6d2;color:#b42318;font-size:12px}
 .task-sidebar .task-delete:disabled{cursor:not-allowed;opacity:.55}
+.task-sidebar #new-multi-logo-task{display:block;width:100%;margin-top:10px;background:#edf0ff;color:#5268c9}

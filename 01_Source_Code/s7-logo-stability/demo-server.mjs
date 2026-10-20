@@ -14,12 +14,14 @@ import {authenticateWorkspace,userSpace} from './user-space.mjs';
 import {createGenerationJobs} from './generation-jobs.mjs';
 import {createSchemes} from './schemes.mjs';
 import {masterTargetsFromTemplate} from './product-master.mjs';
+import {createMultiLogoJobs} from './multi-logo-render.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const MAX_BODY=50*1024*1024;
 const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
 const PUBLIC_FILES=new Set(['tasks.html','tasks.js','tasks.css','task-draft.mjs','generation-client.mjs','generation-versions.mjs','demo.html','demo.js','demo.css','demo-geometry.mjs','target-state.mjs','target-print.mjs','schemes.mjs','preview-logo-layer.mjs','contrast-color.mjs','saved-logo.mjs','product-master.mjs','transparent-logo-download.mjs','rotation-handle.mjs']);
 const PRODUCT_LIBRARY_URL=process.env.S7_PRODUCT_LIBRARY_URL||'http://127.0.0.1:3210/api/products?includeInactive=0';
+for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css'])PUBLIC_FILES.add(file);
 
 function json(res,status,payload){
   const body=JSON.stringify(payload);
@@ -104,9 +106,11 @@ async function productImage(product,req){
   return {bytes:Buffer.from(await response.arrayBuffer()),contentType:response.headers.get('content-type')||'application/octet-stream'};
 }
 
-export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus(),aiMockupStatus=()=>getAiMockupProviderStatus(),mockupRenderer=createAiMockupRenderer(),productCatalog=loadProductCatalog,productTemplate=loadProductTemplate,logoCatalog=loadWorkspaceLogoLibrary,logoImage=loadWorkspaceLogoImage,saveLogoToLibrary=saveWorkspaceLogo,authenticate=process.env.APP_MULTI_USER==='1'?authenticateWorkspace:null,spaceDir=process.env.S7_SPACE_DIR||join(ROOT,'..','data','user-spaces')}={}){
+export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus(),aiMockupStatus=()=>getAiMockupProviderStatus(),mockupRenderer=createAiMockupRenderer(),productCatalog=loadProductCatalog,productTemplate=loadProductTemplate,logoCatalog=loadWorkspaceLogoLibrary,logoImage=loadWorkspaceLogoImage,saveLogoToLibrary=saveWorkspaceLogo,authenticate=process.env.APP_MULTI_USER==='1'?authenticateWorkspace:null,spaceDir=process.env.S7_SPACE_DIR||join(ROOT,'..','data','user-spaces'),multiLogoEnabled=process.env.S7_MULTI_LOGO_ENABLED!=='0'}={}){
   const spaces=userSpace(spaceDir);
   const jobs=createGenerationJobs(spaces);
+  const multiLogoJobs=createMultiLogoJobs(spaces,mockupRenderer);
+  const readGeneration=async(user,id)=>(await spaces.generation(user,id))?.kind==='multi-logo'?multiLogoJobs.read(user,id):jobs.read(user,id);
   return async(req,res)=>{
     try{
       const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);
@@ -115,18 +119,19 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
       const ensureUser=async()=>{if(user&&(await authenticate(req)).id!==user.id)throw Object.assign(Error('登录已变更，请重新登录'),{status:401});};
       if(authenticate&&req.method!=='GET'&&req.headers.origin){const own=`http://${req.headers.host}`,workspace=process.env.APP_PUBLIC_ORIGIN||'http://127.0.0.1:3210';if(![own,workspace].includes(req.headers.origin))throw Object.assign(Error('不允许跨站提交'),{status:403});}
       if(req.method==='GET'&&url.pathname==='/api/session'){json(res,200,{enabled:!!authenticate,user});return;}
+      if(req.method==='GET'&&url.pathname==='/api/features'){json(res,200,{multiLogo:multiLogoEnabled});return;}
       if(user&&url.pathname==='/api/my-space/tasks'){
-        if(req.method==='GET'){const tasks=await spaces.tasks(user);json(res,200,await Promise.all(tasks.map(async task=>({...task,generation:await jobs.read(user,task.id)}))));return;}
+        if(req.method==='GET'){const tasks=await spaces.tasks(user);json(res,200,await Promise.all(tasks.map(async task=>({...task,generation:await readGeneration(user,task.id)}))));return;}
         if(req.method==='POST'){json(res,201,await spaces.createTask(user,await body(req)));return;}
       }
       const taskMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)$/);
       if(user&&taskMatch){
         if(req.method==='GET'){json(res,200,await spaces.task(user,taskMatch[1]));return;}
         if(req.method==='PUT'){json(res,200,await spaces.updateTask(user,taskMatch[1],await body(req)));return;}
-        if(req.method==='DELETE'){await ensureUser();if((await jobs.read(user,taskMatch[1]))?.status==='running')throw Object.assign(Error('任务正在生成，请完成后再删除'),{status:409});await spaces.deleteTask(user,taskMatch[1]);res.writeHead(204);res.end();return;}
+        if(req.method==='DELETE'){await ensureUser();if((await readGeneration(user,taskMatch[1]))?.status==='running')throw Object.assign(Error('任务正在生成，请完成后再删除'),{status:409});await spaces.deleteTask(user,taskMatch[1]);res.writeHead(204);res.end();return;}
       }
       const generationMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/generation$/);
-      if(user&&req.method==='GET'&&generationMatch){json(res,200,await jobs.read(user,generationMatch[1]));return;}
+      if(user&&req.method==='GET'&&generationMatch){json(res,200,await readGeneration(user,generationMatch[1]));return;}
       const taskImageMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/image\/([^/]+)\/([^/]+)$/);
       if(user&&req.method==='GET'&&taskImageMatch){const bytes=await spaces.image(user,taskImageMatch[2],taskImageMatch[3],taskImageMatch[1]);res.writeHead(200,{'content-type':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
       if(user&&req.method==='GET'&&url.pathname==='/api/my-space/history'){json(res,200,await spaces.history(user,url.searchParams.get('taskId')));return;}
@@ -180,6 +185,19 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
         let logoLibrary=null,logoLibraryError=null;try{logoLibrary=await saveLogoToLibrary(req,output.bytes,logoName);}catch(error){logoLibraryError=error.message||'Logo 库保存失败';}
         json(res,200,{width:output.width,height:output.height,provider:processed?.provider||null,model:processed?.model||null,targetColor,logoLibrary,logoLibraryError,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`});
         return;
+      }
+      if(req.method==='POST'&&url.pathname==='/api/ai-render-logos'){
+        if(!multiLogoEnabled)throw Object.assign(Error('多 Logo 上样已关闭'),{status:404});
+        if(!user)throw Object.assign(Error('请先登录工作空间'),{status:401});
+        const input=await body(req);
+        await spaces.task(user,input.taskId);
+        const product=(await productCatalog(req)).find(item=>String(item?.id)===input.productId&&item.status!=='INACTIVE');
+        if(!product)throw Object.assign(Error('产品不存在或已停用，请刷新产品库'),{status:400});
+        const master=await productTemplate(product,req);
+        if(master?.needsTemplateReview)throw Object.assign(Error('产品标准图已修改，请先重新确认并发布母版'),{status:400});
+        const source=await productImage(product,req);
+        const record=await multiLogoJobs.start(user,input.taskId,{...input,baseImage:source.bytes,targets:masterTargetsFromTemplate(master?.template),product:{id:String(product.id),sku:String(product.sku||''),name:String(product.name||'')}});
+        json(res,202,record);return;
       }
       if(req.method==='POST'&&url.pathname==='/api/ai-render-multi'){
         const input=await body(req),productIds=input.productIds;
@@ -239,7 +257,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
       if(req.method==='POST'&&url.pathname==='/api/ai-render'){
         const input=await body(req);
         const selectedVersions=selectGenerationVersions(input);
-        if(user&&input.taskId)await spaces.task(user,input.taskId);
+        if(user&&input.taskId){const task=await spaces.task(user,input.taskId);if(task.state?.mode==='multi-logo')throw Object.assign(Error('请从多 Logo 上样页面生成此任务'),{status:400});}
         const baseImage=Buffer.from(input.baseImage||'','base64');
         const logoImage=Buffer.from(input.logoImage||'','base64');
         const basePng=await sharp(baseImage).png().toBuffer();

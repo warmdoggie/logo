@@ -31,6 +31,11 @@ test('主工作区同一端口直接提供 S7 页面、静态资源和 API', {ti
     const script=await fetch(base+'/s7/demo.js');
     assert.equal(script.status,200);
     assert.match(await script.text(),/beginResultProgress/);
+    for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css']){
+      const asset=await fetch(base+'/s7/'+file);
+      assert.equal(asset.status,200,`新增资源应由主工作区提供：${file}`);
+      assert.ok((await asset.text()).length>0);
+    }
     const anonymous=await fetch(base+'/s7/api/session');
     assert.equal(anonymous.status,401);
     const password=(await readFile(join(dir,'workspace-admin.txt'),'utf8')).match(/密码：(.+)/)?.[1].trim();
@@ -41,6 +46,9 @@ test('主工作区同一端口直接提供 S7 页面、静态资源和 API', {ti
     const session=await fetch(base+'/s7/api/session',{headers:{cookie}});
     assert.equal(session.status,200);
     assert.equal((await session.json()).user.username,'admin');
+    const features=await fetch(base+'/s7/api/features',{headers:{cookie}});
+    assert.equal(features.status,200);
+    assert.equal((await features.json()).multiLogo,true);
     const task=await fetch(base+'/s7/api/my-space/tasks',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({title:'集成测试任务'})});
     assert.equal(task.status,201);
     assert.equal((await task.json()).title,'集成测试任务');
