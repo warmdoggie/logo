@@ -12,6 +12,7 @@ import {createTaskDraft,normalizeTaskResult,restoredBaseProduct} from './task-dr
 import {createGenerationWatcher,previewStatus,productGeneration} from './generation-client.mjs';
 import {downloadKey,syncDownloadSelection,selectedDownloadOutputs} from './download-selection.mjs';
 import {createPreviewImages,previewImageUrl} from './preview-images.mjs';
+import {createImagePreview} from './image-preview.mjs';
 
 const targets=document.querySelector('#targets');
 const status=document.querySelector('#status');
@@ -49,6 +50,7 @@ const imagePreview=document.querySelector('#image-preview');
 const imagePreviewTitle=document.querySelector('#image-preview-title');
 const imagePreviewImage=document.querySelector('#image-preview-image');
 const imagePreviewViewport=document.querySelector('#image-preview-viewport');
+const imagePreviewStatus=document.querySelector('#image-preview-status');
 const zoomReset=document.querySelector('#zoom-reset');
 let schemeState=null,activeScheme='ORIGINAL',placementScope='shared',rebuildingTargets=false,schemePreviewFrame=null;
 let submittedSignatures={},savedSignatures={},schemePhases={},showModifiedPreview=new Set();
@@ -85,9 +87,10 @@ const S7_BASE=location.pathname==='/s7'||location.pathname.startsWith('/s7/')?'/
 const s7Path=value=>S7_BASE&&typeof value==='string'&&value.startsWith('/')?`${S7_BASE}${value}`:value;
 const logoLibraryPath=value=>S7_BASE?new URL(value,location.origin).href:s7Path(value);
 const nativeFetch=window.fetch.bind(window);
+const fullImagePreview=createImagePreview({image:imagePreviewImage,request:nativeFetch,onStatus:(stage,message)=>{imagePreviewStatus.hidden=stage==='ready';imagePreviewStatus.disabled=stage!=='error';imagePreviewStatus.textContent=stage==='error'?`${message}（${imagePreviewImage.hidden?'暂无可用预览':'当前显示预览图'}）`:message;}});
 let s7User=null;
 let logoStorage=localStorage;
-function requireLogin(){previewImages.clear();document.body.replaceChildren();const link=document.createElement('a');link.textContent='登录已失效，请返回主工作空间登录';link.href=S7_BASE?'/':`http://${location.hostname}:3210/`;link.target='_top';document.body.append(link);}
+function requireLogin(){fullImagePreview.close();previewImages.clear();document.body.replaceChildren();const link=document.createElement('a');link.textContent='登录已失效，请返回主工作空间登录';link.href=S7_BASE?'/':`http://${location.hostname}:3210/`;link.target='_top';document.body.append(link);}
 const fetch=async(input,init)=>{if(currentTaskId&&s7User&&init?.method==='POST'&&['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo','/api/process-logo','/api/render'].includes(input)){init={...init,body:JSON.stringify({...JSON.parse(init.body),taskId:currentTaskId})};}const response=await nativeFetch(typeof input==='string'?s7Path(input):input,init);if(s7User){const session=await nativeFetch(s7Path('/api/session'));const value=session.ok?await session.json():null;if(session.status===401||(session.ok&&value?.user?.id!==s7User.id)){requireLogin();throw Error('登录已变更，请重新进入个人空间');}if(!session.ok)throw Error('认证服务暂时无法读取，请稍后重试');if(init?.method==='POST'&&response.ok)refreshHistory().catch(()=>{});}return response;};
 {
  const response=await nativeFetch(s7Path('/api/session'));
@@ -489,7 +492,7 @@ function createSchemeCards(){
     const input=versionInputs.find(input=>input.value===version);card.querySelector('label').append(input,document.createTextNode(name));
     card.querySelector('.edit-scheme').onclick=()=>switchScheme(version);
     const thumbnail=card.querySelector('canvas');thumbnail.setAttribute('aria-label',`${name}效果示意`);thumbnail.onclick=()=>switchScheme(version);
-    const image=card.querySelector('img');image.alt=`${name}生成结果`;image.onclick=()=>{const output=schemeOutput(version);if(output)openImagePreview(name,output.dataUrl);};
+    const image=card.querySelector('img');image.alt=`${name}生成结果`;image.onclick=()=>{const output=schemeOutput(version);if(output)openImagePreview(name,output.dataUrl,image.currentSrc||image.src);};
     const selection=card.querySelector('.select-download');selection.setAttribute('aria-label',`选择下载${name}`);selection.title=`选择下载${name}`;
     selection.onchange=()=>{const output=schemeOutput(version);if(!output)return;const key=downloadKey({...output,productId:output.productId||loadedMultiProductId||''});downloadSelection={...downloadSelection,[key]:{dataUrl:output.dataUrl,selected:selection.checked}};taskDraft?.schedule();updateDownloadSelection();};
     card.querySelector('.regenerate-result').onclick=()=>regenerateResult(version,card);
@@ -828,13 +831,14 @@ function setPreviewScale(value){
   imagePreviewImage.style.transform=`scale(${previewScale})`;
   zoomReset.textContent=`${Math.round(previewScale*100)}%`;
 }
-function openImagePreview(version,dataUrl){
+function openImagePreview(version,dataUrl,fallbackSrc){
   imagePreviewTitle.textContent=`${version} · 图片预览`;
-  imagePreviewImage.src=dataUrl;
   imagePreview.hidden=false;
   setPreviewScale(1);
+  imagePreviewStatus.onclick=()=>fullImagePreview.show(dataUrl,fallbackSrc);
+  return fullImagePreview.show(dataUrl,fallbackSrc);
 }
-function closeImagePreview(){imagePreview.hidden=true;imagePreviewImage.removeAttribute('src');}
+function closeImagePreview(){imagePreview.hidden=true;fullImagePreview.close();}
 async function regenerateResult(version,card){
   if(taskLogos.length>1){await runMultiLogoGeneration({onlyLogoId:loadedTaskLogoId,selectedVersions:[version]});return;}
   if(multiPackageProducts.length>1){await runMultiPackageGeneration({onlyProductId:loadedMultiProductId,selectedVersions:[version]});return;}
@@ -1065,7 +1069,7 @@ if(currentTaskId&&s7User){
   });
   await generationWatcher.refresh();
   if(!taskActive)generationWatcher.setActive(false);
-  window.addEventListener('pagehide',()=>{generationWatcher.stop();previewImages.clear();});
+  window.addEventListener('pagehide',()=>{generationWatcher.stop();fullImagePreview.close();previewImages.clear();});
   document.addEventListener('input',()=>taskDraft.schedule());document.addEventListener('change',()=>taskDraft.schedule());
   window.addEventListener('beforeunload',event=>{if(taskDraft.isDirty()){event.preventDefault();event.returnValue='';}});
  }catch(error){setStatus(error.message,'error');document.querySelector('#generate').disabled=true;}

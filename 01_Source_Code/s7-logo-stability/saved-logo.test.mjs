@@ -25,3 +25,23 @@ test('clearing the saved logo removes it from browser storage',()=>{
   clearSavedLogo(storage);
   assert.equal(loadSavedLogo(storage),null);
 });
+
+test('a full browser cache does not discard a successfully processed logo or restore the stale logo',()=>{
+  const storage=memoryStorage(),latest={data:'large-processed-png',name:'new.png',sourceData:'large-original'};
+  saveLogo(storage,{data:'old-png',name:'old.png'});
+  storage.setItem=()=>{throw new DOMException('quota exceeded','QuotaExceededError');};
+  assert.doesNotThrow(()=>saveLogo(storage,latest));
+  assert.deepEqual(loadSavedLogo(storage),latest);
+  assert.equal(storage.getItem('s7-logo-stability.saved-logo.v1'),null);
+  clearSavedLogo(storage);
+  assert.equal(loadSavedLogo(storage),null);
+});
+
+test('unavailable browser storage still allows using and clearing the current processed logo',()=>{
+  const unavailable=()=>{throw new DOMException('blocked','SecurityError');};
+  const storage={getItem:unavailable,setItem:unavailable,removeItem:unavailable},logo={data:'processed-png',name:'new.png'};
+  assert.doesNotThrow(()=>saveLogo(storage,logo));
+  assert.deepEqual(loadSavedLogo(storage),logo);
+  assert.doesNotThrow(()=>clearSavedLogo(storage));
+  assert.equal(loadSavedLogo(storage),null);
+});

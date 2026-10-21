@@ -25,6 +25,7 @@ const PUBLIC_FILES=new Set(['tasks.html','tasks.js','tasks.css','task-draft.mjs'
 PUBLIC_FILES.add('download-selection.mjs');
 PUBLIC_FILES.add('download-archive.mjs');
 PUBLIC_FILES.add('preview-images.mjs');
+PUBLIC_FILES.add('image-preview.mjs');
 const PRODUCT_LIBRARY_URL=process.env.S7_PRODUCT_LIBRARY_URL||'http://127.0.0.1:3210/api/products?includeInactive=0';
 for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css'])PUBLIC_FILES.add(file);
 
