@@ -15,11 +15,15 @@ import {createGenerationJobs} from './generation-jobs.mjs';
 import {createSchemes} from './schemes.mjs';
 import {masterTargetsFromTemplate} from './product-master.mjs';
 import {createMultiLogoJobs} from './multi-logo-render.mjs';
+import {createMultiProductJobs} from './multi-product-jobs.mjs';
+import {zipStore} from '../zip.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const MAX_BODY=50*1024*1024;
 const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8'};
 const PUBLIC_FILES=new Set(['tasks.html','tasks.js','tasks.css','task-draft.mjs','generation-client.mjs','generation-versions.mjs','demo.html','demo.js','demo.css','demo-geometry.mjs','target-state.mjs','target-print.mjs','schemes.mjs','preview-logo-layer.mjs','contrast-color.mjs','saved-logo.mjs','product-master.mjs','transparent-logo-download.mjs','rotation-handle.mjs']);
+PUBLIC_FILES.add('download-selection.mjs');
+PUBLIC_FILES.add('download-archive.mjs');
 const PRODUCT_LIBRARY_URL=process.env.S7_PRODUCT_LIBRARY_URL||'http://127.0.0.1:3210/api/products?includeInactive=0';
 for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css'])PUBLIC_FILES.add(file);
 
@@ -110,7 +114,8 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
   const spaces=userSpace(spaceDir);
   const jobs=createGenerationJobs(spaces);
   const multiLogoJobs=createMultiLogoJobs(spaces,mockupRenderer);
-  const readGeneration=async(user,id)=>(await spaces.generation(user,id))?.kind==='multi-logo'?multiLogoJobs.read(user,id):jobs.read(user,id);
+  const multiProductJobs=createMultiProductJobs(spaces,{productTemplate,productImage,mockupRenderer});
+  const readGeneration=async(user,id)=>{const record=await spaces.generation(user,id);if(record?.kind==='multi-logo')return multiLogoJobs.read(user,id);if(record?.status==='running'&&record.kind!=='multi-product')return jobs.read(user,id);return multiProductJobs.read(user,id);};
   return async(req,res)=>{
     try{
       const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);
@@ -121,17 +126,34 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
       if(req.method==='GET'&&url.pathname==='/api/session'){json(res,200,{enabled:!!authenticate,user});return;}
       if(req.method==='GET'&&url.pathname==='/api/features'){json(res,200,{multiLogo:multiLogoEnabled});return;}
       if(user&&url.pathname==='/api/my-space/tasks'){
-        if(req.method==='GET'){const tasks=await spaces.tasks(user);json(res,200,await Promise.all(tasks.map(async task=>({...task,generation:await readGeneration(user,task.id)}))));return;}
+        if(req.method==='GET'){const tasks=await spaces.tasks(user);const rows=await Promise.all(tasks.map(async task=>{try{return {...task,generation:await readGeneration(user,task.id)};}catch(error){if(error.status===404)return null;throw error;}}));json(res,200,rows.filter(Boolean));return;}
         if(req.method==='POST'){json(res,201,await spaces.createTask(user,await body(req)));return;}
       }
       const taskMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)$/);
       if(user&&taskMatch){
-        if(req.method==='GET'){json(res,200,await spaces.task(user,taskMatch[1]));return;}
+        if(req.method==='GET'){json(res,200,url.searchParams.get('summary')==='1'?await spaces.taskSummary(user,taskMatch[1]):await spaces.task(user,taskMatch[1]));return;}
         if(req.method==='PUT'){json(res,200,await spaces.updateTask(user,taskMatch[1],await body(req)));return;}
         if(req.method==='DELETE'){await ensureUser();if((await readGeneration(user,taskMatch[1]))?.status==='running')throw Object.assign(Error('任务正在生成，请完成后再删除'),{status:409});await spaces.deleteTask(user,taskMatch[1]);res.writeHead(204);res.end();return;}
       }
       const generationMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/generation$/);
       if(user&&req.method==='GET'&&generationMatch){json(res,200,await readGeneration(user,generationMatch[1]));return;}
+      const downloadMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/download$/);
+      if(user&&req.method==='POST'&&downloadMatch){
+        const id=downloadMatch[1],task=await spaces.taskSummary(user,id),input=await body(req);
+        if(!Array.isArray(input.urls)||!input.urls.length||input.urls.length>200||input.urls.some(value=>typeof value!=='string'))throw Object.assign(Error('请选择 1–200 张已生成的图片'),{status:400});
+        const history=await spaces.history(user,id),available=new Map(history.flatMap(record=>record.images.map(image=>[image.url,{...image,recordId:record.id}])));
+        const selected=[...new Set(input.urls)].map(url=>available.get(url));
+        if(selected.some(image=>!image))throw Object.assign(Error('选择的图片不属于当前任务，请刷新后重试'),{status:400});
+        const clean=value=>value.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').slice(0,120);
+        const files=[];let total=0;
+        for(const [index,image]of selected.entries()){
+          const bytes=await spaces.image(user,image.recordId,image.name,id);total+=bytes.length;
+          if(total>300*1024*1024)throw Object.assign(Error('本次下载超过 300 MB，请分批选择'),{status:400});
+          files.push({name:`${index+1}-${clean(image.label)}.png`,bytes});
+        }
+        await ensureUser();const bytes=zipStore(files);
+        res.writeHead(200,{'content-type':'application/zip','content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(clean(task.title)+'.zip')}`,'cache-control':'private, no-store'});res.end(bytes);return;
+      }
       const taskImageMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/image\/([^/]+)\/([^/]+)$/);
       if(user&&req.method==='GET'&&taskImageMatch){const bytes=await spaces.image(user,taskImageMatch[2],taskImageMatch[3],taskImageMatch[1]);res.writeHead(200,{'content-type':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
       if(user&&req.method==='GET'&&url.pathname==='/api/my-space/history'){json(res,200,await spaces.history(user,url.searchParams.get('taskId')));return;}
@@ -211,6 +233,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
         if(user&&input.taskId)await spaces.task(user,input.taskId);
         const catalog=await productCatalog(req),products=productIds.map(id=>catalog.find(product=>String(product?.id)===id));
         if(products.some(product=>!product||product.status==='INACTIVE'))throw Object.assign(Error('所选产品中有已删除或停用的包材，请刷新产品库'),{status:400});
+        if(input.background===true){if(!user||!input.taskId)throw Object.assign(Error('后台生成需要个人任务'),{status:400});json(res,202,await multiProductJobs.start(user,input.taskId,input,products,req));return;}
         const model=input.model,originalColor=input.originalColor||'#000000';
         res.writeHead(200,{'content-type':'text/event-stream; charset=utf-8','cache-control':'no-cache, no-transform','connection':'keep-alive','x-accel-buffering':'no'});res.flushHeaders?.();
         event(res,'started',{total:products.length});

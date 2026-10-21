@@ -5,6 +5,18 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import sharp from 'sharp';
 import {createDemoServer} from './demo-server.mjs';
+import {userSpace} from './user-space.mjs';
+
+test('草稿增量保存保留素材且返回轻量摘要',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'s7-delta-')),spaces=userSpace(dir),user={id:'alice'};
+ try{
+  const task=await spaces.createTask(user,{title:'delta'});
+  await spaces.updateTask(user,task.id,{revision:0,state:{baseData:'large image',targets:[{x:.2}]}});
+  const saved=await spaces.updateTask(user,task.id,{revision:1,mergeState:true,summary:true,state:{targets:[{x:.4}]}});
+  assert.equal(saved.state,undefined);assert.equal(saved.revision,2);
+  assert.deepEqual((await spaces.task(user,task.id)).state,{baseData:'large image',targets:[{x:.4}]});
+ }finally{await rm(dir,{recursive:true,force:true});}
+});
 
 test('S7 requires a session and saves generation history and images separately for each user',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'s7-users-'));

@@ -5,7 +5,7 @@ export function createGenerationJobs(spaces){
  const active=new Map(),key=(user,taskId)=>`${user.id}:${taskId}`;
  async function read(user,taskId){
   const record=await spaces.generation(user,taskId);
-  if(record?.kind==='multi-logo')return record;
+  if(['multi-logo','multi-product'].includes(record?.kind))return record;
   if(record?.status==='running'&&active.get(key(user,taskId))!==record.id)return spaces.updateGeneration(user,taskId,current=>current.kind==='multi-logo'||current.id!==record.id||current.status!=='running'||active.get(key(user,taskId))===current.id?current:({...current,status:'interrupted',stages:Object.fromEntries(Object.entries(current.stages).map(([version,value])=>[version,value.stage==='complete'?value:{stage:'failed',error:'服务重启导致生成中断，请重试'}]))}));
   return record;
  }

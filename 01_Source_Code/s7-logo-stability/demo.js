@@ -9,13 +9,15 @@ import {masterTargetsFromTemplate} from './product-master.mjs';
 import {triggerTransparentLogoDownload} from './transparent-logo-download.mjs';
 import {rotationGestureMode,rotationHandleLocalPosition} from './rotation-handle.mjs';
 import {createTaskDraft,normalizeTaskResult} from './task-draft.mjs';
-import {createGenerationWatcher} from './generation-client.mjs';
+import {createGenerationWatcher,previewStatus,productGeneration} from './generation-client.mjs';
+import {downloadKey,syncDownloadSelection,selectedDownloadOutputs} from './download-selection.mjs';
 
 const targets=document.querySelector('#targets');
 const status=document.querySelector('#status');
 const emptyState=document.querySelector('#empty-state');
 const results=document.querySelector('#results');
 const resultMeta=document.querySelector('#result-meta');
+const downloadSelectedButton=document.querySelector('#download-selected');
 const multiProductTabs=document.querySelector('#multi-product-tabs');
 const multiProductOutput=document.querySelector('#multi-product-output');
 const previewSection=document.querySelector('.preview-section');
@@ -66,10 +68,12 @@ let baseImage=null,logoImage=null;
 let productLibraryProducts=[];
 let multiPackageProducts=[],multiPackageBusy=false;
 let multiProductResults=new Map(),selectedMultiProductId=null;
-let multiProductViews=new Map(),loadedMultiProductId=null,multiProductLoadRevision=0;
+let multiProductViews=new Map(),loadedMultiProductId=null,multiProductLoadRevision=0,multiProductJob=null;
 let logoLibraryItems=[];
 const currentTaskId=new URLSearchParams(location.search).get('task');
-let taskDraft=null,lastResultPayload=null,generationWatcher=null,generationId=null;
+let taskDraft=null,lastResultPayload=null,generationWatcher=null,generationId=null,taskActive=true;
+let downloadSelection={},downloadingSelected=false,downloadSelectionReady=!currentTaskId;
+window.addEventListener('message',event=>{if(event.origin!==location.origin||event.source!==window.parent||event.data?.type!=='s7-task-visibility'||event.data.taskId!==currentTaskId)return;taskActive=event.data.active;generationWatcher?.setActive(taskActive);});
 function notifyTask(text,busy=false,updatedAt){if(currentTaskId&&window.parent!==window)window.parent.postMessage({type:'s7-task-status',taskId:currentTaskId,text,busy,updatedAt},location.origin);}
 
 const esc=value=>String(value).replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
@@ -80,20 +84,20 @@ const nativeFetch=window.fetch.bind(window);
 let s7User=null;
 let logoStorage=localStorage;
 function requireLogin(){document.body.replaceChildren();const link=document.createElement('a');link.textContent='登录已失效，请返回主工作空间登录';link.href=S7_BASE?'/':`http://${location.hostname}:3210/`;link.target='_top';document.body.append(link);}
-const fetch=async(input,init)=>{if(currentTaskId&&s7User&&init?.method==='POST'&&['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo','/api/process-logo','/api/render'].includes(input)){init={...init,body:JSON.stringify({...JSON.parse(init.body),taskId:currentTaskId})};}const response=await nativeFetch(typeof input==='string'?s7Path(input):input,init);if(s7User){const session=await nativeFetch(s7Path('/api/session'));const value=session.ok?await session.json():null;if(value?.user?.id!==s7User.id){requireLogin();throw Error('登录已变更，请重新进入个人空间');}if(init?.method==='POST'&&response.ok)await refreshHistory();}return response;};
+const fetch=async(input,init)=>{if(currentTaskId&&s7User&&init?.method==='POST'&&['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo','/api/process-logo','/api/render'].includes(input)){init={...init,body:JSON.stringify({...JSON.parse(init.body),taskId:currentTaskId})};}const response=await nativeFetch(typeof input==='string'?s7Path(input):input,init);if(s7User){const session=await nativeFetch(s7Path('/api/session'));const value=session.ok?await session.json():null;if(session.status===401||(session.ok&&value?.user?.id!==s7User.id)){requireLogin();throw Error('登录已变更，请重新进入个人空间');}if(!session.ok)throw Error('认证服务暂时无法读取，请稍后重试');if(init?.method==='POST'&&response.ok)refreshHistory().catch(()=>{});}return response;};
 {
  const response=await nativeFetch(s7Path('/api/session'));
  if(!response.ok){requireLogin();await new Promise(()=>{});}
  const session=await response.json();s7User=session.user;
  if(s7User){const prefix=`s7-user.${s7User.id}.${currentTaskId||'legacy'}.`;logoStorage={getItem:key=>localStorage.getItem(prefix+key),setItem:(key,value)=>localStorage.setItem(prefix+key,value),removeItem:key=>localStorage.removeItem(prefix+key)};
-  setInterval(async()=>{try{const r=await nativeFetch(s7Path('/api/session'));const v=r.ok?await r.json():null;if(v?.user?.id!==s7User.id)requireLogin();}catch{requireLogin();}},10000);
+  setInterval(async()=>{if(!taskActive)return;try{const r=await nativeFetch(s7Path('/api/session'));const v=r.ok?await r.json():null;if(r.status===401||(r.ok&&v?.user?.id!==s7User.id))requireLogin();}catch{}},10000);
  }
 }
 async function refreshHistory(){
  if(!s7User)return;
  let section=document.querySelector('#personal-history');if(!section){section=document.createElement('section');section.id='personal-history';section.className='panel';document.querySelector('main').append(section);}
  const response=await nativeFetch(s7Path('/api/my-space/history'+(currentTaskId?'?taskId='+encodeURIComponent(currentTaskId):'')));if(!response.ok){section.textContent='个人生成历史暂时无法读取';return;}
- const history=await response.json();section.innerHTML=`<h2>我的素材与生成历史</h2>${history.length?history.map(record=>`<details><summary>${esc(new Date(record.createdAt).toLocaleString())} · ${esc(record.kind)} · ${esc(record.model||'')}</summary><div class="result-grid">${record.images.map(image=>`<article><p>${esc(image.label)}</p><a href="${esc(s7Path(image.url))}" download><img src="${esc(s7Path(image.url))}" alt="${esc(image.label)}" loading="lazy" width="180"><p>下载图片</p></a>${image.label==='透明Logo'?`<button class="button secondary" data-restore-logo="${esc(image.url)}">使用此 Logo</button>`:''}</article>`).join('')}</div></details>`).join(''):'<p>生成完成后，素材和结果会保存在你的个人空间。</p>'}`;
+ const history=(await response.json()).filter(record=>!['AI上样','多包材印刷效果','多 Logo 印刷效果'].includes(record.kind));section.hidden=!history.length;section.innerHTML=`<h2>我的 Logo 素材</h2>${history.map(record=>`<details><summary>${esc(new Date(record.createdAt).toLocaleString())} · ${esc(record.kind)} · ${esc(record.model||'')}</summary><div class="result-grid">${record.images.map(image=>`<article><p>${esc(image.label)}</p><a href="${esc(s7Path(image.url))}" download><img src="${esc(s7Path(image.url))}" alt="${esc(image.label)}" loading="lazy" width="180"><p>下载图片</p></a>${image.label==='透明Logo'?`<button class="button secondary" data-restore-logo="${esc(image.url)}">使用此 Logo</button>`:''}</article>`).join('')}</div></details>`).join('')}`;
  for(const button of section.querySelectorAll('[data-restore-logo]'))button.onclick=async()=>{try{const r=await fetch(button.dataset.restoreLogo);if(!r.ok)throw Error('Logo读取失败');const loaded=await fileData(await r.blob());const saved={data:loaded.data,name:'个人空间透明Logo.png'};saveLogo(logoStorage,saved);await useSavedLogo(saved);setStatus('已从个人空间恢复透明Logo','success');}catch(error){setStatus(error.message,'error');}};
 }
 function setStatus(message,type=''){status.textContent=message;status.className=`status ${type}`;taskDraft?.schedule();notifyTask(type==='busy'?'生成中…':type==='error'?'操作失败':type==='success'?'已完成':'编辑中',type==='busy');}
@@ -123,7 +127,7 @@ function captureMultiProductLayouts(){
   saveMultiProductView();
   return multiPackageProducts.flatMap(product=>{
     const view=multiProductViews.get(product.id);if(!view?.schemeState)return [];
-    return [{productId:product.id,targets:view.targets,schemeState:structuredClone(view.schemeState),activeScheme:view.activeScheme,placementScope:view.placementScope,selectedTargetId:view.selectedTargetId}];
+    return [{productId:product.id,targets:view.targets,schemeState:structuredClone(view.schemeState),activeScheme:view.activeScheme,placementScope:view.placementScope,selectedTargetId:view.selectedTargetId,savedSignatures:{...view.savedSignatures}}];
   });
 }
 async function showMultiProduct(id){
@@ -146,11 +150,12 @@ async function showMultiProduct(id){
     }
     if(revision!==multiProductLoadRevision||selectedMultiProductId!==id)return;
     baseData=view.baseData;baseImage=view.baseImage;schemeState=structuredClone(view.schemeState);activeScheme=view.activeScheme;placementScope=view.placementScope;selectedTargetId=view.selectedTargetId;
-    lastResultPayload=view.lastResultPayload;savedSignatures={...view.savedSignatures};schemePhases=structuredClone(view.schemePhases);submittedSignatures={};showModifiedPreview=new Set();
+    lastResultPayload=view.lastResultPayload||null;savedSignatures={...view.savedSignatures};schemePhases=structuredClone(view.schemePhases||{});submittedSignatures={};showModifiedPreview=new Set();
     loadedMultiProductId=id;document.querySelector('#preview-version').value=activeScheme;
     document.querySelector('#base-name').textContent=`产品库：${product.sku} · ${product.name}`;
     loadSchemeTargets();renderMultiProductResults();
     setStatus(`已显示 ${product.sku} 的四种方案预览。`,'success');
+    if(multiProductJob)restoreMultiProductGeneration(multiProductJob);
   }catch(error){if(revision===multiProductLoadRevision)setStatus(error.message,'error');}
 }
 
@@ -158,28 +163,24 @@ function renderMultiProductResults(){
   const previewProducts=multiPackageProducts;
   const active=previewProducts.length>0;
   if(active&&!previewProducts.some(product=>product.id===selectedMultiProductId))selectedMultiProductId=previewProducts[0].id;
-  const result=multiProductResults.get(selectedMultiProductId);
   multiProductTabs.hidden=!active;
-  multiProductOutput.hidden=!active||!result;
-  results.hidden=active&&!!result?.images;
+  multiProductOutput.hidden=true;
+  results.hidden=false;
   previewSection.hidden=false;
   if(!active){multiProductTabs.replaceChildren();multiProductOutput.replaceChildren();resultMeta.textContent='选择方案查看和调整';return;}
   if(!previewProducts.some(product=>product.id===selectedMultiProductId))selectedMultiProductId=previewProducts[0].id;
   multiProductTabs.innerHTML=previewProducts.map(product=>{
     const imageUrl=s7Path(product.imageUrl||`/api/product-library/image/${encodeURIComponent(product.id)}`);
     const result=multiProductResults.get(product.id);
-    const state=result?.error?'生成失败':result?.images?(result.complete?'已完成':'部分完成'):multiPackageBusy?'处理中':'方案预览';
+    const progress=multiProductJob?productGeneration(multiProductJob,product.id):null;
+    const completed=progress?Object.values(progress.stages).filter(value=>value.stage==='complete').length:0;
+    const state=progress?completed===4?'已生成完成':`${completed}/4 已完成${multiPackageBusy?' · 生成中':''}`:result?.error?'生成失败':result?.images?(result.complete?'已生成完成':'部分完成'):multiPackageBusy?'处理中':'方案预览';
     return `<button type="button" class="multi-product-tab ${product.id===selectedMultiProductId?'active':''}" data-multi-product-id="${esc(product.id)}" aria-pressed="${product.id===selectedMultiProductId}"><img src="${esc(imageUrl)}" alt=""><span><strong>${esc(product.sku)}</strong><small>${state}</small></span></button>`;
   }).join('');
   multiProductTabs.querySelectorAll('[data-multi-product-id]').forEach(button=>button.addEventListener('click',()=>showMultiProduct(button.dataset.multiProductId)));
   const product=previewProducts.find(item=>item.id===selectedMultiProductId);
   resultMeta.textContent=product?`${product.sku} · ${product.name}`:'批量包材效果';
-  if(result?.error){multiProductOutput.innerHTML=`<p class="status error">${esc(result.error)}</p>`;return;}
-  if(!result?.images){multiProductOutput.replaceChildren();return;}
-  const imageUrl=image=>image.url?s7Path(image.url):image.dataUrl;
-  const effects=result.images.filter(image=>!image.label.endsWith('· 四格图'));
-  multiProductOutput.innerHTML=`${result.failures?.length?`<p class="status error">${result.failures.map(item=>`${esc(item.version)}：${esc(item.error)}`).join('；')}</p>`:''}<div class="multi-effect-gallery">${effects.map(image=>`<article><img src="${esc(imageUrl(image))}" alt="${esc(image.label)}" data-preview-image="${esc(image.label)}"><div><span>${esc(image.label.split('· ').at(-1))}</span><a href="${esc(imageUrl(image))}" download>下载</a></div></article>`).join('')}</div>`;
-  multiProductOutput.querySelectorAll('[data-preview-image]').forEach(image=>image.addEventListener('click',()=>openImagePreview(image.dataset.previewImage,image.src)));
+  multiProductOutput.replaceChildren();
 }
 async function openProductLibrary(){
   productLibraryPanel.hidden=!productLibraryPanel.hidden;if(productLibraryPanel.hidden)return;
@@ -282,8 +283,46 @@ function drawSchemeThumbnail(thumbnail,scheme){
 function appearanceSummary(scheme){
   return scheme.targets.map(target=>{const print=resolveTargetPrint(target,scheme.version,target.color||'#000000');const effect=print.version==='BLACK'?(target.autoContrast?'自动黑/白':'黑色印刷'):print.finish==='gold'?'烫金':print.finish==='silver'?'烫银':`普通印刷 ${target.preserveOriginalColor?'Logo 原色':target.color||'原色'}`;return `${carrierNames[target.carrierType]||'产品包材'}：${effect}`;}).join(' · ');
 }
+function taskDownloadOutputs(){
+ if(multiPackageProducts.length>1&&multiProductJob)return multiProductJob.outputs.filter(output=>multiPackageProducts.some(product=>product.id===output.productId)).map(output=>({...output,dataUrl:s7Path(output.dataUrl)}));
+ return (lastResultPayload?.outputs||[]).map(output=>({...output,productId:output.productId||loadedMultiProductId||''}));
+}
+function updateDownloadSelection(){
+ const outputs=taskDownloadOutputs(),next=syncDownloadSelection(downloadSelection,outputs);
+ if(downloadSelectionReady&&next!==downloadSelection){downloadSelection=next;taskDraft?.schedule();}
+ const count=selectedDownloadOutputs(downloadSelection,outputs).length;
+ downloadSelectedButton.disabled=downloadingSelected||!count;
+ downloadSelectedButton.textContent=downloadingSelected?'正在打包…':'下载选择图片';downloadSelectedButton.title=`已选择 ${count} 张图片（包含此任务所有产品）`;
+}
+downloadSelectedButton.onclick=async()=>{
+ const selected=selectedDownloadOutputs(downloadSelection,taskDownloadOutputs());if(!selected.length||downloadingSelected)return;
+ downloadingSelected=true;updateDownloadSelection();
+ try{
+  await taskDraft?.flush();
+  let blob,filename='任务图片.zip';
+  if(currentTaskId&&s7User){
+   const response=await fetch(`/api/my-space/tasks/${currentTaskId}/download`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({urls:selected.map(output=>output.dataUrl.replace(/^\/s7(?=\/api\/)/,''))})});
+   if(!response.ok)throw Error((await response.json()).error||'图片下载失败');
+   blob=await response.blob();const name=response.headers.get('content-disposition')?.match(/filename\*=UTF-8''(.+)$/)?.[1];if(name)filename=decodeURIComponent(name);
+  }else{
+   const {zipStore}=await import('./download-archive.mjs'),files=[];let total=0;
+   if(selected.length>200)throw Error('每次最多下载 200 张');
+   for(const [index,output]of selected.entries()){
+    const response=await nativeFetch(output.dataUrl);if(!response.ok)throw Error('图片读取失败，请重试');
+    const bytes=new Uint8Array(await response.arrayBuffer());total+=bytes.length;if(total>300*1024*1024)throw Error('本次下载超过 300 MB，请分批选择');
+    const sku=multiPackageProducts.find(product=>product.id===output.productId)?.sku||'效果图';
+    files.push({name:`${index+1}-${sku.replace(/[<>:"/\\|?*]/g,'_')}-${output.version}.png`,bytes});
+   }
+   blob=new Blob([zipStore(files)],{type:'application/zip'});
+  }
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+ }catch(error){setStatus(error.message||'图片下载失败','error');}
+ finally{downloadingSelected=false;updateDownloadSelection();}
+};
 function renderSchemeCards(){
   if(!schemeState)return;
+  updateDownloadSelection();
   if(thumbnailImages[0]!==baseImage||thumbnailImages[1]!==logoImage){thumbnailImages=[baseImage,logoImage];thumbnailImageRevision++;}
   const signatures=currentSignatures();
   for(const scheme of schemeState.schemes){
@@ -298,10 +337,11 @@ function renderSchemeCards(){
     if(!useImage&&thumbnail.dataset.signature!==thumbnailKey){drawSchemeThumbnail(thumbnail,scheme);thumbnail.dataset.signature=thumbnailKey;}
     card.querySelector('.scheme-summary').textContent=appearanceSummary(scheme);
     card.querySelector('.scheme-image-kind').textContent=useImage?(dirty?'上次成图':'生成结果'):baseImage?'效果示意':'选择产品与 Logo 后预览';
-    const labels={submitting:'提交中',generating:'生成中',saving:'保存中',failed:`失败：${phase?.error||'可重试'}`};
-    card.querySelector('.result-stage').textContent=phase&&phase.stage!=='complete'?labels[phase.stage]||phase.stage:dirty?'有修改，待重新生成':output?'已保存':'待生成';
-    const link=card.querySelector('.download');link.hidden=!output;if(output)link.href=output.dataUrl;
-    const retry=card.querySelector('.regenerate-result');retry.hidden=!output&&phase?.stage!=='failed';retry.disabled=generationBusy;retry.textContent=phase?.stage==='failed'&&lastResultPayload?.remoteTasks?.[scheme.version]&&lastResultPayload?.schemeSignatures?.[scheme.version]===signatures[scheme.version]?'继续获取结果':'重新生成';
+    const progress=previewStatus(output,phase,dirty),overlay=card.querySelector('.generation-overlay');overlay.hidden=!progress.busy;overlay.querySelector('.generation-label').textContent=progress.label;
+    card.classList.toggle('generated-complete',progress.complete);card.querySelector('.result-stage').textContent=progress.label;
+    if(progress.complete)card.querySelector('.scheme-image-kind').textContent='已生成完成';
+    const selection=card.querySelector('.select-download'),download=output&&{...output,productId:output.productId||loadedMultiProductId||''};selection.disabled=!output;selection.checked=!!download&&!!downloadSelection[downloadKey(download)]?.selected;
+    const retry=card.querySelector('.regenerate-result');retry.hidden=(multiPackageProducts.length>1&&!(currentTaskId&&s7User))||(!output&&phase?.stage!=='failed');retry.disabled=generationBusy||multiPackageBusy;retry.textContent=phase?.stage==='failed'&&lastResultPayload?.remoteTasks?.[scheme.version]&&lastResultPayload?.schemeSignatures?.[scheme.version]===signatures[scheme.version]?'继续获取结果':'重新生成';
     const compare=card.querySelector('.compare-result');compare.hidden=!dirty;compare.textContent=useImage?'看修改预览':'看上次成图';
   }
   updateGenerateButton();
@@ -310,12 +350,13 @@ function createSchemeCards(){
   results.replaceChildren();resultCards=new Map();
   for(const [version,name]of Object.entries(schemeNames)){
     const card=document.createElement('article');card.className='result-card scheme-card';card.dataset.version=version;
-    card.innerHTML='<div class="scheme-card-head"><label></label><button type="button" class="text-button edit-scheme">编辑此方案</button></div><div class="scheme-image"><canvas></canvas><img class="result-image" hidden><span class="scheme-image-kind"></span></div><p class="scheme-summary"></p><footer><span class="result-stage"></span><div class="result-actions"><button type="button" class="text-button compare-result" hidden></button><a class="download" hidden>下载</a><button type="button" class="regenerate-result" hidden>重新生成</button></div></footer>';
+    card.innerHTML='<div class="scheme-card-head"><label></label><button type="button" class="text-button edit-scheme">编辑此方案</button></div><div class="scheme-image"><canvas></canvas><img class="result-image" hidden><span class="scheme-image-kind"></span><div class="generation-overlay" role="status" hidden><span class="progress-ring" aria-hidden="true"></span><strong class="generation-label"></strong></div></div><p class="scheme-summary"></p><footer><span class="result-stage"></span><div class="result-actions"><button type="button" class="text-button compare-result" hidden></button><button type="button" class="regenerate-result" hidden>重新生成</button><input type="checkbox" class="select-download" disabled></div></footer>';
     const input=versionInputs.find(input=>input.value===version);card.querySelector('label').append(input,document.createTextNode(name));
     card.querySelector('.edit-scheme').onclick=()=>switchScheme(version);
     const thumbnail=card.querySelector('canvas');thumbnail.setAttribute('aria-label',`${name}效果示意`);thumbnail.onclick=()=>switchScheme(version);
     const image=card.querySelector('img');image.alt=`${name}生成结果`;image.onclick=()=>openImagePreview(name,image.src);
-    const link=card.querySelector('.download');link.download=`logo-mockup-${version.toLowerCase().replaceAll(' ','-')}.png`;
+    const selection=card.querySelector('.select-download');selection.setAttribute('aria-label',`选择下载${name}`);selection.title=`选择下载${name}`;
+    selection.onchange=()=>{const output=schemeOutput(version);if(!output)return;const key=downloadKey({...output,productId:output.productId||loadedMultiProductId||''});downloadSelection={...downloadSelection,[key]:{dataUrl:output.dataUrl,selected:selection.checked}};taskDraft?.schedule();updateDownloadSelection();};
     card.querySelector('.regenerate-result').onclick=()=>regenerateResult(version,card);
     card.querySelector('.compare-result').onclick=()=>{showModifiedPreview.has(version)?showModifiedPreview.delete(version):showModifiedPreview.add(version);queueSchemeCards();};
     results.append(card);resultCards.set(version,card);
@@ -650,6 +691,7 @@ function openImagePreview(version,dataUrl){
 }
 function closeImagePreview(){imagePreview.hidden=true;imagePreviewImage.removeAttribute('src');}
 async function regenerateResult(version,card){
+  if(multiPackageProducts.length>1){await runMultiPackageGeneration({onlyProductId:loadedMultiProductId,selectedVersions:[version]});return;}
   await runGeneration([version],version);
 }
 const versionInputs=[...document.querySelectorAll('#generation-versions input')];
@@ -660,11 +702,32 @@ function updateGenerateButton(){
  button.textContent=generationBusy||multiPackageBusy?'生成中...':multiPackageProducts.length>1?`为 ${multiPackageProducts.length} 个产品生成四种效果`:count?`生成选中的 ${count} 套方案`:'请至少选择一套方案';
  button.disabled=generationBusy||multiPackageBusy||!count;
  const modified=modifiedSchemes(),retry=document.querySelector('#generate-modified');
- retry.hidden=!modified.length;retry.textContent=`重新生成已修改的 ${modified.length} 套方案`;retry.disabled=generationBusy;
+ retry.hidden=(multiPackageProducts.length>1&&!(currentTaskId&&s7User))||!modified.length;retry.textContent=`重新生成已修改的 ${modified.length} 套方案`;retry.disabled=generationBusy||multiPackageBusy;
 }
 for(const input of versionInputs)input.addEventListener('change',()=>{updateGenerateButton();taskDraft?.schedule();});
 let resultCards=new Map();
+function restoreMultiProductGeneration(record){
+  multiProductJob=record;multiPackageBusy=record.status==='running';generationBusy=false;
+  for(const product of multiPackageProducts){
+    const progress=productGeneration(record,product.id),view=multiProductViews.get(product.id)||{};
+    view.lastResultPayload={...progress,outputs:progress.outputs.map(output=>({...output,dataUrl:s7Path(output.dataUrl)}))};view.schemePhases=progress.stages;view.savedSignatures={...view.savedSignatures};
+    for(const output of progress.outputs)if(output.schemeSignature)view.savedSignatures[output.version]=output.schemeSignature;
+    multiProductViews.set(product.id,view);
+  }
+  const view=multiProductViews.get(loadedMultiProductId);
+  if(view&&loadedMultiProductId===selectedMultiProductId){
+    lastResultPayload=view.lastResultPayload;schemePhases=view.schemePhases;savedSignatures={...view.savedSignatures};
+    const signatures=currentSignatures();for(const output of lastResultPayload.outputs)if(!savedSignatures[output.version]&&schemePhases[output.version]?.stage==='complete')savedSignatures[output.version]=signatures[output.version];
+    view.savedSignatures={...savedSignatures};
+  }
+  const done=Object.values(record.stages).filter(value=>value.stage==='complete').length,total=Object.keys(record.stages).length;
+  const failed=Object.values(record.stages).some(value=>value.stage==='failed');
+  const text=multiPackageBusy?`正在生成 · ${done}/${total} 张已完成`:done===total?'已生成完成':`已完成 ${done}/${total} 张，未完成图片可重新生成。`;
+  if(status.textContent!==text)setStatus(text,multiPackageBusy?'busy':failed?'error':'success');
+  notifyTask(text,multiPackageBusy);renderMultiProductResults();queueSchemeCards();updateGenerateButton();
+}
 function restoreGeneration(record){
+  if(record.kind==='multi-product'){restoreMultiProductGeneration(record);return;}
   if(generationId!==record.id){generationId=record.id;beginResultProgress(record);}
   lastResultPayload.remoteTasks=record.remoteTasks||{};
   for(const output of record.outputs)completeResultProgress({...output,dataUrl:s7Path(output.dataUrl)},false);
@@ -756,20 +819,39 @@ async function runGeneration(selectedVersions,onlyVersion){
   }catch(error){for(const version of selectedVersions)if(schemePhases[version]?.stage!=='complete')schemePhases[version]={stage:'failed',error:error.message};setStatus(error.message||'生成失败','error');}
   finally{if(!backgroundAccepted)generationBusy=false;queueSchemeCards();updateGenerateButton();}
 }
-async function runMultiPackageGeneration(){
+async function runMultiPackageGeneration(options={}){
   if(multiPackageBusy)return;
   if(!logoData){setStatus('请先选择一个 Logo。','error');return;}
   if(multiPackageProducts.length<2){setStatus('请至少勾选两个已建立母版的包材。','error');return;}
   if(selectedMultiProductId!==loadedMultiProductId){setStatus('产品预览仍在加载，请加载完成后生成。','error');return;}
-  const productLayouts=captureMultiProductLayouts().map(layout=>({productId:layout.productId,targets:layout.targets,schemes:layout.schemeState.schemes}));
+  const productLayouts=captureMultiProductLayouts().map(layout=>{
+    const view=multiProductViews.get(layout.productId),assets=schemeSignature({version:'assets',targets:[{id:[view.baseData,logoData,mockupModel.value].join('|')}]});
+    return {productId:layout.productId,targets:layout.targets,schemes:layout.schemeState.schemes,schemeSignatures:Object.fromEntries(layout.schemeState.schemes.map(scheme=>[scheme.version,schemeSignature(scheme,assets)]))};
+  });
+  if(currentTaskId&&s7User){
+    multiPackageBusy=true;updateGenerateButton();
+    try{
+      await taskDraft.flush();
+      const response=await fetch('/api/ai-render-multi',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...options,background:true,productIds:multiPackageProducts.map(product=>product.id),productLayouts,logoImage:logoData,model:mockupModel.value,originalColor:'#000000'})});
+      const record=await response.json();if(!response.ok)throw Error(record.error||'多包材生成失败');generationWatcher.track(record);
+    }catch(error){multiPackageBusy=false;updateGenerateButton();setStatus(error.message||'多包材生成失败','error');}
+    return;
+  }
   multiPackageBusy=true;multiProductResults=new Map();renderMultiProductResults();updateGenerateButton();
   const products=multiPackageProducts.map(product=>({...product}));
+  multiProductJob={kind:'multi-product',status:'running',outputs:[],stages:Object.fromEntries(products.flatMap(product=>Object.keys(schemeNames).map(version=>[`${product.id}:${version}`,{stage:'queued'}])))};
+  restoreMultiProductGeneration(multiProductJob);
   try{
     const response=await fetch('/api/ai-render-multi',{method:'POST',headers:{'content-type':'application/json','accept':'text/event-stream'},body:JSON.stringify({productIds:products.map(product=>product.id),productLayouts,logoImage:logoData,model:mockupModel.value,originalColor:'#000000'})});
     if(!response.ok||!response.headers.get('content-type')?.includes('text/event-stream')){const payload=await response.json();throw Error(payload.error||'多包材生成失败');}
     await readProgressStream(response,async(event,data)=>{
-      if(event==='product-error')multiProductResults.set(data.product.id,{error:data.error});
-      else if(event==='product-done')multiProductResults.set(data.product.id,data);
+      if(event==='product-error'){multiProductResults.set(data.product.id,{error:data.error});for(const version of Object.keys(schemeNames))multiProductJob.stages[`${data.product.id}:${version}`]={stage:'failed',error:data.error};}
+      else if(event==='product-done'){
+        multiProductResults.set(data.product.id,data);
+        for(const version of Object.keys(schemeNames)){const image=data.images.find(image=>image.label===`${data.product.sku} · ${version}`);if(image){multiProductJob.outputs.push({productId:data.product.id,version,dataUrl:image.url||image.dataUrl});multiProductJob.stages[`${data.product.id}:${version}`]={stage:'complete'};}else multiProductJob.stages[`${data.product.id}:${version}`]={stage:'failed',error:data.failures?.find(failure=>failure.version===version)?.error||'未返回图片'};}
+      }
+      else if(event==='stage')multiProductJob.stages[`${data.product.id}:${data.version}`]={stage:data.stage,error:data.error};
+      restoreMultiProductGeneration(multiProductJob);
       if(event==='stage'&&data.product.id===selectedMultiProductId)setStatus(`${data.product.sku} · ${data.version}：${({submitting:'提交中',generating:'生成中',saving:'保存中',failed:'失败'})[data.stage]||data.stage}`,'busy');
       if(event==='product-error'||event==='product-done')renderMultiProductResults();
     });
@@ -778,10 +860,10 @@ async function runMultiPackageGeneration(){
     setStatus(failed.length?`${failed.length}/${products.length} 个产品未全部生成成功：${firstFailure?.error||firstFailure?.failures?.[0]?.error||'四种效果未全部返回'}。成功图片已保留。`:'所选产品的四种效果已生成。',failed.length?'error':'success');
     if(s7User)await refreshHistory();
   }catch(error){multiProductResults.set(selectedMultiProductId,{error:error.message||'多包材生成失败'});setStatus(error.message||'多包材生成失败','error');}
-  finally{multiPackageBusy=false;renderMultiProductResults();updateGenerateButton();}
+  finally{multiPackageBusy=false;multiProductJob.status=Object.values(multiProductJob.stages).every(value=>value.stage==='complete')?'complete':'partial';for(const [key,value]of Object.entries(multiProductJob.stages))if(!['complete','failed'].includes(value.stage))multiProductJob.stages[key]={stage:'failed',error:'生成连接中断，请重试'};restoreMultiProductGeneration(multiProductJob);}
 }
 document.querySelector('#generate').onclick=()=>multiPackageProducts.length>1?runMultiPackageGeneration():runGeneration(selectedGenerationVersions());
-document.querySelector('#generate-modified').onclick=()=>runGeneration(modifiedSchemes());
+document.querySelector('#generate-modified').onclick=()=>multiPackageProducts.length>1?runMultiPackageGeneration({onlyProductId:loadedMultiProductId,selectedVersions:modifiedSchemes()}):runGeneration(modifiedSchemes());
 renderMultiProductResults();
 mockupModel.addEventListener('change',()=>{queueSchemeCards();taskDraft?.schedule();});
 createSchemeCards();updateGenerateButton();
@@ -792,10 +874,11 @@ await loadMockupModels();
 if(currentTaskId&&s7User){
  taskDraft=createTaskDraft({id:currentTaskId,
   request:async(url,data,method='GET')=>{const response=await fetch(url,{method,headers:{'Content-Type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});const value=await response.json();if(!response.ok)throw Error(value.error||'任务保存失败');return value;},
-  capture:()=>{const multiProductLayouts=captureMultiProductLayouts();return {schemeState,activeScheme,placementScope,savedSignatures,selectedVersions:selectedGenerationVersions(),baseData,logoData,logoSourceData,baseDataUrl:baseImage?.src||'',logoDataUrl:logoImage?.src||'',targets:collectTargets(),selectedTargetId,model:mockupModel.value,logoOutputColor:document.querySelector('input[name="logo-output-color"]:checked').value,baseName:document.querySelector('#base-name').textContent,logoName:document.querySelector('#logo-name').textContent,result:lastResultPayload,multiPackageProducts,multiProductLayouts,selectedMultiProductId};},
+  capture:()=>{const multiProductLayouts=captureMultiProductLayouts();return {schemeState,activeScheme,placementScope,savedSignatures,downloadSelection,selectedVersions:selectedGenerationVersions(),baseData,logoData,logoSourceData,baseDataUrl:baseData?'':baseImage?.src||'',logoDataUrl:logoData?'':logoImage?.src||'',targets:collectTargets(),selectedTargetId,model:mockupModel.value,logoOutputColor:document.querySelector('input[name="logo-output-color"]:checked').value,baseName:document.querySelector('#base-name').textContent,logoName:document.querySelector('#logo-name').textContent,result:multiPackageProducts.length>1?null:lastResultPayload,multiPackageProducts,multiProductLayouts,selectedMultiProductId};},
   onSaved:record=>{const busy=status.classList.contains('busy');notifyTask(busy?'生成中…':'已保存',busy,record.updatedAt);},onError:error=>{status.textContent=error.message;status.className='status error';notifyTask('保存失败');}});
  try{
   const state=await taskDraft.load();
+  downloadSelection=state.downloadSelection||{};
   if(Array.isArray(state.selectedVersions)){for(const input of versionInputs)input.checked=state.selectedVersions.includes(input.value);updateGenerateButton();}
   baseData=state.baseData||'';logoData=state.logoData||'';logoSourceData=state.logoSourceData||'';
   multiPackageProducts=Array.isArray(state.multiPackageProducts)?state.multiPackageProducts.filter(product=>product&&typeof product.id==='string'&&typeof product.sku==='string'&&typeof product.name==='string'):[];renderMultiProductResults();
@@ -805,11 +888,13 @@ if(currentTaskId&&s7User){
     selectedMultiProductId=restoredProduct.id;
     if(!multiProductViews.has(restoredProduct.id)&&state.schemeState?.schemes?.length)multiProductViews.set(restoredProduct.id,{targets:state.targets,schemeState:state.schemeState,activeScheme:state.activeScheme||'ORIGINAL',placementScope:state.placementScope||'shared',selectedTargetId:state.selectedTargetId});
   }
-  baseImage=state.baseDataUrl?await loadImage(state.baseDataUrl):null;logoImage=state.logoDataUrl?await loadImage(state.logoDataUrl):null;
+  const baseUrl=state.baseData?`data:image/png;base64,${state.baseData}`:state.baseDataUrl,logoUrl=state.logoData?`data:image/png;base64,${state.logoData}`:state.logoDataUrl;
+  baseImage=baseUrl?await loadImage(baseUrl):null;logoImage=logoUrl?await loadImage(logoUrl):null;
+  if(restoredProduct&&baseImage){multiProductViews.set(restoredProduct.id,{...multiProductViews.get(restoredProduct.id),baseData,baseImage});loadedMultiProductId=restoredProduct.id;}
   if(state.schemeState?.schemes?.length){schemeState=state.schemeState;activeScheme=state.activeScheme||'ORIGINAL';placementScope=state.placementScope||'shared';savedSignatures=state.savedSignatures||{};document.querySelector('#preview-version').value=activeScheme;selectedTargetId=state.selectedTargetId;loadSchemeTargets();}
   else if(state.targets?.length){schemeState=null;rebuildingTargets=true;targets.replaceChildren();targetNumber=0;state.targets.forEach(addTarget);rebuildingTargets=false;selectedTargetId=state.selectedTargetId||state.targets[0].id;}
   for(const [id,key]of [['base-name','baseName'],['logo-name','logoName']])if(state[key])document.querySelector('#'+id).textContent=state[key];
-  if(state.logoDataUrl)setSelectedLogoPreview(state.logoDataUrl,state.logoName||'已恢复 Logo');
+  if(logoUrl)setSelectedLogoPreview(logoUrl,state.logoName||'已恢复 Logo');
   if(state.logoOutputColor)document.querySelectorAll('input[name="logo-output-color"]').forEach(input=>{input.checked=input.value===state.logoOutputColor;});
   if([...mockupModel.options].some(option=>option.value===state.model))mockupModel.value=state.model;
   processButton.disabled=!logoData;refreshTargetSelection();drawPreview();if(state.result)renderResults(state.result);
@@ -820,10 +905,12 @@ if(currentTaskId&&s7User){
    onError:error=>{if(error.status!==401)setStatus('进度暂时无法读取，后台生成会继续；稍后自动重连。','error');}
   });
   await generationWatcher.refresh();
+  if(!taskActive)generationWatcher.setActive(false);
   window.addEventListener('pagehide',()=>generationWatcher.stop());
   document.addEventListener('input',()=>taskDraft.schedule());document.addEventListener('change',()=>taskDraft.schedule());
   window.addEventListener('beforeunload',event=>{if(taskDraft.isDirty()){event.preventDefault();event.returnValue='';}});
  }catch(error){setStatus(error.message,'error');document.querySelector('#generate').disabled=true;}
 }else await restoreSavedLogo();
 if(multiPackageProducts.length)await showMultiProduct(selectedMultiProductId||multiPackageProducts[0].id);
+downloadSelectionReady=true;updateDownloadSelection();queueSchemeCards();
 refreshHistory().catch(error=>setStatus(error.message,'error'));

@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as selection from './download-selection.mjs';
+
+test('成图默认选中，取消后跨产品切换和刷新保留选择，新成图重新默认选中',()=>{
+ assert.equal(typeof selection.syncDownloadSelection,'function');
+ const a={productId:'a',version:'ORIGINAL',dataUrl:'/a.png'},b={productId:'b',version:'ORIGINAL',dataUrl:'/b.png'};
+ let state=selection.syncDownloadSelection({},[a,b]);
+ assert.deepEqual(selection.selectedDownloadOutputs(state,[a,b]),[a,b]);
+ state[selection.downloadKey(a)].selected=false;
+ state=JSON.parse(JSON.stringify(state));
+ assert.equal(selection.syncDownloadSelection(state,[a,b]),state,'相同成图的轮询不应修改已保存选择');
+ assert.deepEqual(selection.selectedDownloadOutputs(state,[a,b]),[b],'取消当前产品不影响另一个产品');
+ const replacement={...a,dataUrl:'/a-new.png'};
+ state=selection.syncDownloadSelection(state,[replacement,b]);
+ assert.deepEqual(selection.selectedDownloadOutputs(state,[replacement,b]),[replacement,b]);
+});
+
+test('未生成槽位不能选中或下载，移除产品不留在下载列表',()=>{
+ assert.equal(typeof selection.syncDownloadSelection,'function');
+ const pending={productId:'a',version:'BLACK'},done={version:'ORIGINAL',dataUrl:'/single.png'};
+ const state=selection.syncDownloadSelection({},[pending,done]);
+ assert.equal(Object.keys(state).length,1);
+ assert.deepEqual(selection.selectedDownloadOutputs(state,[pending,done]),[done]);
+ assert.deepEqual(selection.syncDownloadSelection(state,[]),{});
+});
