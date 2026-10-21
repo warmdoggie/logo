@@ -2,6 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as taskState from './task-draft.mjs';
 const {createTaskDraft}=taskState;
+
+test('切换尚未加载完成就刷新时，草稿原图仍归属于原产品',()=>{
+ assert.equal(typeof taskState.restoredBaseProduct,'function');
+ const products=[{id:'a',sku:'A',name:'甲'},{id:'b',sku:'B',name:'乙'}];
+ assert.equal(taskState.restoredBaseProduct({selectedMultiProductId:'b',baseName:'产品库：A · 甲'},products).id,'a');
+ assert.equal(taskState.restoredBaseProduct({selectedMultiProductId:'b',baseProductId:'a',baseName:'旧名称'},products).id,'a');
+ assert.equal(taskState.restoredBaseProduct({selectedMultiProductId:'b'},products).id,'b');
+ assert.equal(taskState.restoredBaseProduct({selectedMultiProductId:'b',baseProductId:'a',baseName:'产品库：A · 甲'},products.slice(1)),undefined);
+ assert.equal(taskState.restoredBaseProduct({selectedMultiProductId:'b',baseName:'产品库：A · 甲'},products.slice(1)),undefined);
+});
 test('恢复已重生成的结果时，不会重新套用旧生成记录的图片',()=>{
  const normalize=taskState.normalizeTaskResult||((payload)=>payload);
  const initial=normalize({outputs:[{version:'BLACK',dataUrl:'data:old'}],savedRecord:{images:[{label:'BLACK',url:'/old.png'}]}});

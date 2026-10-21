@@ -1,6 +1,7 @@
 import {mkdir,readdir,readFile,writeFile,rename,rm,stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {randomUUID} from 'node:crypto';
+import sharp from 'sharp';
 const fail=(message,status)=>{throw Object.assign(Error(message),{status});};
 const safe=value=>{if(typeof value!=='string'||! /^[a-zA-Z0-9_-]{1,80}$/.test(value))fail('文件不存在',404);return value;};
 export async function authenticateWorkspace(req){
@@ -50,7 +51,14 @@ export function userSpace(root){
   return taskId?serialized(taskFile(user,taskId),persist):persist();
  }
  async function history(user,taskId){if(taskId)await ensureTask(user,taskId);let names;try{names=await readdir(directory(user));}catch(e){if(e.code==='ENOENT')return [];throw e;}const records=[];for(const name of names){if(!/^[a-f0-9-]{36}$/.test(name))continue;let record;try{record=JSON.parse(await readFile(join(directory(user),name,'record.json'),'utf8'));}catch(e){if(e.code==='ENOENT')continue;throw e;}if((record.taskId||null)===(taskId||null))records.push(record);}return records.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));}
- async function image(user,id,name,taskId){safe(id);if(!/^image-\d+\.png$/.test(name))fail('文件不存在',404);if(taskId)await ensureTask(user,taskId);try{const record=JSON.parse(await readFile(join(directory(user),id,'record.json'),'utf8'));if((record.taskId||null)!==(taskId||null))fail('文件不存在',404);return await readFile(join(directory(user),id,name));}catch(e){if(e.code==='ENOENT')fail('文件不存在',404);throw e;}}
+ async function image(user,id,name,taskId,preview=false){safe(id);if(!/^image-\d+\.png$/.test(name))fail('文件不存在',404);if(taskId)await ensureTask(user,taskId);try{
+  const folder=join(directory(user),id),record=JSON.parse(await readFile(join(folder,'record.json'),'utf8'));if((record.taskId||null)!==(taskId||null))fail('文件不存在',404);
+  if(!preview)return await readFile(join(folder,name));
+  const file=join(folder,'preview-v1-'+name.replace(/\.png$/,'.webp'));
+  try{return await readFile(file);}catch(error){if(error.code!=='ENOENT')throw error;}
+  const bytes=await sharp(await readFile(join(folder,name))).resize({width:1200,height:1200,fit:'inside',withoutEnlargement:true}).webp({quality:84}).toBuffer(),temporary=file+'.'+randomUUID();
+  try{await writeFile(temporary,bytes,{flag:'wx'});await rename(temporary,file);}finally{await rm(temporary,{force:true});}return bytes;
+ }catch(e){if(e.code==='ENOENT')fail('文件不存在',404);throw e;}}
  async function readGeneration(user,id){await ensureTask(user,id);try{return JSON.parse(await readFile(join(taskFile(user,id),'..','generation.json'),'utf8'));}catch(e){if(e.code==='ENOENT')return null;throw e;}}
  function generation(user,id){return serialized(taskFile(user,id),()=>readGeneration(user,id));}
  async function updateGeneration(user,id,change){return serialized(taskFile(user,id),async()=>{

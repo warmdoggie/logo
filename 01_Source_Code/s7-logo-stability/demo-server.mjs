@@ -24,6 +24,7 @@ const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=
 const PUBLIC_FILES=new Set(['tasks.html','tasks.js','tasks.css','task-draft.mjs','generation-client.mjs','generation-versions.mjs','demo.html','demo.js','demo.css','demo-geometry.mjs','target-state.mjs','target-print.mjs','schemes.mjs','preview-logo-layer.mjs','contrast-color.mjs','saved-logo.mjs','product-master.mjs','transparent-logo-download.mjs','rotation-handle.mjs']);
 PUBLIC_FILES.add('download-selection.mjs');
 PUBLIC_FILES.add('download-archive.mjs');
+PUBLIC_FILES.add('preview-images.mjs');
 const PRODUCT_LIBRARY_URL=process.env.S7_PRODUCT_LIBRARY_URL||'http://127.0.0.1:3210/api/products?includeInactive=0';
 for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css'])PUBLIC_FILES.add(file);
 
@@ -155,10 +156,10 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
         res.writeHead(200,{'content-type':'application/zip','content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(clean(task.title)+'.zip')}`,'cache-control':'private, no-store'});res.end(bytes);return;
       }
       const taskImageMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/image\/([^/]+)\/([^/]+)$/);
-      if(user&&req.method==='GET'&&taskImageMatch){const bytes=await spaces.image(user,taskImageMatch[2],taskImageMatch[3],taskImageMatch[1]);res.writeHead(200,{'content-type':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
+      if(user&&req.method==='GET'&&taskImageMatch){const preview=url.searchParams.get('preview')==='1',bytes=await spaces.image(user,taskImageMatch[2],taskImageMatch[3],taskImageMatch[1],preview);res.writeHead(200,{'content-type':preview?'image/webp':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
       if(user&&req.method==='GET'&&url.pathname==='/api/my-space/history'){json(res,200,await spaces.history(user,url.searchParams.get('taskId')));return;}
       const imageMatch=url.pathname.match(/^\/api\/my-space\/image\/([^/]+)\/([^/]+)$/);
-      if(user&&req.method==='GET'&&imageMatch){const bytes=await spaces.image(user,imageMatch[1],imageMatch[2]);res.writeHead(200,{'content-type':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
+      if(user&&req.method==='GET'&&imageMatch){const preview=url.searchParams.get('preview')==='1',bytes=await spaces.image(user,imageMatch[1],imageMatch[2],undefined,preview);res.writeHead(200,{'content-type':preview?'image/webp':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
       if(req.method==='GET'){
         if(url.pathname==='/healthz'){json(res,200,{ok:true,service:'s7-logo-stability'});return;}
         if(url.pathname==='/api/ai-logo/status'){json(res,200,aiStatus());return;}
@@ -182,6 +183,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
           const product=(await productCatalog(req)).find(item=>String(item?.id)===id);
           if(!product)throw Error('产品不存在');
           const output=await productImage(product,req);
+          if(url.searchParams.get('thumbnail')==='1'){const bytes=await sharp(output.bytes).resize({width:192,height:192,fit:'inside',withoutEnlargement:true}).webp({quality:76}).toBuffer();res.writeHead(200,{'content-type':'image/webp','cache-control':'private, no-store'});res.end(bytes);return;}
           res.writeHead(200,{'content-type':output.contentType,'cache-control':'no-store'});res.end(output.bytes);return;
         }
         const productTemplateMatch=url.pathname.match(/^\/api\/product-library\/template\/([^/]+)$/);

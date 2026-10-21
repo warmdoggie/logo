@@ -8,9 +8,10 @@ import {clearSavedLogo,loadSavedLogo,saveLogo} from './saved-logo.mjs';
 import {masterTargetsFromTemplate} from './product-master.mjs';
 import {triggerTransparentLogoDownload} from './transparent-logo-download.mjs';
 import {rotationGestureMode,rotationHandleLocalPosition} from './rotation-handle.mjs';
-import {createTaskDraft,normalizeTaskResult} from './task-draft.mjs';
+import {createTaskDraft,normalizeTaskResult,restoredBaseProduct} from './task-draft.mjs';
 import {createGenerationWatcher,previewStatus,productGeneration} from './generation-client.mjs';
 import {downloadKey,syncDownloadSelection,selectedDownloadOutputs} from './download-selection.mjs';
+import {createPreviewImages,previewImageUrl} from './preview-images.mjs';
 
 const targets=document.querySelector('#targets');
 const status=document.querySelector('#status');
@@ -18,6 +19,7 @@ const emptyState=document.querySelector('#empty-state');
 const results=document.querySelector('#results');
 const resultMeta=document.querySelector('#result-meta');
 const downloadSelectedButton=document.querySelector('#download-selected');
+const previewImages=createPreviewImages();let previewLoading=false,previewError='';
 const multiProductTabs=document.querySelector('#multi-product-tabs');
 const multiProductOutput=document.querySelector('#multi-product-output');
 const previewSection=document.querySelector('.preview-section');
@@ -83,7 +85,7 @@ const logoLibraryPath=value=>S7_BASE?new URL(value,location.origin).href:s7Path(
 const nativeFetch=window.fetch.bind(window);
 let s7User=null;
 let logoStorage=localStorage;
-function requireLogin(){document.body.replaceChildren();const link=document.createElement('a');link.textContent='登录已失效，请返回主工作空间登录';link.href=S7_BASE?'/':`http://${location.hostname}:3210/`;link.target='_top';document.body.append(link);}
+function requireLogin(){previewImages.clear();document.body.replaceChildren();const link=document.createElement('a');link.textContent='登录已失效，请返回主工作空间登录';link.href=S7_BASE?'/':`http://${location.hostname}:3210/`;link.target='_top';document.body.append(link);}
 const fetch=async(input,init)=>{if(currentTaskId&&s7User&&init?.method==='POST'&&['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo','/api/process-logo','/api/render'].includes(input)){init={...init,body:JSON.stringify({...JSON.parse(init.body),taskId:currentTaskId})};}const response=await nativeFetch(typeof input==='string'?s7Path(input):input,init);if(s7User){const session=await nativeFetch(s7Path('/api/session'));const value=session.ok?await session.json():null;if(session.status===401||(session.ok&&value?.user?.id!==s7User.id)){requireLogin();throw Error('登录已变更，请重新进入个人空间');}if(!session.ok)throw Error('认证服务暂时无法读取，请稍后重试');if(init?.method==='POST'&&response.ok)refreshHistory().catch(()=>{});}return response;};
 {
  const response=await nativeFetch(s7Path('/api/session'));
@@ -133,8 +135,9 @@ function captureMultiProductLayouts(){
 async function showMultiProduct(id){
   const product=multiPackageProducts.find(item=>item.id===id);if(!product)return;
   selectedMultiProductId=id;renderMultiProductResults();
-  if(loadedMultiProductId===id)return;
   const revision=++multiProductLoadRevision;
+  queueSchemeCards();
+  if(loadedMultiProductId===id)return;
   saveMultiProductView();
   setStatus(`正在加载 ${product.sku} 的四种方案预览…`,'busy');
   try{
@@ -167,17 +170,25 @@ function renderMultiProductResults(){
   multiProductOutput.hidden=true;
   results.hidden=false;
   previewSection.hidden=false;
-  if(!active){multiProductTabs.replaceChildren();multiProductOutput.replaceChildren();resultMeta.textContent='选择方案查看和调整';return;}
+  if(!active){multiProductTabs.replaceChildren();delete multiProductTabs.dataset.products;multiProductOutput.replaceChildren();resultMeta.textContent='选择方案查看和调整';return;}
   if(!previewProducts.some(product=>product.id===selectedMultiProductId))selectedMultiProductId=previewProducts[0].id;
-  multiProductTabs.innerHTML=previewProducts.map(product=>{
-    const imageUrl=s7Path(product.imageUrl||`/api/product-library/image/${encodeURIComponent(product.id)}`);
+  const tabKey=JSON.stringify(previewProducts.map(product=>[product.id,product.sku,product.imageUrl]));
+  if(multiProductTabs.dataset.products!==tabKey){
+    multiProductTabs.innerHTML=previewProducts.map(product=>{
+      const imageUrl=s7Path(product.imageUrl||`/api/product-library/image/${encodeURIComponent(product.id)}`);
+      return `<button type="button" class="multi-product-tab" data-multi-product-id="${esc(product.id)}"><img src="${esc(imageUrl+'?thumbnail=1')}" alt=""><span><strong>${esc(product.sku)}</strong><small></small></span></button>`;
+    }).join('');
+    multiProductTabs.dataset.products=tabKey;
+    multiProductTabs.querySelectorAll('[data-multi-product-id]').forEach(button=>button.addEventListener('click',()=>showMultiProduct(button.dataset.multiProductId)));
+  }
+  for(const product of previewProducts){
     const result=multiProductResults.get(product.id);
     const progress=multiProductJob?productGeneration(multiProductJob,product.id):null;
     const completed=progress?Object.values(progress.stages).filter(value=>value.stage==='complete').length:0;
     const state=progress?completed===4?'已生成完成':`${completed}/4 已完成${multiPackageBusy?' · 生成中':''}`:result?.error?'生成失败':result?.images?(result.complete?'已生成完成':'部分完成'):multiPackageBusy?'处理中':'方案预览';
-    return `<button type="button" class="multi-product-tab ${product.id===selectedMultiProductId?'active':''}" data-multi-product-id="${esc(product.id)}" aria-pressed="${product.id===selectedMultiProductId}"><img src="${esc(imageUrl)}" alt=""><span><strong>${esc(product.sku)}</strong><small>${state}</small></span></button>`;
-  }).join('');
-  multiProductTabs.querySelectorAll('[data-multi-product-id]').forEach(button=>button.addEventListener('click',()=>showMultiProduct(button.dataset.multiProductId)));
+    const button=[...multiProductTabs.querySelectorAll('[data-multi-product-id]')].find(button=>button.dataset.multiProductId===product.id);
+    button.classList.toggle('active',product.id===selectedMultiProductId);button.setAttribute('aria-pressed',String(product.id===selectedMultiProductId));button.querySelector('small').textContent=state;
+  }
   const product=previewProducts.find(item=>item.id===selectedMultiProductId);
   resultMeta.textContent=product?`${product.sku} · ${product.name}`:'批量包材效果';
   multiProductOutput.replaceChildren();
@@ -261,7 +272,13 @@ function assetKey(){
   return cachedAssetKey;
 }
 function currentSignatures(){return Object.fromEntries((schemeState?.schemes||[]).map(scheme=>[scheme.version,schemeSignature(scheme,assetKey())]));}
-function schemeOutput(version){return lastResultPayload?.outputs?.find(output=>output.version===version);}
+function schemeOutput(version){
+ if(selectedMultiProductId!==loadedMultiProductId){
+  if(!multiProductJob)return multiProductViews.get(selectedMultiProductId)?.lastResultPayload?.outputs?.find(output=>output.version===version);
+  const output=multiProductJob.outputs.find(output=>output.productId===selectedMultiProductId&&output.version===version);return output?{...output,dataUrl:s7Path(output.dataUrl)}:undefined;
+ }
+ return lastResultPayload?.outputs?.find(output=>output.version===version);
+}
 function modifiedSchemes(){const signatures=currentSignatures();return Object.keys(schemeNames).filter(version=>schemeOutput(version)&&savedSignatures[version]!==signatures[version]);}
 function queueSchemeCards(){
   if(schemePreviewFrame!==null)return;
@@ -324,26 +341,30 @@ function renderSchemeCards(){
   if(!schemeState)return;
   updateDownloadSelection();
   if(thumbnailImages[0]!==baseImage||thumbnailImages[1]!==logoImage){thumbnailImages=[baseImage,logoImage];thumbnailImageRevision++;}
-  const signatures=currentSignatures();
+  const signatures=currentSignatures(),switching=!!selectedMultiProductId&&selectedMultiProductId!==loadedMultiProductId;
+  const switchingProgress=switching&&multiProductJob?productGeneration(multiProductJob,selectedMultiProductId):null,entries=[];
   for(const scheme of schemeState.schemes){
     const card=resultCards.get(scheme.version);if(!card)continue;
-    const output=schemeOutput(scheme.version),phase=schemePhases[scheme.version],dirty=!!output&&savedSignatures[scheme.version]!==signatures[scheme.version];
+    const output=schemeOutput(scheme.version),phase=switchingProgress?switchingProgress.stages[scheme.version]:schemePhases[scheme.version],dirty=!switching&&!!output&&savedSignatures[scheme.version]!==signatures[scheme.version];
     card.classList.toggle('active',scheme.version===activeScheme);card.classList.toggle('modified',dirty);
     card.dataset.stage=phase?.stage|| (output?'complete':'preview');
     const useImage=!!output&&!(dirty&&showModifiedPreview.has(scheme.version));
-    const image=card.querySelector('.result-image'),thumbnail=card.querySelector('canvas');image.hidden=!useImage;thumbnail.hidden=useImage;
-    if(output&&image.getAttribute('src')!==output.dataUrl)image.src=output.dataUrl;
+    const image=card.querySelector('.result-image'),thumbnail=card.querySelector('canvas');thumbnail.hidden=useImage||switching;
+    entries.push({image,url:useImage?previewImageUrl(output.dataUrl):null});
     const thumbnailKey=`${signatures[scheme.version]}:${thumbnailImageRevision}`;
-    if(!useImage&&thumbnail.dataset.signature!==thumbnailKey){drawSchemeThumbnail(thumbnail,scheme);thumbnail.dataset.signature=thumbnailKey;}
-    card.querySelector('.scheme-summary').textContent=appearanceSummary(scheme);
+    if(!switching&&!useImage&&thumbnail.dataset.signature!==thumbnailKey){drawSchemeThumbnail(thumbnail,scheme);thumbnail.dataset.signature=thumbnailKey;}
+    card.querySelector('.scheme-summary').textContent=switching?'正在加载此产品的编辑素材…':appearanceSummary(scheme);
+    card.querySelector('.edit-scheme').disabled=switching;
     card.querySelector('.scheme-image-kind').textContent=useImage?(dirty?'上次成图':'生成结果'):baseImage?'效果示意':'选择产品与 Logo 后预览';
-    const progress=previewStatus(output,phase,dirty),overlay=card.querySelector('.generation-overlay');overlay.hidden=!progress.busy;overlay.querySelector('.generation-label').textContent=progress.label;
+    const progress=previewStatus(output,phase,dirty),overlay=card.querySelector('.generation-overlay');overlay.hidden=!progress.busy&&!(useImage&&(previewLoading||previewError));overlay.querySelector('.generation-label').textContent=progress.busy?progress.label:previewError||'正在加载预览';
+    overlay.onclick=()=>{if(previewError){previewImages.retry();previewError='';queueSchemeCards();}};
     card.classList.toggle('generated-complete',progress.complete);card.querySelector('.result-stage').textContent=progress.label;
     if(progress.complete)card.querySelector('.scheme-image-kind').textContent='已生成完成';
     const selection=card.querySelector('.select-download'),download=output&&{...output,productId:output.productId||loadedMultiProductId||''};selection.disabled=!output;selection.checked=!!download&&!!downloadSelection[downloadKey(download)]?.selected;
-    const retry=card.querySelector('.regenerate-result');retry.hidden=(multiPackageProducts.length>1&&!(currentTaskId&&s7User))||(!output&&phase?.stage!=='failed');retry.disabled=generationBusy||multiPackageBusy;retry.textContent=phase?.stage==='failed'&&lastResultPayload?.remoteTasks?.[scheme.version]&&lastResultPayload?.schemeSignatures?.[scheme.version]===signatures[scheme.version]?'继续获取结果':'重新生成';
+    const retry=card.querySelector('.regenerate-result');retry.hidden=(multiPackageProducts.length>1&&!(currentTaskId&&s7User))||(!output&&phase?.stage!=='failed');retry.disabled=generationBusy||multiPackageBusy||switching;retry.textContent=phase?.stage==='failed'&&lastResultPayload?.remoteTasks?.[scheme.version]&&lastResultPayload?.schemeSignatures?.[scheme.version]===signatures[scheme.version]?'继续获取结果':'重新生成';
     const compare=card.querySelector('.compare-result');compare.hidden=!dirty;compare.textContent=useImage?'看修改预览':'看上次成图';
   }
+  previewImages.show(JSON.stringify([selectedMultiProductId,entries.map(entry=>entry.url)]),entries,{onLoading:()=>{previewLoading=true;previewError='';queueSchemeCards();},onReady:()=>{previewLoading=false;queueSchemeCards();},onError:()=>{previewLoading=false;previewError='预览加载失败，点击重试';queueSchemeCards();}});
   updateGenerateButton();
 }
 function createSchemeCards(){
@@ -354,7 +375,7 @@ function createSchemeCards(){
     const input=versionInputs.find(input=>input.value===version);card.querySelector('label').append(input,document.createTextNode(name));
     card.querySelector('.edit-scheme').onclick=()=>switchScheme(version);
     const thumbnail=card.querySelector('canvas');thumbnail.setAttribute('aria-label',`${name}效果示意`);thumbnail.onclick=()=>switchScheme(version);
-    const image=card.querySelector('img');image.alt=`${name}生成结果`;image.onclick=()=>openImagePreview(name,image.src);
+    const image=card.querySelector('img');image.alt=`${name}生成结果`;image.onclick=()=>{const output=schemeOutput(version);if(output)openImagePreview(name,output.dataUrl);};
     const selection=card.querySelector('.select-download');selection.setAttribute('aria-label',`选择下载${name}`);selection.title=`选择下载${name}`;
     selection.onchange=()=>{const output=schemeOutput(version);if(!output)return;const key=downloadKey({...output,productId:output.productId||loadedMultiProductId||''});downloadSelection={...downloadSelection,[key]:{dataUrl:output.dataUrl,selected:selection.checked}};taskDraft?.schedule();updateDownloadSelection();};
     card.querySelector('.regenerate-result').onclick=()=>regenerateResult(version,card);
@@ -725,6 +746,8 @@ function restoreMultiProductGeneration(record){
   const text=multiPackageBusy?`正在生成 · ${done}/${total} 张已完成`:done===total?'已生成完成':`已完成 ${done}/${total} 张，未完成图片可重新生成。`;
   if(status.textContent!==text)setStatus(text,multiPackageBusy?'busy':failed?'error':'success');
   notifyTask(text,multiPackageBusy);renderMultiProductResults();queueSchemeCards();updateGenerateButton();
+  const next=multiPackageProducts[(multiPackageProducts.findIndex(product=>product.id===selectedMultiProductId)+1)%multiPackageProducts.length];
+  if(next&&taskActive)setTimeout(()=>previewImages.preload(record.outputs.filter(output=>output.productId===next.id).map(output=>previewImageUrl(s7Path(output.dataUrl)))),200);
 }
 function restoreGeneration(record){
   if(record.kind==='multi-product'){restoreMultiProductGeneration(record);return;}
@@ -874,7 +897,7 @@ await loadMockupModels();
 if(currentTaskId&&s7User){
  taskDraft=createTaskDraft({id:currentTaskId,
   request:async(url,data,method='GET')=>{const response=await fetch(url,{method,headers:{'Content-Type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});const value=await response.json();if(!response.ok)throw Error(value.error||'任务保存失败');return value;},
-  capture:()=>{const multiProductLayouts=captureMultiProductLayouts();return {schemeState,activeScheme,placementScope,savedSignatures,downloadSelection,selectedVersions:selectedGenerationVersions(),baseData,logoData,logoSourceData,baseDataUrl:baseData?'':baseImage?.src||'',logoDataUrl:logoData?'':logoImage?.src||'',targets:collectTargets(),selectedTargetId,model:mockupModel.value,logoOutputColor:document.querySelector('input[name="logo-output-color"]:checked').value,baseName:document.querySelector('#base-name').textContent,logoName:document.querySelector('#logo-name').textContent,result:multiPackageProducts.length>1?null:lastResultPayload,multiPackageProducts,multiProductLayouts,selectedMultiProductId};},
+  capture:()=>{const multiProductLayouts=captureMultiProductLayouts();return {schemeState,activeScheme,placementScope,savedSignatures,downloadSelection,selectedVersions:selectedGenerationVersions(),baseData,baseProductId:loadedMultiProductId,logoData,logoSourceData,baseDataUrl:baseData?'':baseImage?.src||'',logoDataUrl:logoData?'':logoImage?.src||'',targets:collectTargets(),selectedTargetId,model:mockupModel.value,logoOutputColor:document.querySelector('input[name="logo-output-color"]:checked').value,baseName:document.querySelector('#base-name').textContent,logoName:document.querySelector('#logo-name').textContent,result:multiPackageProducts.length>1?null:lastResultPayload,multiPackageProducts,multiProductLayouts,selectedMultiProductId};},
   onSaved:record=>{const busy=status.classList.contains('busy');notifyTask(busy?'生成中…':'已保存',busy,record.updatedAt);},onError:error=>{status.textContent=error.message;status.className='status error';notifyTask('保存失败');}});
  try{
   const state=await taskDraft.load();
@@ -884,13 +907,12 @@ if(currentTaskId&&s7User){
   multiPackageProducts=Array.isArray(state.multiPackageProducts)?state.multiPackageProducts.filter(product=>product&&typeof product.id==='string'&&typeof product.sku==='string'&&typeof product.name==='string'):[];renderMultiProductResults();
   if(Array.isArray(state.multiProductLayouts))multiProductViews=new Map(state.multiProductLayouts.filter(layout=>layout?.schemeState?.schemes?.length).map(layout=>[layout.productId,layout]));
   const restoredProduct=multiPackageProducts.find(product=>state.selectedMultiProductId?product.id===state.selectedMultiProductId:state.baseName===`产品库：${product.sku} · ${product.name}`);
-  if(restoredProduct){
-    selectedMultiProductId=restoredProduct.id;
-    if(!multiProductViews.has(restoredProduct.id)&&state.schemeState?.schemes?.length)multiProductViews.set(restoredProduct.id,{targets:state.targets,schemeState:state.schemeState,activeScheme:state.activeScheme||'ORIGINAL',placementScope:state.placementScope||'shared',selectedTargetId:state.selectedTargetId});
-  }
+  if(restoredProduct)selectedMultiProductId=restoredProduct.id;
+  const restoredBase=restoredBaseProduct(state,multiPackageProducts);
+  if(restoredBase&&!multiProductViews.has(restoredBase.id)&&state.schemeState?.schemes?.length)multiProductViews.set(restoredBase.id,{targets:state.targets,schemeState:state.schemeState,activeScheme:state.activeScheme||'ORIGINAL',placementScope:state.placementScope||'shared',selectedTargetId:state.selectedTargetId});
   const baseUrl=state.baseData?`data:image/png;base64,${state.baseData}`:state.baseDataUrl,logoUrl=state.logoData?`data:image/png;base64,${state.logoData}`:state.logoDataUrl;
   baseImage=baseUrl?await loadImage(baseUrl):null;logoImage=logoUrl?await loadImage(logoUrl):null;
-  if(restoredProduct&&baseImage){multiProductViews.set(restoredProduct.id,{...multiProductViews.get(restoredProduct.id),baseData,baseImage});loadedMultiProductId=restoredProduct.id;}
+  if(restoredBase&&baseImage){multiProductViews.set(restoredBase.id,{...multiProductViews.get(restoredBase.id),baseData,baseImage});loadedMultiProductId=restoredBase.id;}
   if(state.schemeState?.schemes?.length){schemeState=state.schemeState;activeScheme=state.activeScheme||'ORIGINAL';placementScope=state.placementScope||'shared';savedSignatures=state.savedSignatures||{};document.querySelector('#preview-version').value=activeScheme;selectedTargetId=state.selectedTargetId;loadSchemeTargets();}
   else if(state.targets?.length){schemeState=null;rebuildingTargets=true;targets.replaceChildren();targetNumber=0;state.targets.forEach(addTarget);rebuildingTargets=false;selectedTargetId=state.selectedTargetId||state.targets[0].id;}
   for(const [id,key]of [['base-name','baseName'],['logo-name','logoName']])if(state[key])document.querySelector('#'+id).textContent=state[key];
@@ -906,7 +928,7 @@ if(currentTaskId&&s7User){
   });
   await generationWatcher.refresh();
   if(!taskActive)generationWatcher.setActive(false);
-  window.addEventListener('pagehide',()=>generationWatcher.stop());
+  window.addEventListener('pagehide',()=>{generationWatcher.stop();previewImages.clear();});
   document.addEventListener('input',()=>taskDraft.schedule());document.addEventListener('change',()=>taskDraft.schedule());
   window.addEventListener('beforeunload',event=>{if(taskDraft.isDirty()){event.preventDefault();event.returnValue='';}});
  }catch(error){setStatus(error.message,'error');document.querySelector('#generate').disabled=true;}

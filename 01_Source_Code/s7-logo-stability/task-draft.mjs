@@ -1,3 +1,9 @@
+export function restoredBaseProduct(state,products){
+ if(state.baseProductId)return products.find(product=>product.id===state.baseProductId);
+ const named=products.find(product=>state.baseName===`产品库：${product.sku} · ${product.name}`);
+ if(named||state.baseName?.startsWith('产品库：'))return named;
+ return products.find(product=>product.id===state.selectedMultiProductId);
+}
 export function normalizeTaskResult(payload,path=value=>value){
  const {savedRecord,...result}=payload;
  return {...result,outputs:result.outputs.map(output=>{const image=savedRecord?.images.find(image=>image.label===output.version);return {...output,dataUrl:image?path(image.url):output.dataUrl};})};
