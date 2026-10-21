@@ -214,3 +214,7 @@ body { margin: 0; }
 .scheme-card.generated-complete .scheme-image-kind { background: #e6f6ed; border-color: #a6dbc0; color: #157445; font-size: 13px; font-weight: 750; padding: 6px 10px; }
 .scheme-card.generated-complete .result-stage { color: #157445; font-size: 13px; font-weight: 750; }
 @media (prefers-reduced-motion: reduce) { .progress-ring { animation-duration: 2.5s; } }
+.task-logo-tab { display: flex; flex: 0 0 auto; align-items: center; gap: 4px; }
+.task-logo-tab .multi-product-tab { min-width: 120px; }
+.task-logo-tab .multi-product-tab img { object-fit: contain; }
+.task-logo-tab .remove-task-logo { padding: 8px 4px; white-space: nowrap; }

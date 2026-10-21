@@ -2,6 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as selection from './download-selection.mjs';
 
+test('同一产品不同 Logo 的同款成图可以独立选择下载',()=>{
+ const red={productId:'product',logoId:'red',version:'ORIGINAL',dataUrl:'/red.png'},blue={productId:'product',logoId:'blue',version:'ORIGINAL',dataUrl:'/blue.png'};
+ const state=selection.syncDownloadSelection({},[red,blue]);
+ assert.deepEqual(selection.selectedDownloadOutputs(state,[red,blue]),[red,blue]);
+ state[selection.downloadKey(red)].selected=false;
+ assert.deepEqual(selection.selectedDownloadOutputs(state,[red,blue]),[blue]);
+});
+
 test('成图默认选中，取消后跨产品切换和刷新保留选择，新成图重新默认选中',()=>{
  assert.equal(typeof selection.syncDownloadSelection,'function');
  const a={productId:'a',version:'ORIGINAL',dataUrl:'/a.png'},b={productId:'b',version:'ORIGINAL',dataUrl:'/b.png'};

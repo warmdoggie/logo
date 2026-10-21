@@ -7,6 +7,7 @@ import sharp from 'sharp';
 import {createDemoServer} from './demo-server.mjs';
 import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
 import {userSpace} from './user-space.mjs';
+import {createSchemes} from './schemes.mjs';
 
 const versions=['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL'];
 async function fixture(t,renderer,options={}){
@@ -39,6 +40,33 @@ test('one product with two logos saves eight separately attributed images using 
  const history=await(await f.call(`/api/my-space/history?taskId=${f.input.taskId}`)).json();assert.equal(history.reduce((n,r)=>n+r.images.length,0),8);
  const image=await f.call(job.outputs[0].dataUrl);assert.equal(image.status,200);
  assert.equal((await f.call(job.outputs[0].dataUrl,null,'GET','bob')).status,404);
+});
+
+test('ordinary tasks generate multiple logos with independent layouts and preserve other results on regeneration',async t=>{
+ const inputs=[];
+ const f=await fixture(t,async input=>{inputs.push(input);return input.selectedVersions.map(version=>({version,bytes:f.base}));});
+ const task=await(await f.call('/api/my-space/tasks',{title:'普通任务'})).json();
+ const targets=[{id:'body',x:.6,y:.5,widthRatio:.25,rotation:15}];
+ const schemes=createSchemes(targets).schemes;schemes[2].targets[0].rotation=40;
+ const input={...f.input,taskId:task.id,logoLayouts:[{logoId:'red',targets,schemes,schemeSignatures:{ORIGINAL:'red-original'}}]};
+ assert.equal((await f.call('/api/ai-render-logos',input)).status,202);
+ const wait=async()=>{for(let i=0;i<200;i++){const job=await(await f.call(`/api/my-space/tasks/${task.id}/generation`)).json();if(job.status!=='running')return job;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('任务未结束');};
+ const before=await wait();assert.equal(before.outputs.length,8);
+ assert.deepEqual(inputs[0].targets,targets);assert.deepEqual(inputs[0].schemes,schemes);
+ assert.equal(before.outputs.find(output=>output.logoId==='red'&&output.version==='ORIGINAL').schemeSignature,'red-original');
+ assert.equal((await f.call('/api/ai-render-logos',{...input,onlyLogoId:'red',selectedVersions:['BLACK']})).status,202);
+ const after=await wait();assert.equal(after.status,'complete');assert.equal(after.outputs.length,8);
+ assert.equal(inputs.length,3);assert.deepEqual(inputs[2].selectedVersions,['BLACK']);
+ for(const output of before.outputs.filter(output=>output.logoId!=='red'||output.version!=='BLACK'))assert.equal(after.outputs.find(item=>item.logoId===output.logoId&&item.version===output.version).dataUrl,output.dataUrl);
+});
+
+test('ordinary tasks reject multi-product logo batches and mismatched layouts before rendering',async t=>{
+ let calls=0;const f=await fixture(t,async()=>{calls++;return [];});
+ const task=await(await f.call('/api/my-space/tasks',{title:'普通任务'})).json();
+ await f.call(`/api/my-space/tasks/${task.id}`,{revision:0,state:{multiPackageProducts:[{id:'bottle'},{id:'other'}]}},'PUT');
+ assert.equal((await f.call('/api/ai-render-logos',{...f.input,taskId:task.id})).status,400);
+ for(const logoLayouts of [[{logoId:'missing'}],[{logoId:'red'},{logoId:'red'}],[{logoId:'red',targets:[],schemes:[]}]])assert.equal((await f.call('/api/ai-render-logos',{...f.input,logoLayouts})).status,400);
+ assert.equal(calls,0);
 });
 
 test('partial failure keeps other logo results and retries only missing versions without duplicating successes',async t=>{

@@ -20,11 +20,11 @@
         </div>
         <button id="choose-logo-library" type="button" class="button secondary product-library-button">从 Logo 库选择</button>
         <div id="logo-library-panel" class="product-library-panel" hidden>
-          <div class="product-library-head"><strong>选择 Logo 库图片</strong><button id="close-logo-library" type="button" class="text-button">关闭</button></div>
+          <div class="product-library-head"><strong>选择 Logo 库图片（可多选）</strong><button id="close-logo-library" type="button" class="text-button">关闭</button></div>
           <input id="logo-library-search" class="product-library-search" type="search" placeholder="搜索 Logo 名称">
           <div id="logo-library-list" class="product-library-list" aria-live="polite">正在读取 Logo 库…</div>
         </div>
-        <div class="file-field">透明 Logo<input id="logo-image" type="file" accept="image/*" hidden><span id="selected-logo-preview" class="selected-logo-preview" hidden><img id="selected-logo-thumbnail" alt="当前选中的 Logo"><small id="logo-name">尚未选择</small></span></div>
+        <div class="file-field"><label for="logo-image" class="text-button">上传 Logo（可多选）</label><input id="logo-image" type="file" accept="image/*" multiple hidden><span id="selected-logo-preview" class="selected-logo-preview" hidden><img id="selected-logo-thumbnail" alt="当前选中的 Logo"><small id="logo-name">尚未选择</small></span></div>
         <button id="process-logo" type="button" class="button secondary process-button" disabled>AI 加工 Logo（透明底）</button>
         <button id="use-saved-logo" type="button" class="text-button" hidden>使用已保存 Logo</button>
         <button id="clear-saved-logo" type="button" class="text-button" hidden>清除已保存 Logo</button>

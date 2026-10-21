@@ -1,4 +1,4 @@
-export const downloadKey=output=>JSON.stringify([output.productId||'',output.version]);
+export const downloadKey=output=>JSON.stringify(output.logoId?[output.productId||'',output.version,output.logoId]:[output.productId||'',output.version]);
 export function syncDownloadSelection(state,outputs){
  const next={};let changed=false;
  for(const output of outputs){
