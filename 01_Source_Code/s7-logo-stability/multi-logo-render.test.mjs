@@ -42,6 +42,32 @@ test('one product with two logos saves eight separately attributed images using 
  assert.equal((await f.call(job.outputs[0].dataUrl,null,'GET','bob')).status,404);
 });
 
+test('unchecked versions never reach the model or become failed stages in a multi-logo batch',async t=>{
+ const requests=[];
+ const f=await fixture(t,async input=>{requests.push(input.selectedVersions);return input.selectedVersions.map(version=>({version,bytes:f.base}));});
+ assert.equal((await f.call('/api/ai-render-logos',{...f.input,selectedVersions:['ORIGINAL','BLACK']})).status,202);
+ const job=await f.wait();assert.equal(job.status,'complete');assert.equal(job.outputs.length,4);assert.equal(Object.keys(job.stages).length,4);
+ assert.deepEqual(requests,[['ORIGINAL','BLACK'],['ORIGINAL','BLACK']]);
+ assert.ok(job.outputs.every(output=>['ORIGINAL','BLACK'].includes(output.version)));
+});
+
+test('retrying a selected multi-logo batch does not generate versions that were never selected',async t=>{
+ const requests=[];let retry=false;
+ const f=await fixture(t,async input=>{requests.push(input.selectedVersions);if(!retry)await input.onStage('SILVER FOIL','failed',Error('temporary'));return input.selectedVersions.filter(version=>retry||version!=='SILVER FOIL').map(version=>({version,bytes:f.base}));});
+ await f.call('/api/ai-render-logos',{...f.input,selectedVersions:['BLACK','SILVER FOIL']});assert.equal((await f.wait()).status,'partial');
+ retry=true;await f.call('/api/ai-render-logos',{...f.input,retryFailed:true});const job=await f.wait();
+ assert.deepEqual(requests.slice(2),[['SILVER FOIL'],['SILVER FOIL']]);assert.equal(job.status,'complete');assert.equal(job.outputs.length,4);
+});
+
+test('removing a failed logo before a single-image regeneration removes its stages from progress',async t=>{
+ const f=await fixture(t,async input=>input.selectedVersions.map(version=>({version,bytes:f.base})));
+ const input={...f.input,logos:[...f.input.logos,{...f.input.logos[0],id:'removed',name:'移除的Logo'}],selectedVersions:['BLACK']};
+ await f.call('/api/ai-render-logos',input);await f.wait();
+ await f.spaces.updateGeneration({id:'alice'},f.input.taskId,current=>({...current,status:'partial',stages:{...current.stages,'removed:BLACK':{stage:'failed',error:'temporary'}}}));
+ await f.call('/api/ai-render-logos',{...input,logos:f.input.logos,onlyLogoId:'red'});const job=await f.wait();
+ assert.equal(job.status,'complete');assert.deepEqual(Object.keys(job.stages).sort(),['other:BLACK','red:BLACK']);assert.equal(job.outputs.length,2);
+});
+
 test('ordinary tasks generate multiple logos with independent layouts and preserve other results on regeneration',async t=>{
  const inputs=[];
  const f=await fixture(t,async input=>{inputs.push(input);return input.selectedVersions.map(version=>({version,bytes:f.base}));});

@@ -20,6 +20,7 @@ test('batch submission includes cached product edits and the active product late
     schemeState:createSchemes([target(.4,.2)]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'master-zone',lastResultPayload:null,savedSignatures:{},schemePhases:{},
     multiProductViews:new Map([['a',{targets:aTargets,schemeState:aState,activeScheme:'GOLD FOIL'}]]),multiProductResults:new Map(),
     collectTargets:()=>bTargets,
+    selectedGenerationVersions:()=>['BLACK','SILVER FOIL'],
     syncSchemeState:()=>{context.schemeState=editScheme(context.schemeState,context.activeScheme,bTargets,true);},
     setStatus:()=>{},renderMultiProductResults:()=>{},restoreMultiProductGeneration:()=>{},updateGenerateButton:()=>{},s7User:null,
     fetch:async(url,options)=>{assert.equal(url,'/api/ai-render-multi');requestBody=JSON.parse(options.body);return {ok:true,headers:{get:()=> 'text/event-stream'}};},
@@ -28,6 +29,7 @@ test('batch submission includes cached product edits and the active product late
   vm.runInContext(snapshots+submission,context);
   await vm.runInContext('runMultiPackageGeneration()',context);
   assert.deepEqual(requestBody.productLayouts.map(layout=>layout.productId),['a','b']);
+  assert.deepEqual(requestBody.selectedVersions,['BLACK','SILVER FOIL']);
   assert.deepEqual(requestBody.productLayouts[0].targets,aTargets);
   assert.deepEqual(requestBody.productLayouts[0].schemes,aState.schemes);
   assert.deepEqual(requestBody.productLayouts[1].targets,bTargets);

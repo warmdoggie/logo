@@ -14,6 +14,7 @@ async function workspace(){
   schemeState:createSchemes([{id:'body',x:.3,y:.4,widthRatio:.2}]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'body',lastResultPayload:null,savedSignatures:{},schemePhases:{},submittedSignatures:{},showModifiedPreview:new Set(),
   multiPackageProducts:[{id:'product',sku:'P1',name:'产品'}],loadedMultiProductId:'product',selectedMultiProductId:'product',multiPackageBusy:false,generationBusy:false,
   currentTaskId:'task',s7User:{id:'alice'},mockupModel:{value:'flux-3-image'},schemeNames:{ORIGINAL:'原色',BLACK:'黑白','GOLD FOIL':'金','SILVER FOIL':'银'},
+  selectedGenerationVersions:()=>['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL'],
   collectTargets:()=>context.schemeState.schemes[0].targets,syncSchemeState:()=>{},
   loadImage:async()=>({naturalWidth:8,naturalHeight:5}),setSelectedLogoPreview:()=>{},loadSchemeTargets:()=>{},renderMultiProductResults:()=>{},renderProductLibrary:()=>{},renderLogoLibrary:()=>{},queueSchemeCards:()=>{},updateGenerateButton:()=>{},setStatus:()=>{},notifyTask:()=>{},
   document:{querySelector:()=>({value:'',textContent:''})},processButton:{disabled:false},processingPanel:{hidden:true},
@@ -41,12 +42,14 @@ test('switching logo thumbnails keeps independent edits and restores the matchin
 
 test('ordinary batch submission includes each logo layout and the latest unswitched edit',async()=>{
  const c=await workspace();let request;
+ c.selectedGenerationVersions=()=>['BLACK'];
  c.schemeState=editScheme(c.schemeState,'ORIGINAL',[{id:'body',x:.7,y:.4,widthRatio:.25}],true);
  c.fetch=async(url,options)=>{request={url,body:JSON.parse(options.body)};return {ok:true,json:async()=>({kind:'multi-logo',outputs:[]})};};
  c.generationWatcher={track:()=>{}};
  await c.runMultiLogoGeneration();
  assert.equal(request.url,'/api/ai-render-logos');assert.equal(request.body.taskId,'task');
  assert.equal(request.body.productId,'product');assert.deepEqual(request.body.logos.map(logo=>logo.id),['red','blue']);
+ assert.deepEqual(request.body.selectedVersions,['BLACK']);
  assert.equal(request.body.logoLayouts.find(view=>view.logoId==='red').schemes[0].targets[0].x,.7);
 });
 

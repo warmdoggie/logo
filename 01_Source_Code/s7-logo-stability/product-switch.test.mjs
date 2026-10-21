@@ -2,6 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
+import {productGeneration} from './generation-client.mjs';
+
+test('a newly added product with no requested stages stays in preview after another batch completed',async()=>{
+ const source=await readFile(new URL('./demo.js',import.meta.url),'utf8'),summary={},product={id:'c',sku:'C'};
+ const button={dataset:{multiProductId:'c'},classList:{toggle(){}},setAttribute(){},querySelector:()=>summary};
+ const tabs={dataset:{products:JSON.stringify([['c','C',null]])},querySelectorAll:()=>[button]};
+ const context=vm.createContext({taskLogos:[],multiPackageProducts:[product],selectedMultiProductId:'c',multiProductTabs:tabs,multiProductOutput:{replaceChildren(){}},results:{},previewSection:{},resultMeta:{},multiProductResults:new Map(),multiProductJob:{kind:'multi-product',outputs:[],stages:{'a:BLACK':{stage:'complete'}}},multiPackageBusy:false,productGeneration});
+ vm.runInContext(source.slice(source.indexOf('function renderMultiProductResults(){'),source.indexOf('async function openProductLibrary()')),context);
+ context.renderMultiProductResults();assert.equal(summary.textContent,'方案预览');
+});
 
 test('切到尚在加载的产品后立即返回，必须重新呈现原产品并丢弃迟到的加载',async()=>{
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8'),rendered=[];

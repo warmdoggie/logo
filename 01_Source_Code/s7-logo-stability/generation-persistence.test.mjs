@@ -49,7 +49,7 @@ test('三版本任务只记录所选阶段，恢复和单张重试保留三张�
  try{
   const task=await(await call('/api/my-space/tasks',{title:'三个版本'})).json();
   const path=`/api/my-space/tasks/${task.id}/generation`;
-  const input={background:true,taskId:task.id,selectedVersions,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',x:.5,y:.5,widthRatio:.2,rotation:0}]};
+  const input={background:true,taskId:task.id,selectedVersions,preserveResults:true,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',x:.5,y:.5,widthRatio:.2,rotation:0}]};
   const wait=async()=>{let record;for(let n=0;n<100;n++){record=await(await call(path)).json();if(record.status!=='running')return record;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('generation did not finish');};
   assert.equal((await call('/api/ai-render',{...input,selectedVersions:[]})).status,400);
   assert.equal(calls.length,0);
@@ -102,6 +102,6 @@ test('生成脱离页面和登录会话运行，逐张持久化，重进及重�
   assert.equal((await call('/api/ai-render',{...input,taskId:legacy.id,onlyVersion:'BLACK'})).status,202);
   for(let n=0;n<100;n++){completed=await(await call(`/api/my-space/tasks/${legacy.id}/generation`)).json();if(completed.status!=='running')break;await new Promise(resolve=>setTimeout(resolve,10));}
   assert.deepEqual(completed.outputs.map(item=>item.version).sort(),['BLACK','ORIGINAL']);
-  assert.equal(Object.keys(completed.stages).length,4);
+  assert.deepEqual(Object.keys(completed.stages).sort(),['BLACK','ORIGINAL']);
  }finally{release();releaseFinish();if(server?.listening)await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});}
 });

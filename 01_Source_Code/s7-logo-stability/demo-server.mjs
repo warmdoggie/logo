@@ -1,4 +1,4 @@
-import {generationVersions,selectGenerationVersions} from './generation-versions.mjs';
+import {selectGenerationVersions} from './generation-versions.mjs';
 import {createServer} from 'node:http';
 import {readFile} from 'node:fs/promises';
 import {dirname,join,resolve} from 'node:path';
@@ -237,7 +237,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
         const catalog=await productCatalog(req),products=productIds.map(id=>catalog.find(product=>String(product?.id)===id));
         if(products.some(product=>!product||product.status==='INACTIVE'))throw Object.assign(Error('所选产品中有已删除或停用的包材，请刷新产品库'),{status:400});
         if(input.background===true){if(!user||!input.taskId)throw Object.assign(Error('后台生成需要个人任务'),{status:400});json(res,202,await multiProductJobs.start(user,input.taskId,input,products,req));return;}
-        const model=input.model,originalColor=input.originalColor||'#000000';
+        const model=input.model,originalColor=input.originalColor||'#000000',selectedVersions=selectGenerationVersions(input);
         res.writeHead(200,{'content-type':'text/event-stream; charset=utf-8','cache-control':'no-cache, no-transform','connection':'keep-alive','x-accel-buffering':'no'});res.flushHeaders?.();
         event(res,'started',{total:products.length});
         let completed=0,failed=0;
@@ -258,12 +258,12 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
               finishReferenceImage:input.finishReferenceImage?`data:image/png;base64,${input.finishReferenceImage}`:undefined,
               maskImage:`data:image/png;base64,${guideSet.mask.toString('base64')}`,model,
               guides:guideSet.outputs.map(output=>({version:output.version,dataUrl:`data:image/png;base64,${output.bytes.toString('base64')}`,maskDataUrl:`data:image/png;base64,${output.mask.toString('base64')}`,foilMaskDataUrl:`data:image/png;base64,${output.foilMask.toString('base64')}`,goldMaskDataUrl:`data:image/png;base64,${output.goldMask.toString('base64')}`})),
-              targets,schemes,selectedVersions:generationVersions,originalColor,
+              targets,schemes,selectedVersions,originalColor,
               logoAspectRatio:logoMeta.height/logoMeta.width,size:pickAspectRatio(guideSet.width,guideSet.height),
               onStage:async(version,stage,error)=>{if(stage==='failed')failures.push({version,error:error?.message||'生成失败'});event(res,'stage',{product:productInfo,version,stage,error:error?.message});}
             });
             if(!outputs.length)throw Error(failures.map(item=>`${item.version}：${item.error}`).join('；')||'四种印刷效果均未生成成功');
-            const complete=generationVersions.every(version=>outputs.some(output=>output.version===version)),images=outputs.map(output=>({label:`${productInfo.sku} · ${output.version}`,bytes:output.bytes}));
+            const complete=selectedVersions.every(version=>outputs.some(output=>output.version===version)),images=outputs.map(output=>({label:`${productInfo.sku} · ${output.version}`,bytes:output.bytes}));
             await ensureUser();const savedRecord=user?await spaces.save(user,{taskId:input.taskId,kind:'多包材印刷效果',model,images}):null;
             if(complete)completed++;else failed++;const savedImages=savedRecord?.images.map(image=>({label:image.label,url:image.url}))||images.map(image=>({label:image.label,dataUrl:`data:image/png;base64,${image.bytes.toString('base64')}`}));event(res,'product-done',{product:productInfo,outputs:outputs.map(output=>output.version),images:savedImages,complete,failures});
           }catch(error){failed++;event(res,'product-error',{product:productInfo,error:error.message||'生成失败'});}

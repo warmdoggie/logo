@@ -30,7 +30,7 @@ export function createMultiLogoJobs(spaces,mockupRenderer){
   const layouts=input.logoLayouts??[];
   if(!Array.isArray(layouts)||new Set(layouts.map(layout=>layout?.logoId)).size!==layouts.length||layouts.some(layout=>!layout||!input.logos.some(logo=>logo.id===layout.logoId)||!Array.isArray(layout.targets)||!layout.targets.length||!Array.isArray(layout.schemes)||layout.schemes.length!==versions.length||versions.some(version=>layout.schemes.filter(scheme=>scheme?.version===version&&Array.isArray(scheme.targets)&&scheme.targets.length).length!==1)))fail('Logo 方案与所选素材不匹配');
   if(input.onlyLogoId&&(!input.logos.some(logo=>logo.id===input.onlyLogoId)||previous?.kind!=='multi-logo'||previous.product.id!==input.product.id))fail('请先生成所选 Logo 的效果图');
-  const requested=input.onlyLogoId?selectGenerationVersions(input):versions;
+  const requested=selectGenerationVersions(input);
   if(typeof input.model!=='string'||!input.model.trim())fail('请选择成图模型');
   if(!Array.isArray(input.targets)||!input.targets.length)fail('产品尚无有效的 Logo 区域，请先发布产品母版');
   const targets=input.targets.map(target=>({...target,preserveOriginalColor:target.preserveOriginalColor??!target.color,autoContrast:target.autoContrast!==false}));
@@ -48,14 +48,14 @@ export function createMultiLogoJobs(spaces,mockupRenderer){
   }
   const retry=input.retryFailed===true;
   if(retry&&(!previous||previous.kind!=='multi-logo'||previous.logos.length!==logos.length||logos.some(logo=>previous.logos.find(old=>old.id===logo.id)?.fingerprint!==logo.fingerprint)))fail('素材、产品或模型已修改，请重新生成全部 Logo',409);
-  const selected=new Map(logos.map(logo=>[logo.id,input.onlyLogoId&&logo.id!==input.onlyLogoId?[]:requested.filter(version=>!retry||previous.stages[key(logo.id,version)]?.stage!=='complete')]));
+  const selected=new Map(logos.map(logo=>[logo.id,input.onlyLogoId&&logo.id!==input.onlyLogoId?[]:requested.filter(version=>!retry||(previous.stages[key(logo.id,version)]&&previous.stages[key(logo.id,version)].stage!=='complete'))]));
   if(![...selected.values()].some(list=>list.length))fail('所有图片均已完成');
   const job=await spaces.updateGeneration(user,taskId,current=>{
    if(current?.status==='running')fail('当前任务正在生成，请等待完成',409);
    const stamp=new Date().toISOString();
    return {id:randomUUID(),kind:'multi-logo',status:'running',createdAt:stamp,updatedAt:stamp,product:input.product,model:input.model,
     logos:logos.map(({id,name,fingerprint})=>({id,name,fingerprint})),outputs:retry||input.onlyLogoId?current.outputs.filter(output=>logos.some(logo=>logo.id===output.logoId)):[],remoteTasks:retry||input.onlyLogoId?current.remoteTasks||{}:{},
-    stages:Object.fromEntries(logos.flatMap(logo=>versions.map(version=>[key(logo.id,version),(retry||input.onlyLogoId)&&!selected.get(logo.id).includes(version)?current.stages[key(logo.id,version)]||{stage:'failed',error:'尚未生成'}:{stage:'queued'}])))};
+    stages:{...((retry||input.onlyLogoId)?Object.fromEntries(Object.entries(current.stages).filter(([id])=>logos.some(logo=>id.startsWith(logo.id+':')))):{}),...Object.fromEntries(logos.flatMap(logo=>selected.get(logo.id).map(version=>[key(logo.id,version),{stage:'queued'}])))}};
   });
   const activeKey=taskKey(user,taskId);active.set(activeKey,job.id);
   const update=change=>spaces.updateGeneration(user,taskId,current=>current.id!==job.id?current:{...change(current),updatedAt:new Date().toISOString()});

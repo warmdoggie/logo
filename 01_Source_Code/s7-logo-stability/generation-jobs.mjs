@@ -19,7 +19,7 @@ export function createGenerationJobs(spaces){
    if(previous?.status==='running')throw Object.assign(Error('当前任务正在生成，请等待完成'),{status:409});
    const stamp=new Date().toISOString();return {...metadata,id:randomUUID(),status:'running',createdAt:stamp,updatedAt:stamp,remoteTasks:previous?.remoteTasks||{},
     outputs:metadata.onlyVersion||metadata.preserveResults?(previous?.outputs||legacyOutputs):[],
-    stages:{...((metadata.onlyVersion||metadata.preserveResults)?(previous?.stages||Object.fromEntries(versions.map(version=>[version,legacyOutputs.some(output=>output.version===version)?{stage:'complete'}:{stage:'failed',error:'尚未生成，请重试'}]))):{}),...Object.fromEntries(selected.map(version=>[version,{stage:'submitting'}]))}};
+    stages:{...((metadata.onlyVersion||metadata.preserveResults)?(previous?.stages||Object.fromEntries(legacyOutputs.map(output=>[output.version,{stage:'complete'}]))):{}),...Object.fromEntries(selected.map(version=>[version,{stage:'submitting'}]))}};
   });
   const activeKey=key(user,taskId);active.set(activeKey,record.id);
   const update=change=>spaces.updateGeneration(user,taskId,current=>{if(current.id!==record.id)return current;return {...change(current),updatedAt:new Date().toISOString()};});

@@ -34,7 +34,7 @@ export function createMultiProductJobs(spaces,{productTemplate,productImage,mock
   if((await spaces.task(user,taskId)).state?.mode==='multi-logo')fail('请使用多 Logo 上样的独立生成入口');
   const previous=await read(user,taskId),activeKey=taskKey(user,taskId);
   if(previous?.status==='running'||active.has(activeKey))fail('当前任务正在生成，请等待完成',409);
-  const selected=input.onlyProductId?selectGenerationVersions(input):versions;
+  const selected=selectGenerationVersions(input);
   if(input.onlyProductId&&(!products.some(product=>String(product.id)===input.onlyProductId)||previous?.kind!=='multi-product'))fail('请先生成所选产品的效果图');
   if(selected.some(version=>!versions.includes(version)))fail('生成版本无效');
   const logo=Buffer.from(input.logoImage,'base64'),logoMeta=await sharp(logo).metadata(),prepared=[];
