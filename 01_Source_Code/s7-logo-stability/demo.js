@@ -77,7 +77,7 @@ let logoLibraryItems=[];
 let taskLogos=[],selectedTaskLogoId=null,loadedTaskLogoId=null,multiLogoViews=new Map(),multiLogoJob=null;
 let multiLogoEnabled=false,logoSelectionBusy=false,logoLoadRevision=0;
 const currentTaskId=new URLSearchParams(location.search).get('task');
-let taskDraft=null,lastResultPayload=null,generationWatcher=null,generationId=null,taskActive=true;
+let taskDraft=null,lastResultPayload=null,generationWatcher=null,generationId=null,dismissedGenerationId=null,taskActive=true;
 let downloadSelection={},downloadingSelected=false,downloadSelectionReady=!currentTaskId;
 window.addEventListener('message',event=>{if(event.origin!==location.origin||event.source!==window.parent||event.data?.type!=='s7-task-visibility'||event.data.taskId!==currentTaskId)return;taskActive=event.data.active;generationWatcher?.setActive(taskActive);});
 function notifyTask(text,busy=false,updatedAt){if(currentTaskId&&window.parent!==window)window.parent.postMessage({type:'s7-task-status',taskId:currentTaskId,text,busy,updatedAt},location.origin);}
@@ -127,6 +127,18 @@ function renderProductLibrary(){
   }));
 }
 
+async function removeTaskProduct(id){
+  if(logoSelectionBusy||generationBusy||multiPackageBusy||!multiPackageProducts.some(product=>product.id===id))return;
+  saveMultiProductView();++multiProductLoadRevision;
+  multiPackageProducts=multiPackageProducts.filter(product=>product.id!==id);multiProductResults.delete(id);
+  if(selectedMultiProductId===id)selectedMultiProductId=multiPackageProducts[0]?.id||null;
+  if(!multiPackageProducts.length){
+    if(generationId)dismissedGenerationId=generationId;
+    selectedMultiProductId=null;loadedMultiProductId=null;baseData='';baseImage=null;lastResultPayload=null;savedSignatures={};schemePhases={};
+    document.querySelector('#base-name').textContent='尚未选择产品';drawPreview();
+  }else if(selectedMultiProductId!==loadedMultiProductId)await showMultiProduct(selectedMultiProductId);
+  renderProductLibrary();renderMultiProductResults();queueSchemeCards();updateGenerateButton();taskDraft?.schedule();
+}
 function saveMultiProductView(){
   if(!loadedMultiProductId)return;
   syncSchemeState();
@@ -224,7 +236,7 @@ function renderMultiLogoTabs(){
   multiProductTabs.hidden=false;multiProductOutput.hidden=true;results.hidden=false;previewSection.hidden=false;
   const key=JSON.stringify(taskLogos.map(logo=>[logo.id,logo.name,logo.logoImage]));
   if(multiProductTabs.dataset.logos!==key){
-    multiProductTabs.innerHTML=taskLogos.map(logo=>`<div class="task-logo-tab"><button type="button" class="multi-product-tab" data-task-logo-id="${esc(logo.id)}"><img src="data:image/png;base64,${esc(logo.logoImage)}" alt=""><span><strong>${esc(logo.name)}</strong><small></small></span></button><button type="button" class="text-button remove-task-logo" data-remove-logo-id="${esc(logo.id)}" aria-label="移除 ${esc(logo.name)}">移除</button></div>`).join('');
+    multiProductTabs.innerHTML=taskLogos.map(logo=>`<div class="task-logo-tab"><button type="button" class="multi-product-tab" data-task-logo-id="${esc(logo.id)}"><img src="data:image/png;base64,${esc(logo.logoImage)}" alt=""><span><strong>${esc(logo.name)}</strong><small></small></span></button><button type="button" class="remove-task-asset" data-remove-logo-id="${esc(logo.id)}" aria-label="移除 ${esc(logo.name)}" title="移除 ${esc(logo.name)}">×</button></div>`).join('');
     multiProductTabs.dataset.logos=key;delete multiProductTabs.dataset.products;
     multiProductTabs.querySelectorAll('[data-task-logo-id]').forEach(button=>button.onclick=()=>showTaskLogo(button.dataset.taskLogoId));
     multiProductTabs.querySelectorAll('[data-remove-logo-id]').forEach(button=>button.onclick=()=>removeTaskLogo(button.dataset.removeLogoId));
@@ -291,11 +303,13 @@ function renderMultiProductResults(){
   if(multiProductTabs.dataset.products!==tabKey){
     multiProductTabs.innerHTML=previewProducts.map(product=>{
       const imageUrl=s7Path(product.imageUrl||`/api/product-library/image/${encodeURIComponent(product.id)}`);
-      return `<button type="button" class="multi-product-tab" data-multi-product-id="${esc(product.id)}"><img src="${esc(imageUrl+'?thumbnail=1')}" alt=""><span><strong>${esc(product.sku)}</strong><small></small></span></button>`;
+      return `<div class="task-product-tab"><button type="button" class="multi-product-tab" data-multi-product-id="${esc(product.id)}"><img src="${esc(imageUrl+'?thumbnail=1')}" alt=""><span><strong>${esc(product.sku)}</strong><small></small></span></button><button type="button" class="remove-task-asset" data-remove-product-id="${esc(product.id)}" aria-label="移除产品 ${esc(product.sku)}" title="移除产品 ${esc(product.sku)}">×</button></div>`;
     }).join('');
     multiProductTabs.dataset.products=tabKey;
     multiProductTabs.querySelectorAll('[data-multi-product-id]').forEach(button=>button.addEventListener('click',()=>showMultiProduct(button.dataset.multiProductId)));
+    multiProductTabs.querySelectorAll('[data-remove-product-id]').forEach(button=>button.onclick=()=>removeTaskProduct(button.dataset.removeProductId));
   }
+  multiProductTabs.querySelectorAll('[data-remove-product-id]').forEach(button=>button.disabled=generationBusy||multiPackageBusy||logoSelectionBusy);
   for(const product of previewProducts){
     const result=multiProductResults.get(product.id);
     const progress=multiProductJob?productGeneration(multiProductJob,product.id):null;
@@ -416,9 +430,6 @@ function drawSchemeThumbnail(thumbnail,scheme){
     if(target.quad)drawQuadPreview(context,layer,target.quad);else{context.save();context.translate(target.x*thumbnail.width,target.y*thumbnail.height);context.rotate((target.rotation||0)*Math.PI/180);context.drawImage(layer,-width/2,-height/2,width,height);context.restore();}
   }
 }
-function appearanceSummary(scheme){
-  return scheme.targets.map(target=>{const print=resolveTargetPrint(target,scheme.version,target.color||'#000000');const effect=print.version==='BLACK'?(target.autoContrast?'自动黑/白':'黑色印刷'):print.finish==='gold'?'烫金':print.finish==='silver'?'烫银':`普通印刷 ${target.preserveOriginalColor?'Logo 原色':target.color||'原色'}`;return `${carrierNames[target.carrierType]||'产品包材'}：${effect}`;}).join(' · ');
-}
 function taskDownloadOutputs(){
  if(taskLogos.length>1&&multiLogoJob?.product.id===loadedMultiProductId)return multiLogoJob.outputs.filter(output=>taskLogos.some(logo=>logo.id===output.logoId)).map(output=>({...output,productId:multiLogoJob.product.id,dataUrl:s7Path(output.dataUrl)}));
  if(multiPackageProducts.length>1&&multiProductJob)return multiProductJob.outputs.filter(output=>multiPackageProducts.some(product=>product.id===output.productId)).map(output=>({...output,dataUrl:s7Path(output.dataUrl)}));
@@ -486,13 +497,10 @@ function renderSchemeCards(){
     entries.push({image,url:useImage?previewImageUrl(output.dataUrl):null});
     const thumbnailKey=`${signatures[scheme.version]}:${thumbnailImageRevision}`;
     if(!switching&&!useImage&&thumbnail.dataset.signature!==thumbnailKey){drawSchemeThumbnail(thumbnail,scheme);thumbnail.dataset.signature=thumbnailKey;}
-    card.querySelector('.scheme-summary').textContent=switching?'正在加载此产品的编辑素材…':appearanceSummary(scheme);
     card.querySelector('.edit-scheme').disabled=switching;
-    card.querySelector('.scheme-image-kind').textContent=useImage?(dirty?'上次成图':'生成结果'):baseImage?'效果示意':'选择产品与 Logo 后预览';
     const progress=previewStatus(output,phase,dirty),overlay=card.querySelector('.generation-overlay');overlay.hidden=!progress.busy&&!(useImage&&(previewLoading||previewError));overlay.querySelector('.generation-label').textContent=progress.busy?progress.label:previewError||'正在加载预览';
     overlay.onclick=()=>{if(previewError){previewImages.retry();previewError='';queueSchemeCards();}};
     card.classList.toggle('generated-complete',progress.complete);card.querySelector('.result-stage').textContent=progress.label;
-    if(progress.complete)card.querySelector('.scheme-image-kind').textContent='已生成完成';
     updateSchemeSelection(card.querySelector('.select-download'),scheme.version,output,switching);
     const retry=card.querySelector('.regenerate-result');retry.hidden=(multiPackageProducts.length>1&&!(currentTaskId&&s7User))||(!output&&phase?.stage!=='failed');retry.disabled=generationBusy||multiPackageBusy||switching;retry.textContent=phase?.stage==='failed'&&lastResultPayload?.remoteTasks?.[scheme.version]&&lastResultPayload?.schemeSignatures?.[scheme.version]===signatures[scheme.version]?'继续获取结果':'重新生成';
     const compare=card.querySelector('.compare-result');compare.hidden=!dirty;compare.textContent=useImage?'看修改预览':'看上次成图';
@@ -504,7 +512,7 @@ function createSchemeCards(){
   results.replaceChildren();resultCards=new Map();
   for(const [version,name]of Object.entries(schemeNames)){
     const card=document.createElement('article');card.className='result-card scheme-card';card.dataset.version=version;
-    card.innerHTML='<div class="scheme-card-head"><label></label><button type="button" class="text-button edit-scheme">编辑此方案</button></div><div class="scheme-image"><canvas></canvas><img class="result-image" hidden><span class="scheme-image-kind"></span><div class="generation-overlay" role="status" hidden><span class="progress-ring" aria-hidden="true"></span><strong class="generation-label"></strong></div></div><p class="scheme-summary"></p><footer><span class="result-stage"></span><div class="result-actions"><button type="button" class="text-button compare-result" hidden></button><button type="button" class="regenerate-result" hidden>重新生成</button><input type="checkbox" class="select-download" disabled></div></footer>';
+    card.innerHTML='<div class="scheme-card-head"><label></label><button type="button" class="text-button edit-scheme">编辑此方案</button></div><div class="scheme-image"><canvas></canvas><img class="result-image" hidden><div class="generation-overlay" role="status" hidden><span class="progress-ring" aria-hidden="true"></span><strong class="generation-label"></strong></div></div><footer><span class="result-stage"></span><div class="result-actions"><button type="button" class="text-button compare-result" hidden></button><button type="button" class="regenerate-result" hidden>重新生成</button><input type="checkbox" class="select-download" disabled></div></footer>';
     card.querySelector('label').textContent=name;
     card.querySelector('.edit-scheme').onclick=()=>switchScheme(version);
     const thumbnail=card.querySelector('canvas');thumbnail.setAttribute('aria-label',`${name}效果示意`);thumbnail.onclick=()=>switchScheme(version);
@@ -853,6 +861,7 @@ const versionInputs=[...document.querySelectorAll('#generation-versions input')]
 const selectedGenerationVersions=()=>versionInputs.filter(input=>input.checked).map(input=>input.value);
 let generationBusy=false;
 function updateGenerateButton(){
+ multiProductTabs.querySelectorAll('.remove-task-asset').forEach(button=>button.disabled=generationBusy||multiPackageBusy||logoSelectionBusy);
  const count=selectedGenerationVersions().length,button=document.querySelector('#generate');
  button.textContent=generationBusy||multiPackageBusy?'生成中...':!count?'请至少选择一套方案':taskLogos.length>1?`为 ${taskLogos.length} 个 Logo 生成 ${count} 种效果 · 共 ${taskLogos.length*count} 张`:multiPackageProducts.length>1?`为 ${multiPackageProducts.length} 个产品生成 ${count} 种效果 · 共 ${multiPackageProducts.length*count} 张`:`生成选中的 ${count} 套方案`;
  button.disabled=generationBusy||multiPackageBusy||logoSelectionBusy||!count||(taskLogos.length>1&&(!multiLogoEnabled||multiPackageProducts.length!==1));
@@ -884,6 +893,7 @@ function restoreMultiProductGeneration(record){
   if(next&&taskActive)setTimeout(()=>previewImages.preload(record.outputs.filter(output=>output.productId===next.id).map(output=>previewImageUrl(s7Path(output.dataUrl)))),200);
 }
 function restoreGeneration(record){
+  if(record.id&&record.id===dismissedGenerationId)return;
   if(record.kind==='multi-logo'){restoreMultiLogoGeneration(record);return;}
   multiLogoJob=null;
   if(record.kind==='multi-product'){restoreMultiProductGeneration(record);return;}
@@ -1035,7 +1045,7 @@ try{const response=await fetch('/api/features');multiLogoEnabled=response.ok&&(a
 if(currentTaskId&&s7User){
  taskDraft=createTaskDraft({id:currentTaskId,
   request:async(url,data,method='GET')=>{const response=await fetch(url,{method,headers:{'Content-Type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});const value=await response.json();if(!response.ok)throw Error(value.error||'任务保存失败');return value;},
-  capture:()=>{const multiLogoLayouts=captureMultiLogoLayouts(),multiProductLayouts=captureMultiProductLayouts();return {mode:'ordinary',taskLogos,multiLogoLayouts,selectedTaskLogoId,schemeState,activeScheme,placementScope,savedSignatures,downloadSelection,selectedVersions:selectedGenerationVersions(),baseData,baseProductId:loadedMultiProductId,logoData,logoSourceData,baseDataUrl:baseData?'':baseImage?.src||'',logoDataUrl:logoData?'':logoImage?.src||'',targets:collectTargets(),selectedTargetId,model:mockupModel.value,logoOutputColor:document.querySelector('input[name="logo-output-color"]:checked').value,baseName:document.querySelector('#base-name').textContent,logoName:document.querySelector('#logo-name').textContent,result:multiPackageProducts.length>1||taskLogos.length>1?null:lastResultPayload,multiPackageProducts,multiProductLayouts,selectedMultiProductId};},
+  capture:()=>{const multiLogoLayouts=captureMultiLogoLayouts(),multiProductLayouts=captureMultiProductLayouts();return {mode:'ordinary',taskLogos,multiLogoLayouts,selectedTaskLogoId,schemeState,activeScheme,placementScope,savedSignatures,dismissedGenerationId,downloadSelection,selectedVersions:selectedGenerationVersions(),baseData,baseProductId:loadedMultiProductId,logoData,logoSourceData,baseDataUrl:baseData?'':baseImage?.src||'',logoDataUrl:logoData?'':logoImage?.src||'',targets:collectTargets(),selectedTargetId,model:mockupModel.value,logoOutputColor:document.querySelector('input[name="logo-output-color"]:checked').value,baseName:document.querySelector('#base-name').textContent,logoName:document.querySelector('#logo-name').textContent,result:multiPackageProducts.length>1||taskLogos.length>1?null:lastResultPayload,multiPackageProducts,multiProductLayouts,selectedMultiProductId};},
   onSaved:record=>{const busy=status.classList.contains('busy');notifyTask(busy?'生成中…':'已保存',busy,record.updatedAt);},onError:error=>{status.textContent=error.message;status.className='status error';notifyTask('保存失败');}});
  try{
   const state=await taskDraft.load();
@@ -1049,6 +1059,7 @@ if(currentTaskId&&s7User){
   if(restoredLogo){state.logoData=restoredLogo.logoImage;state.logoSourceData=restoredLogo.sourceData||'';state.logoName=restoredLogo.name;}
 
   downloadSelection=state.downloadSelection||{};
+  dismissedGenerationId=state.dismissedGenerationId||null;
   if(Array.isArray(state.selectedVersions)){for(const input of versionInputs)input.checked=state.selectedVersions.includes(input.value);updateGenerateButton();}
   baseData=state.baseData||'';logoData=state.logoData||'';logoSourceData=state.logoSourceData||'';
   multiPackageProducts=Array.isArray(state.multiPackageProducts)?state.multiPackageProducts.filter(product=>product&&typeof product.id==='string'&&typeof product.sku==='string'&&typeof product.name==='string'):[];renderMultiProductResults();

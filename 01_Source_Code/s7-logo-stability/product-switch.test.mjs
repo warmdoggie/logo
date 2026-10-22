@@ -7,7 +7,7 @@ import {productGeneration} from './generation-client.mjs';
 test('a newly added product with no requested stages stays in preview after another batch completed',async()=>{
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8'),summary={},product={id:'c',sku:'C'};
  const button={dataset:{multiProductId:'c'},classList:{toggle(){}},setAttribute(){},querySelector:()=>summary};
- const tabs={dataset:{products:JSON.stringify([['c','C',null]])},querySelectorAll:()=>[button]};
+ const tabs={dataset:{products:JSON.stringify([['c','C',null]])},querySelectorAll:selector=>selector==='[data-multi-product-id]'?[button]:[]};
  const context=vm.createContext({taskLogos:[],multiPackageProducts:[product],selectedMultiProductId:'c',multiProductTabs:tabs,multiProductOutput:{replaceChildren(){}},results:{},previewSection:{},resultMeta:{},multiProductResults:new Map(),multiProductJob:{kind:'multi-product',outputs:[],stages:{'a:BLACK':{stage:'complete'}}},multiPackageBusy:false,productGeneration});
  vm.runInContext(source.slice(source.indexOf('function renderMultiProductResults(){'),source.indexOf('async function openProductLibrary()')),context);
  context.renderMultiProductResults();assert.equal(summary.textContent,'方案预览');
@@ -33,7 +33,7 @@ test('尚未有批量生成记录时，切换到新产品不能沿用上个产�
 
 test('刷新产品状态保留标签节点，清空再选回同一产品仍能重建标签',async()=>{
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
- const tabs={dataset:{},buttons:[],replaceChildren(){this.buttons=[];},querySelectorAll(){return this.buttons;},set innerHTML(text){this.buttons=[...text.matchAll(/data-multi-product-id="([^"]+)"/g)].map(match=>({dataset:{multiProductId:match[1]},classList:{toggle(){}},setAttribute(){},querySelector(){return {};},addEventListener(){}}));}};
+ const tabs={dataset:{},buttons:[],replaceChildren(){this.buttons=[];},querySelectorAll(selector){return selector==='[data-multi-product-id]'?this.buttons:[];},set innerHTML(text){this.buttons=[...text.matchAll(/data-multi-product-id="([^"]+)"/g)].map(match=>({dataset:{multiProductId:match[1]},classList:{toggle(){}},setAttribute(){},querySelector(){return {};},addEventListener(){}}));}};
  const product={id:'a',sku:'A'},context=vm.createContext({taskLogos:[],multiPackageProducts:[product],selectedMultiProductId:'a',multiProductTabs:tabs,multiProductOutput:{replaceChildren(){}},results:{},previewSection:{},resultMeta:{},multiProductResults:new Map(),multiProductJob:null,multiPackageBusy:false,s7Path:value=>value,esc:value=>value});
  vm.runInContext(source.slice(source.indexOf('function renderMultiProductResults(){'),source.indexOf('async function openProductLibrary()')),context);
  vm.runInContext('renderMultiProductResults()',context);const button=tabs.buttons[0];vm.runInContext('renderMultiProductResults()',context);assert.equal(tabs.buttons[0],button);
