@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import sharp from 'sharp';
-import {createSchemes,editScheme,copyTargetAppearance,restoreSharedGeometry,schemeTargets,schemeSignature} from './schemes.mjs';
+import {createSchemes,editScheme,restoreSharedGeometry,schemeTargets,schemeSignature} from './schemes.mjs';
 import {renderLogoSet} from './index.mjs';
 import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
 
@@ -34,15 +34,6 @@ test('independent placement stays independent until explicitly restored',()=>{
   assert.equal(schemeTargets(state,'SILVER FOIL')[0].x,.4);
   state=restoreSharedGeometry(state,'SILVER FOIL');
   assert.equal(schemeTargets(state,'SILVER FOIL')[0].x,.3);
-});
-
-test('copy appearance affects only the selected region and chosen destinations',()=>{
-  let state=createSchemes(targets),edited=structuredClone(schemeTargets(state,'GOLD FOIL'));edited[1].color='#FFFFFF';
-  state=editScheme(state,'GOLD FOIL',edited,true);
-  state=copyTargetAppearance(state,'GOLD FOIL','box',['SILVER FOIL']);
-  assert.equal(schemeTargets(state,'SILVER FOIL')[1].color,'#FFFFFF');
-  assert.equal(schemeTargets(state,'ORIGINAL')[1].color,'#235689');
-  assert.equal(schemeTargets(state,'SILVER FOIL')[0].printFinish,'VERSION');
 });
 
 test('scheme signatures ignore editing controls but track production changes',()=>{

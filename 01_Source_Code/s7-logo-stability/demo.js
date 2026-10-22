@@ -1,4 +1,4 @@
-import {createSchemes,editScheme,copyTargetAppearance,restoreSharedGeometry,schemeSignature} from './schemes.mjs';
+import {createSchemes,editScheme,restoreSharedGeometry,schemeSignature} from './schemes.mjs';
 import {clampTargetCenter,pointerToNormalized,rotationFromPointer,widthRatioFromScalePointer} from './demo-geometry.mjs';
 import {canMoveTarget,rotateTargetInPlace,setTargetMoveEnabled} from './target-state.mjs';
 import {renderTintedLogoLayer} from './preview-logo-layer.mjs';
@@ -518,17 +518,6 @@ function createSchemeCards(){
 }
 for(const button of document.querySelectorAll('[data-scope]'))button.onclick=()=>{syncSchemeState();placementScope=button.dataset.scope;updateSchemeHeading();taskDraft?.schedule();};
 document.querySelector('#restore-shared').onclick=()=>{schemeState=restoreSharedGeometry(schemeState,activeScheme);placementScope='shared';loadSchemeTargets();};
-document.querySelector('#copy-appearance').onclick=()=>{
-  syncSchemeState();const dialog=document.querySelector('#copy-scheme-dialog'),options=document.querySelector('#copy-scheme-options');options.replaceChildren();
-  document.querySelector('#copy-region-name').textContent=`${schemeNames[activeScheme]} · ${targets.querySelector('.selected .target-head strong')?.textContent||'当前区域'}的颜色和工艺`;
-  for(const [version,name]of Object.entries(schemeNames))if(version!==activeScheme){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.value=version;label.append(input,name);options.append(label);}
-  dialog.showModal();
-};
-document.querySelector('#confirm-copy').onclick=event=>{
-  const versions=[...document.querySelectorAll('#copy-scheme-options input:checked')].map(input=>input.value);
-  if(!versions.length){event.preventDefault();return;}
-  schemeState=copyTargetAppearance(schemeState,activeScheme,selectedTargetId,versions);queueSchemeCards();taskDraft?.schedule();
-};
 
 function closePrintMenus(){
   for(const menu of document.querySelectorAll('.print-select-menu:not([hidden])')){

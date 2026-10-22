@@ -59,13 +59,6 @@ export function editScheme(state,version,targets,shared=true){
   return next;
 }
 
-export function copyTargetAppearance(state,fromVersion,targetId,toVersions){
-  const next=clone(state),source=schemeTargets(next,fromVersion).find(target=>target.id===targetId);
-  if(!source)throw Error('请选择 Logo 区域');
-  for(const version of toVersions){const target=schemeTargets(next,version).find(target=>target.id===targetId);for(const key of appearanceKeys.filter(key=>key!=='carrierType'))target[key]=clone(source[key]);}
-  return next;
-}
-
 export function restoreSharedGeometry(state,version){
   const next=clone(state),scheme=next.schemes.find(scheme=>scheme.version===version);
   scheme.targets=scheme.targets.map(target=>({...target,...geometry(next.sharedTargets.find(item=>item.id===target.id)||target)}));
