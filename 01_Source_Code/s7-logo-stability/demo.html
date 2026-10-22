@@ -65,11 +65,13 @@
         <div class="section-title"><h2>3. 效果方案</h2><div class="result-toolbar"><span id="result-meta">选择方案查看和调整</span><button type="button" id="download-selected" class="button primary" disabled>下载选择图片</button></div></div>
         <div id="multi-product-tabs" class="multi-product-tabs" aria-label="批量包材"></div>
         <div id="multi-product-output" class="multi-product-output" aria-live="polite" hidden></div>
-        <div id="results" class="results scheme-grid" aria-live="polite"></div>
-        <div class="preview-section">
-          <div class="preview-title"><strong id="canvas-scheme-title">原色方案 · 编辑预览</strong><span id="selected-target">未选择目标</span></div>
-          <div class="canvas-wrap"><canvas id="placement-canvas" aria-label="Logo拖动定位画布"></canvas><div id="preview-empty" class="preview-empty">上传原图后，这里会显示可拖动的 Logo</div></div>
-          <p class="hint">母版位置默认锁定；点击“移动位置”后才可拖动。蓝色方块缩放；上方圆形手柄旋转。</p>
+        <div class="scheme-workspace">
+          <div class="preview-section">
+            <div class="preview-title"><strong id="canvas-scheme-title">原色方案 · 编辑预览</strong><span id="selected-target">未选择目标</span></div>
+            <div class="canvas-wrap"><canvas id="placement-canvas" aria-label="Logo拖动定位画布"></canvas><div id="preview-empty" class="preview-empty">上传原图后，这里会显示可拖动的 Logo</div></div>
+            <p class="hint">母版位置默认锁定；点击“移动位置”后才可拖动。蓝色方块缩放；上方圆形手柄旋转。</p>
+          </div>
+          <div id="results" class="results scheme-grid" aria-live="polite" aria-label="方案预览，生成后点击图片查看大图"></div>
         </div>
         <div id="empty-state" hidden></div>
       </section>
