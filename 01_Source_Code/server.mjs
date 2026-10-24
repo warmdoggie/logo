@@ -24,6 +24,7 @@ import {readSeedLogo} from './seed-logo.mjs';
 import {workspaceAuth,requestScope} from './workspace-auth.mjs';
 import {logoLibrary} from './logo-library.mjs';
 import {createDemoHandler} from './s7-logo-stability/demo-server.mjs';
+import {createCleanupHandler} from './logo-cleanup/server.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const data = process.env.APP_DATA_DIR || join(root, 'data');
@@ -103,6 +104,7 @@ if(process.env.APP_NO_SEED!=='1'&&!db.prepare("SELECT value FROM AppMeta WHERE k
 await logos.initializeLegacy();
 const users=workspaceAuth(db,data,storage);
 const s7Handler=createDemoHandler({authenticate:users?req=>users.requireUser(req):null,spaceDir:process.env.S7_SPACE_DIR||join(data,'user-spaces')});
+const cleanupHandler=createCleanupHandler({authenticate:users?req=>users.requireUser(req):null,dataDir:join(data,'logo-cleanup')});
 function products(query='',includeInactive=false) {
  const q=query.trim().toUpperCase();
  const rows=db.prepare('SELECT p.*, (SELECT version FROM ProductTemplate WHERE productId=p.id AND isCurrent=1) AS currentVersion FROM Product p ORDER BY createdAt DESC, sku ASC').all();
@@ -132,6 +134,12 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
   const requestOrigin=`${forwardedProto==='https'?'https':'http'}://${req.headers.host}`;
   if(req.method!=='GET'&&req.headers.origin&&req.headers.origin!==requestOrigin)bad('不允许跨站提交',403);
   const url=new URL(req.url,`http://${req.headers.host}`), path=url.pathname;
+  if(path==='/logo-cleanup'||path.startsWith('/logo-cleanup/')){
+   if(path==='/logo-cleanup'){res.writeHead(302,{Location:'/logo-cleanup/'});return res.end();}
+   const originalUrl=req.url;req.url=req.url.replace(/^\/logo-cleanup/,'');
+   res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'`);
+   try{return await cleanupHandler(req,res);}finally{req.url=originalUrl;}
+  }
   if(path==='/s7'||path.startsWith('/s7/')){
    const originalUrl=req.url;req.url=req.url.replace(/^\/s7(?=\/|\?|$)/,'')||'/';
    res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'`);

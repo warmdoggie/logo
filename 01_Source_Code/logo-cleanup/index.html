@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>批量去除 Logo 占位字</title><link rel="stylesheet" href="./style.css"><script type="module" src="./client.js"></script></head>
+<body>
+<main>
+  <header><div><h1>批量去除 Logo 占位字</h1><p>多选产品图，一键识别并去掉 YOUR LOGO、Private Label 等占位字，保留标题、尺寸与重量。</p></div><button id="new-batch">新建批次</button></header>
+  <div class="toolbar"><label>处理批次 <select id="batches" aria-label="处理批次"><option value="">暂无批次</option></select></label><label class="upload">添加图片<input id="files" type="file" accept="image/png,image/jpeg,image/webp" multiple></label><button id="auto" class="primary">一键自动去字</button><button id="detect">仅识别占位字</button><button id="remove">按已有框去字</button><a id="download" class="button" aria-disabled="true">下载已完成 ZIP</a></div>
+  <p id="summary" role="status" aria-live="polite">正在读取批次…</p>
+  <p id="error" role="alert" hidden></p>
+  <section id="dropzone" class="empty"><h2>添加需要处理的产品图</h2><p>拖入多张图片，或点击“添加图片”多选。每批最多 100 张，单张不超过 12 MB。</p><p>上传后点击“一键自动去字”，整批自动识别并修补，无需逐张框选。</p></section>
+  <section id="workspace" hidden>
+    <aside><h2>本批图片</h2><label class="select-all"><input id="select-all" type="checkbox">全选待处理图片</label><div id="queue"></div></aside>
+    <div class="editor">
+      <div class="editor-heading"><h2 id="selected-name">原图与去字区域</h2><span id="dimensions"></span></div>
+      <div class="comparison"><section><h3>原图与去字框</h3><canvas id="canvas" tabindex="0" aria-label="原图去字区域编辑器，可拖动绘制、移动和缩放区域"></canvas><div class="tools"><button id="delete-region">删除选中框</button><button id="clear-regions">清空框</button></div></section><section><h3>处理结果</h3><img id="result" alt="去除占位字后的产品图" hidden><div id="result-empty" class="result-empty">完成去字后在这里对比结果</div></section></div>
+      <p class="hint">拖动空白处补框；拖动框内移动，拖动右下角缩放。选中后可按 Delete 删除。只框住字样，避开产品边缘及其他文字。</p>
+      <div class="tools"><button id="detect-one">重新识别此图</button><button id="remove-one">去字 / 重试此图</button><a id="download-one" class="button" aria-disabled="true">下载此图 PNG</a></div>
+      <p id="item-message" role="status"></p>
+    </div>
+  </section>
+  <p class="hint">默认处理本批勾选的未完成图片，同时处理最多 3 张，其余自动排队；关闭页面不影响后台处理。原图单独保留，结果保持原图尺寸与框外像素。未识别到占位字的图片会标为“待核对”，可补框后重试；倾斜、交叉及普通品牌字仍需核对。</p>
+</main>
+</body></html>

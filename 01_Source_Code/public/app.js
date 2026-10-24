@@ -10,8 +10,9 @@ import {renderLogo, leaveLogo} from './logo-editor.js';
 import {initializeAccounts,renderAccounts} from './account-ui.js';
 const workspaceAccount=await initializeAccounts();
 const main=document.querySelector('#main');
+function renderCleanupModule(){main.innerHTML='<section class="panel s7-module-panel"><iframe src="/logo-cleanup/" title="批量去除 Logo 占位字" width="100%" height="900" frameborder="0"></iframe></section>';}
 function renderS7Module(){main.innerHTML=`<section class="panel s7-module-panel"><iframe src="/s7/?v=${Date.now()}" title="S7 Logo Stability" width="100%" height="900" frameborder="0"></iframe></section>`;}
-function renderS7IfRequested(){const path=(location.hash.slice(1)||'/tasks').split('?')[0],isS7=path==='/modules/s7-logo-stability';document.body.classList.toggle('s7-module',isS7);if(!isS7)return false;document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.nav==='modules'));document.querySelector('#breadcrumb').textContent='S7 Logo Stability';renderS7Module();return true;}
+function renderS7IfRequested(){const path=(location.hash.slice(1)||'/tasks').split('?')[0],isS7=path==='/modules/s7-logo-stability',isCleanup=path==='/modules/logo-cleanup';document.body.classList.toggle('s7-module',isS7||isCleanup);if(!isS7&&!isCleanup)return false;document.querySelectorAll('[data-nav]').forEach(a=>a.classList.toggle('active',a.dataset.module===(isCleanup?'logo-cleanup':'s7-logo-stability')));document.querySelector('#breadcrumb').textContent=isCleanup?'批量去除 Logo 占位字':'S7 Logo Stability';if(isCleanup)renderCleanupModule();else renderS7Module();return true;}
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const date=v=>new Date(v).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
 const image=p=>`/files/${encodeURIComponent(p)}`;

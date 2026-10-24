@@ -9,6 +9,15 @@
       "productionUrl": "https://logo.heciai.net/",
       "isolated": false,
       "notes": "由主工作区同一进程和端口提供页面与 API；任务素材按用户隔离，产品图库共享。"
+    },
+    {
+      "id": "logo-cleanup",
+      "name": "批量去除 Logo 占位字",
+      "source": "01_Source_Code/logo-cleanup",
+      "startScript": "start-workspace.ps1",
+      "localUrl": "http://127.0.0.1:3210/#/modules/logo-cleanup",
+      "isolated": false,
+      "notes": "本地 OCR 定位占位字，复用 APIMart 局部修补；批次和图片按工作区用户隔离。"
     }
   ]
 }
