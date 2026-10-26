@@ -335,25 +335,35 @@ productLibrarySearch.addEventListener('input',renderProductLibrary);
 function renderLogoLibrary(){
   const query=logoLibrarySearch.value.trim().toUpperCase();
   const visible=logoLibraryItems.filter(item=>String(item.name||'').toUpperCase().includes(query));
-  logoLibraryList.innerHTML=visible.length?visible.map(item=>`<article class="product-library-item"><img src="${esc(logoLibraryPath(item.imageUrl))}" alt="${esc(item.name)}"><div><strong>${esc(item.name)}</strong><span>${esc(new Date(item.createdAt).toLocaleString())}</span></div><label class="batch-product-check"><input type="checkbox" data-logo-id="${esc(item.id)}" aria-label="选择 ${esc(item.name)}" ${taskLogos.some(logo=>logo.id===item.id)?'checked':''} ${generationBusy||multiPackageBusy||logoSelectionBusy||(!taskLogos.some(logo=>logo.id===item.id)&&taskLogos.length>0&&(!multiLogoEnabled||multiPackageProducts.length>1))?'disabled':''}></label></article>`).join(''):'<p class="hint">Logo 库中没有匹配的图片。</p>';
-  logoLibraryList.querySelectorAll('[data-logo-id]').forEach(input=>input.addEventListener('change',async()=>{
-    if(generationBusy||multiPackageBusy||logoSelectionBusy){renderLogoLibrary();return;}
-    const item=logoLibraryItems.find(value=>value.id===input.dataset.logoId);if(!item)return;
-    if(!input.checked){await removeTaskLogo(item.id);return;}
-    logoSelectionBusy=true;renderLogoLibrary();updateGenerateButton();
-    try{
-      const response=await fetch(logoLibraryPath(item.imageUrl));if(!response.ok)throw Error('Logo 库图片读取失败');
-      const loaded=await fileData(await response.blob());
-      await addTaskLogo({id:item.id,name:item.name.slice(0,120),logoImage:loaded.data});
-      setStatus(`已选择 ${taskLogos.length} 个 Logo，可关闭选择框后调整预览。`,'success');
-    }catch(error){setStatus(error.message,'error');}
-    finally{logoSelectionBusy=false;renderLogoLibrary();renderProductLibrary();updateGenerateButton();}
-  }));
+  const key=JSON.stringify(visible.map(item=>[item.id,item.name,item.createdAt,item.imageUrl]));
+  if(logoLibraryList.dataset.items!==key){
+    logoLibraryList.dataset.items=key;
+    logoLibraryList.innerHTML=visible.length?visible.map(item=>`<article class="product-library-item"><img src="${esc(logoLibraryPath(item.imageUrl+'?thumbnail=1'))}" alt="${esc(item.name)}"><div><strong>${esc(item.name)}</strong><span>${esc(new Date(item.createdAt).toLocaleString())}</span></div><label class="batch-product-check"><input type="checkbox" data-logo-id="${esc(item.id)}" aria-label="选择 ${esc(item.name)}"></label></article>`).join(''):'<p class="hint">Logo 库中没有匹配的图片。</p>';
+    logoLibraryList.querySelectorAll('[data-logo-id]').forEach(input=>input.addEventListener('change',async()=>{
+      if(generationBusy||multiPackageBusy||logoSelectionBusy){renderLogoLibrary();return;}
+      const item=logoLibraryItems.find(value=>value.id===input.dataset.logoId);if(!item)return;
+      if(!input.checked){await removeTaskLogo(item.id);return;}
+      logoSelectionBusy=true;logoLibraryList.dataset.loadingLogo=item.id;renderLogoLibrary();updateGenerateButton();
+      setStatus('正在加载所选 Logo…','busy');
+      try{
+        const response=await fetch(logoLibraryPath(item.imageUrl));if(!response.ok)throw Error('Logo 库图片读取失败');
+        const loaded=await fileData(await response.blob());
+        await addTaskLogo({id:item.id,name:item.name.slice(0,120),logoImage:loaded.data});
+        setStatus(`已选择 ${taskLogos.length} 个 Logo，可关闭选择框后调整预览。`,'success');
+      }catch(error){setStatus(error.message,'error');}
+      finally{delete logoLibraryList.dataset.loadingLogo;logoSelectionBusy=false;renderLogoLibrary();renderProductLibrary();updateGenerateButton();}
+    }));
+  }
+  logoLibraryList.querySelectorAll('[data-logo-id]').forEach(input=>{
+    const selected=taskLogos.some(logo=>logo.id===input.dataset.logoId);
+    input.checked=selected||logoLibraryList.dataset.loadingLogo===input.dataset.logoId;
+    input.disabled=generationBusy||multiPackageBusy||logoSelectionBusy||(!selected&&taskLogos.length>0&&(!multiLogoEnabled||multiPackageProducts.length>1));
+  });
 }
 
 async function openLogoLibrary(){
   logoLibraryPanel.hidden=!logoLibraryPanel.hidden;if(logoLibraryPanel.hidden)return;
-  productLibraryPanel.hidden=true;logoLibraryList.textContent='正在读取 Logo 库…';
+  productLibraryPanel.hidden=true;delete logoLibraryList.dataset.items;logoLibraryList.textContent='正在读取 Logo 库…';
   try{const response=await fetch(logoLibraryPath('/api/logo-library'));const payload=await response.json();if(!response.ok)throw Error(payload.error||'Logo 库读取失败');logoLibraryItems=payload;renderLogoLibrary();}
   catch(error){logoLibraryList.innerHTML=`<p class="hint status error">${esc(error.message)}</p>`;}
 }
@@ -1045,7 +1055,7 @@ try{const response=await fetch('/api/features');multiLogoEnabled=response.ok&&(a
 if(currentTaskId&&s7User){
  taskDraft=createTaskDraft({id:currentTaskId,
   request:async(url,data,method='GET')=>{const response=await fetch(url,{method,headers:{'Content-Type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});const value=await response.json();if(!response.ok)throw Error(value.error||'任务保存失败');return value;},
-  capture:()=>{const multiLogoLayouts=captureMultiLogoLayouts(),multiProductLayouts=captureMultiProductLayouts();return {mode:'ordinary',taskLogos,multiLogoLayouts,selectedTaskLogoId,schemeState,activeScheme,placementScope,savedSignatures,dismissedGenerationId,downloadSelection,selectedVersions:selectedGenerationVersions(),baseData,baseProductId:loadedMultiProductId,logoData,logoSourceData,baseDataUrl:baseData?'':baseImage?.src||'',logoDataUrl:logoData?'':logoImage?.src||'',targets:collectTargets(),selectedTargetId,model:mockupModel.value,logoOutputColor:document.querySelector('input[name="logo-output-color"]:checked').value,baseName:document.querySelector('#base-name').textContent,logoName:document.querySelector('#logo-name').textContent,result:multiPackageProducts.length>1||taskLogos.length>1?null:lastResultPayload,multiPackageProducts,multiProductLayouts,selectedMultiProductId};},
+  capture:()=>{const multiLogoLayouts=captureMultiLogoLayouts(),multiProductLayouts=captureMultiProductLayouts();return {mode:'ordinary',taskLogos,multiLogoLayouts,selectedTaskLogoId,schemeState,activeScheme,placementScope,savedSignatures,dismissedGenerationId,downloadSelection,selectedVersions:selectedGenerationVersions(),baseData,baseProductId:loadedMultiProductId,logoData:taskLogos.length?'':logoData,logoSourceData:taskLogos.length?'':logoSourceData,baseDataUrl:baseData?'':baseImage?.src||'',logoDataUrl:taskLogos.length||logoData?'':logoImage?.src||'',targets:collectTargets(),selectedTargetId,model:mockupModel.value,logoOutputColor:document.querySelector('input[name="logo-output-color"]:checked').value,baseName:document.querySelector('#base-name').textContent,logoName:document.querySelector('#logo-name').textContent,result:multiPackageProducts.length>1||taskLogos.length>1?null:lastResultPayload,multiPackageProducts,multiProductLayouts,selectedMultiProductId};},
   onSaved:record=>{const busy=status.classList.contains('busy');notifyTask(busy?'生成中…':'已保存',busy,record.updatedAt);},onError:error=>{status.textContent=error.message;status.className='status error';notifyTask('保存失败');}});
  try{
   const state=await taskDraft.load();

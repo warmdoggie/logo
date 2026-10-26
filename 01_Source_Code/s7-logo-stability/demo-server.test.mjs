@@ -78,6 +78,20 @@ test('S7 通过当前用户会话读取 Logo 库图片',async()=>{
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
 
+test('Logo 列表缩略图保留透明度和比例，选择仍读取原图',async()=>{
+  const original=await image(2048,1024,{r:20,g:40,b:60,alpha:.5});
+  const {server,base}=await openServer({logoImage:async()=>original});
+  try{
+    const response=await fetch(base+'/api/logo-library/logo-1/image?thumbnail=1');
+    assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/webp');
+    assert.equal(response.headers.get('cache-control'),'private, no-store');
+    const thumbnail=Buffer.from(await response.arrayBuffer()),meta=await sharp(thumbnail).metadata();
+    assert.equal(meta.width,192);assert.equal(meta.height,96);assert.equal(meta.hasAlpha,true);
+    assert.ok(thumbnail.length<original.length);
+    assert.deepEqual(Buffer.from(await(await fetch(base+'/api/logo-library/logo-1/image')).arrayBuffer()),original);
+  }finally{await new Promise(resolve=>server.close(resolve));}
+});
+
 test('产品库选择器读取主工作区产品并返回标准图',async()=>{
   const productImage=await image(16,10,{r:230,g:220,b:210,alpha:1});
   const {server,base}=await openServer({productCatalog:async()=>[{

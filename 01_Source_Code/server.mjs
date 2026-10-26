@@ -180,7 +180,17 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
    const saved=logoAssets.add({name:String(form.get('name')||file.name||'Logo.png'),bytes:await sharp(bytes).png().toBuffer()});return json(saved,201);
   }
   const logoLibraryMatch=path.match(/^\/api\/logo-library\/([^/]+)(?:\/(image))?$/);
-  if(logoLibraryMatch){const id=decodeURIComponent(logoLibraryMatch[1]);if(req.method==='GET'&&logoLibraryMatch[2]){res.setHeader('Content-Type','image/png');return res.end(logoAssets.image(id));}if(req.method==='PATCH'&&!logoLibraryMatch[2])return json(logoAssets.rename(id,(await input()).name));if(req.method==='DELETE'&&!logoLibraryMatch[2]){logoAssets.remove(id);return json({ok:true});}bad('Logo 库接口不存在',404);}
+  if(logoLibraryMatch){
+   const id=decodeURIComponent(logoLibraryMatch[1]);
+   if(req.method==='GET'&&logoLibraryMatch[2]){
+    const bytes=logoAssets.image(id);
+    if(url.searchParams.get('thumbnail')==='1'){res.setHeader('Content-Type','image/webp');return res.end(await sharp(bytes).resize({width:192,height:192,fit:'inside',withoutEnlargement:true}).webp({quality:76}).toBuffer());}
+    res.setHeader('Content-Type','image/png');return res.end(bytes);
+   }
+   if(req.method==='PATCH'&&!logoLibraryMatch[2])return json(logoAssets.rename(id,(await input()).name));
+   if(req.method==='DELETE'&&!logoLibraryMatch[2]){logoAssets.remove(id);return json({ok:true});}
+   bad('Logo 库接口不存在',404);
+  }
   if(path.startsWith('/api/transparent/')){
    const [,,,id,action]=path.split('/');
    if(req.method==='GET'&&!action)return json({...transparent.page(id),actor});

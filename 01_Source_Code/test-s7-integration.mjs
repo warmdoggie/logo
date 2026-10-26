@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {spawn} from 'node:child_process';
 import {createServer} from 'node:net';
 import {test} from 'node:test';
+import sharp from 'sharp';
 
 const root=process.cwd();
 
@@ -43,6 +44,19 @@ test('主工作区同一端口直接提供 S7 页面、静态资源和 API', {ti
     const login=await fetch(base+'/api/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({username:'admin',password})});
     assert.equal(login.status,200);
     const cookie=login.headers.get('set-cookie').split(';')[0];
+    const original=await sharp({create:{width:1024,height:512,channels:4,background:{r:40,g:60,b:80,alpha:.5}}}).png().toBuffer();
+    const form=new FormData();form.set('file',new Blob([original],{type:'image/png'}),'logo.png');
+    const uploaded=await fetch(base+'/api/logo-library',{method:'POST',headers:{cookie},body:form});
+    assert.equal(uploaded.status,201);
+    const logo=await uploaded.json();
+    const thumbnail=await fetch(base+logo.imageUrl+'?thumbnail=1',{headers:{cookie}});
+    assert.equal(thumbnail.status,200);assert.equal(thumbnail.headers.get('content-type'),'image/webp');
+    assert.match(thumbnail.headers.get('cache-control'),/no-store/);
+    const meta=await sharp(Buffer.from(await thumbnail.arrayBuffer())).metadata();
+    assert.equal(meta.width,192);assert.equal(meta.height,96);assert.equal(meta.hasAlpha,true);
+    const full=await fetch(base+logo.imageUrl,{headers:{cookie}});
+    assert.deepEqual(Buffer.from(await full.arrayBuffer()),original);
+    assert.equal((await fetch(base+logo.imageUrl+'?thumbnail=1')).status,401);
     const session=await fetch(base+'/s7/api/session',{headers:{cookie}});
     assert.equal(session.status,200);
     assert.equal((await session.json()).user.username,'admin');

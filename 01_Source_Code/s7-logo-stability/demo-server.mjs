@@ -176,6 +176,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
         const logoImageMatch=url.pathname.match(/^\/api\/logo-library\/([^/]+)\/image$/);
         if(logoImageMatch){
           const bytes=await logoImage(req,decodeURIComponent(logoImageMatch[1]));
+          if(url.searchParams.get('thumbnail')==='1'){const thumbnail=await sharp(bytes).resize({width:192,height:192,fit:'inside',withoutEnlargement:true}).webp({quality:76}).toBuffer();res.writeHead(200,{'content-type':'image/webp','cache-control':'private, no-store'});res.end(thumbnail);return;}
           res.writeHead(200,{'content-type':'image/png','cache-control':'private, no-store'});res.end(bytes);return;
         }
         const productImageMatch=url.pathname.match(/^\/api\/product-library\/image\/([^/]+)$/);
