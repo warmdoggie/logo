@@ -22,6 +22,7 @@ export function workspaceAuth(db,data,storage,{enabled=process.env.APP_MULTI_USE
  CREATE TABLE IF NOT EXISTS WorkspaceFileOwner(fileKey TEXT PRIMARY KEY,userId TEXT NOT NULL REFERENCES WorkspaceUser(id));
  CREATE INDEX IF NOT EXISTS idx_TaskOwner_user ON TaskOwner(userId);`);
  if(!db.prepare('PRAGMA table_info(WorkspaceUser)').all().some(column=>column.name==='approvalStatus'))db.exec("ALTER TABLE WorkspaceUser ADD COLUMN approvalStatus TEXT NOT NULL DEFAULT 'APPROVED' CHECK(approvalStatus IN ('PENDING','APPROVED','REJECTED'))");
+ if(!db.prepare('PRAGMA table_info(WorkspaceUser)').all().some(column=>column.name==='canEditProducts'))db.exec('ALTER TABLE WorkspaceUser ADD COLUMN canEditProducts INTEGER NOT NULL DEFAULT 0 CHECK(canEditProducts IN (0,1))');
  function createUser(username,password,role='USER',approvalStatus='APPROVED'){
   if(typeof username!=='string'||! /^[a-zA-Z0-9][a-zA-Z0-9_.-]{2,39}$/.test(username))fail('账号需为 3–40 位字母、数字、点、横线或下划线',400);
   if(typeof password!=='string'||password.length<12||password.length>200)fail('密码需为 12–200 位',400);
@@ -35,7 +36,7 @@ export function workspaceAuth(db,data,storage,{enabled=process.env.APP_MULTI_USE
  // Existing private files belong to the administrator. Shared product references are checked separately.
  if(existsSync(storage.root))for(const key of readdirSync(storage.root))db.prepare('INSERT OR IGNORE INTO WorkspaceFileOwner VALUES (?,?)').run(key,admin.id);
  storage.onPut=key=>{const user=requestScope.getStore()?.user;if(!user)fail('缺少文件所属用户',401);db.prepare('INSERT INTO WorkspaceFileOwner VALUES (?,?)').run(key,user.id);};
- const publicUser=row=>({id:row.id,username:row.username,role:row.role,disabled:!!row.disabled,approvalStatus:row.approvalStatus});
+ const publicUser=row=>({id:row.id,username:row.username,role:row.role,disabled:!!row.disabled,approvalStatus:row.approvalStatus,canEditProducts:!!row.canEditProducts});
  const token=req=>(req.headers.cookie||'').match(/(?:^|;\s*)workspace_session=([a-f0-9]{64})(?:;|$)/)?.[1];
  function actor(req){const value=token(req);if(!value)return null;const row=db.prepare("SELECT u.* FROM WorkspaceSession s JOIN WorkspaceUser u ON u.id=s.userId WHERE s.tokenHash=? AND s.expiresAt>? AND u.disabled=0 AND u.approvalStatus='APPROVED'").get(hash(value),Date.now());return row?publicUser(row):null;}
  function requireUser(req){const user=actor(req);if(!user)fail('请先登录',401);return user;}
@@ -77,9 +78,11 @@ export function workspaceAuth(db,data,storage,{enabled=process.env.APP_MULTI_USE
  function updateUser(actor,id,input){
   requireAdmin(actor);const row=db.prepare('SELECT * FROM WorkspaceUser WHERE id=?').get(id);if(!row)fail('账号不存在',404);
   if(row.role==='ADMIN'&&input.disabled===true)fail('不能停用管理员',400);
+  if(input.canEditProducts!==undefined&&typeof input.canEditProducts!=='boolean')fail('产品图库权限格式不正确',400);
   if(input.password!==undefined){if(typeof input.password!=='string'||input.password.length<12||input.password.length>200)fail('密码需为 12–200 位',400);const salt=randomBytes(16).toString('hex');db.prepare('UPDATE WorkspaceUser SET salt=?,passwordHash=? WHERE id=?').run(salt,scryptSync(input.password,salt,64).toString('hex'),id);}
   if(input.disabled!==undefined){if(typeof input.disabled!=='boolean')fail('账号状态格式不正确',400);db.prepare('UPDATE WorkspaceUser SET disabled=? WHERE id=?').run(Number(input.disabled),id);}
-  db.prepare('DELETE FROM WorkspaceSession WHERE userId=?').run(id);return {ok:true};
+  if(input.canEditProducts!==undefined)db.prepare('UPDATE WorkspaceUser SET canEditProducts=? WHERE id=?').run(Number(input.canEditProducts),id);
+  if(input.password!==undefined||input.disabled!==undefined)db.prepare('DELETE FROM WorkspaceSession WHERE userId=?').run(id);return {ok:true};
  }
  function guard(user,path,method){
   if(path.startsWith('/files/'))return ownFile(user,decodeURIComponent(path.slice(7)));
@@ -89,15 +92,16 @@ export function workspaceAuth(db,data,storage,{enabled=process.env.APP_MULTI_USE
   if(path.startsWith('/api/logo-rule-facts/')){const row=db.prepare('SELECT taskId FROM ProductionLogo WHERE id=?').get(decodeURIComponent(path.split('/')[3]));return ownTask(user,row?.taskId||'');}
   if(path==='/api/logo-library'||path.startsWith('/api/logo-library/'))return;
   if(path==='/api/rule-auth'){if(method!=='GET')fail('请使用工作空间账号登录，不能切换规则账号',403);return;}
-  if(path.startsWith('/api/manage/products/')){requireAdmin(user);return;}
+  if(path.startsWith('/api/manage/products/')){if(!user.canEditProducts)requireAdmin(user);return;}
   if(path==='/api/tasks'||path==='/api/batch-summary'||path==='/api/ai/status'||path==='/api/render')return;
   if(path==='/api/products/batch'||path==='/api/rules/meta')return;
-  if(/^\/api\/(?:products|templates|manage\/products|rules|rule-policies|product-rule-profile|ai\/surface)(?:\/|$)/.test(path)){if(method!=='GET')requireAdmin(user);return;}
+  if(/^\/api\/(?:products|templates)(?:\/|$)/.test(path)){if(method!=='GET'&&!user.canEditProducts)requireAdmin(user);return;}
+  if(/^\/api\/(?:rules|rule-policies|product-rule-profile|ai\/surface)(?:\/|$)/.test(path)){if(method!=='GET')requireAdmin(user);return;}
   // Administrative/global APIs are never available to ordinary users.
   requireAdmin(user);
  }
  return {actor,requireUser,requireAdmin,ownTask,ownFile,guard,login,logout,register,reviewUser,createUser,updateUser,
-  users:()=>db.prepare('SELECT id,username,role,disabled,approvalStatus,createdAt FROM WorkspaceUser ORDER BY createdAt').all(),
+  users:()=>db.prepare('SELECT id,username,role,disabled,approvalStatus,createdAt,canEditProducts FROM WorkspaceUser ORDER BY createdAt').all().map(row=>({...row,canEditProducts:!!row.canEditProducts})),
   claimTask:(id,user)=>db.prepare('INSERT INTO TaskOwner VALUES (?,?)').run(id,user.id),
   visibleTasks:user=>db.prepare('SELECT taskId FROM TaskOwner WHERE userId=?').all(user.id).map(row=>row.taskId)};
 }
