@@ -8,9 +8,9 @@ async function workspace(){
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
  const view=id=>({baseData:`base-${id}`,baseImage:{id},targets:[{id:'body',x:id==='a'?.3:.7,y:.5,widthRatio:.2}],schemeState:createSchemes([{id:'body',x:id==='a'?.3:.7,y:.5,widthRatio:.2}]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'body',lastResultPayload:{outputs:[{version:'ORIGINAL',dataUrl:`/${id}.png`}]},savedSignatures:{},schemePhases:{}});
  const first=view('a'),nodes={};
- const c=vm.createContext({structuredClone,createSchemes,taskLogos:[{id:'logo'}],logoData:'logo',logoImage:{},logoSelectionBusy:false,generationBusy:false,multiPackageBusy:false,
+ const c=vm.createContext({currentTaskId:null,s7User:null,structuredClone,createSchemes,taskLogos:[{id:'logo'}],selectedTaskLogoId:'logo',loadedTaskLogoId:'logo',logoData:'logo',logoImage:{},logoSelectionBusy:false,generationBusy:false,multiPackageBusy:false,
   multiPackageProducts:[{id:'a',sku:'A'},{id:'b',sku:'B'}],selectedMultiProductId:'a',loadedMultiProductId:'a',multiProductLoadRevision:0,
-  multiProductViews:new Map([['a',first],['b',view('b')]]),multiProductResults:new Map([['a',{}],['b',{}]]),multiProductJob:null,multiLogoJob:null,multiLogoViews:new Map(),
+  multiProductViews:new Map([['a',first],['b',view('b')]]),multiProductLoads:new Map(),multiProductResults:new Map([['a',{}],['b',{}]]),multiProductJob:null,multiLogoJob:null,multiLogoViews:new Map(),
   ...first,submittedSignatures:{},showModifiedPreview:new Set(),generationId:'old-job',dismissedGenerationId:null,
   collectTargets:()=>c.schemeState.schemes[0].targets,syncSchemeState:()=>{},loadSchemeTargets:()=>{},drawPreview:()=>{},
   renderProductLibrary:()=>{},renderMultiProductResults:()=>{},queueSchemeCards:()=>{},updateGenerateButton:()=>{},setStatus:()=>{},taskDraft:{schedule:()=>{}},

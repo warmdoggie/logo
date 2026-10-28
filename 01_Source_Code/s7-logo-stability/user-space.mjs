@@ -1,6 +1,6 @@
 import {mkdir,readdir,readFile,writeFile,rename,rm,stat} from 'node:fs/promises';
 import {join} from 'node:path';
-import {randomUUID} from 'node:crypto';
+import {randomUUID,createHash} from 'node:crypto';
 import sharp from 'sharp';
 const fail=(message,status)=>{throw Object.assign(Error(message),{status});};
 const safe=value=>{if(typeof value!=='string'||! /^[a-zA-Z0-9_-]{1,80}$/.test(value))fail('文件不存在',404);return value;};
@@ -17,6 +17,28 @@ export function userSpace(root){
  async function serialized(file,operation){const previous=updates.get(file)||Promise.resolve(),current=previous.catch(()=>{}).then(operation);updates.set(file,current);try{return await current;}finally{if(updates.get(file)===current)updates.delete(file);}}
  async function task(user,id){try{return JSON.parse(await readFile(taskFile(user,id),'utf8'));}catch(e){if(e.code==='ENOENT')fail('任务不存在',404);throw e;}}
  async function ensureTask(user,id){try{await stat(taskFile(user,id));}catch(e){if(e.code==='ENOENT')fail('任务不存在',404);throw e;}}
+ async function saveTaskAsset(user,id,bytes,contentType){
+  const extension={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[contentType];if(!extension)fail('图片格式不支持',400);
+  const name=createHash('sha256').update(bytes).digest('hex')+'.'+extension,file=taskFile(user,id);
+  return serialized(file,async()=>{
+   await ensureTask(user,id);const folder=join(file,'..','assets');await mkdir(folder,{recursive:true});
+   const target=join(folder,name);
+   try{await stat(target);}catch(error){
+    if(error.code!=='ENOENT')throw error;const temporary=target+'.'+randomUUID();
+    try{await writeFile(temporary,bytes,{flag:'wx'});await rename(temporary,target);}finally{await rm(temporary,{force:true});}
+   }
+   return `/api/my-space/tasks/${id}/assets/${name}`;
+  });
+ }
+ async function taskAsset(user,id,name){
+  if(!/^[a-f0-9]{64}\.(png|jpg|webp)$/.test(name))fail('文件不存在',404);await ensureTask(user,id);
+  try{return {bytes:await readFile(join(taskFile(user,id),'..','assets',name)),contentType:{png:'image/png',jpg:'image/jpeg',webp:'image/webp'}[name.split('.').at(-1)]};}catch(error){if(error.code==='ENOENT')fail('文件不存在',404);throw error;}
+ }
+ function taskAssetFromUrl(user,id,url){
+  if(!user)fail('请先登录',401);const prefix=`/api/my-space/tasks/${id}/assets/`;
+  if(typeof url!=='string'||!url.startsWith(prefix))fail('图片快照不属于当前任务',400);
+  return taskAsset(user,id,url.slice(prefix.length));
+ }
  const summary=({state,...record})=>({...record,...(state?.mode?{mode:state.mode}:{})});
  async function taskSummary(user,id){await ensureTask(user,id);try{return JSON.parse(await readFile(join(taskFile(user,id),'..','summary.json'),'utf8'));}catch(e){if(e.code==='ENOENT')return summary(await task(user,id));throw e;}}
  async function writeSummary(file,record){const path=join(file,'..','summary.json'),temporary=path+'.'+randomUUID();try{await writeFile(temporary,JSON.stringify(summary(record)),{flag:'wx'});await rename(temporary,path);}finally{await rm(temporary,{force:true});}}
@@ -65,5 +87,5 @@ export function userSpace(root){
   const record=await change(await readGeneration(user,id)),file=join(taskFile(user,id),'..','generation.json'),temporary=file+'.'+randomUUID();
   try{await writeFile(temporary,JSON.stringify(record),{flag:'wx'});await rename(temporary,file);}catch(e){await rm(temporary,{force:true});throw e;}return record;
  });}
- return {save,history,image,task,taskSummary,tasks,createTask,updateTask,deleteTask,generation,updateGeneration};
+ return {save,history,image,task,taskSummary,tasks,createTask,updateTask,deleteTask,generation,updateGeneration,saveTaskAsset,taskAsset,taskAssetFromUrl};
 }

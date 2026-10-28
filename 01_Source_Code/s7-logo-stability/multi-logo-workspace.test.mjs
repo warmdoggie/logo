@@ -9,8 +9,8 @@ async function workspace(){
  const start=source.indexOf('function saveMultiLogoView(){');
  const context=vm.createContext({structuredClone,createSchemes,schemeSignature,crypto,
   taskLogos:[{id:'red',name:'红标',logoImage:'red-image'},{id:'blue',name:'蓝标',logoImage:'blue-image'}],
-  selectedTaskLogoId:'red',loadedTaskLogoId:'red',multiLogoViews:new Map(),logoLoadRevision:0,logoSelectionBusy:false,multiLogoJob:null,multiLogoEnabled:true,
-  logoData:'red-image',logoSourceData:'',logoImage:{},baseData:'product-image',baseImage:{},
+  selectedTaskLogoId:'red',loadedTaskLogoId:'red',multiLogoViews:new Map(),logoLoadRevision:0,logoSelectionBusy:false,logoDecoding:false,logoImportBusy:false,multiLogoJob:null,multiLogoEnabled:true,
+  logoData:'red-image',logoSourceData:'',logoImage:{},baseData:'product-image',baseImage:{},multiProductViews:new Map(),
   schemeState:createSchemes([{id:'body',x:.3,y:.4,widthRatio:.2}]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'body',lastResultPayload:null,savedSignatures:{},schemePhases:{},submittedSignatures:{},showModifiedPreview:new Set(),
   multiPackageProducts:[{id:'product',sku:'P1',name:'产品'}],loadedMultiProductId:'product',selectedMultiProductId:'product',multiPackageBusy:false,generationBusy:false,
   currentTaskId:'task',s7User:{id:'alice'},mockupModel:{value:'flux-3-image'},schemeNames:{ORIGINAL:'原色',BLACK:'黑白','GOLD FOIL':'金','SILVER FOIL':'银'},
@@ -43,11 +43,13 @@ test('switching logo thumbnails keeps independent edits and restores the matchin
 test('ordinary batch submission includes each logo layout and the latest unswitched edit',async()=>{
  const c=await workspace();let request;
  c.selectedGenerationVersions=()=>['BLACK'];
+ c.multiProductViews.set('product',{baseAssetUrl:'/api/my-space/tasks/task/assets/product.png'});
  c.schemeState=editScheme(c.schemeState,'ORIGINAL',[{id:'body',x:.7,y:.4,widthRatio:.25}],true);
  c.fetch=async(url,options)=>{request={url,body:JSON.parse(options.body)};return {ok:true,json:async()=>({kind:'multi-logo',outputs:[]})};};
  c.generationWatcher={track:()=>{}};
  await c.runMultiLogoGeneration();
  assert.equal(request.url,'/api/ai-render-logos');assert.equal(request.body.taskId,'task');
+ assert.equal(request.body.baseAssetUrl,'/api/my-space/tasks/task/assets/product.png');
  assert.equal(request.body.productId,'product');assert.deepEqual(request.body.logos.map(logo=>logo.id),['red','blue']);
  assert.deepEqual(request.body.selectedVersions,['BLACK']);
  assert.equal(request.body.logoLayouts.find(view=>view.logoId==='red').schemes[0].targets[0].x,.7);
@@ -75,7 +77,7 @@ test('AI processing writes back to its original logo when a different thumbnail 
 test('initial product loading retains a completed legacy logo job for restoration',async()=>{
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
  const job={kind:'multi-logo',status:'complete',product:{id:'product'},outputs:[{logoId:'red',version:'ORIGINAL',dataUrl:'/legacy-red.png'}]};
- const context=vm.createContext({structuredClone,taskLogos:[{id:'red'},{id:'blue'}],multiLogoJob:job,multiLogoViews:new Map(),multiProductJob:null,
+ const context=vm.createContext({structuredClone,taskLogos:[{id:'red'},{id:'blue'}],selectedTaskLogoId:null,loadedTaskLogoId:null,multiLogoJob:job,multiLogoViews:new Map(),multiProductJob:null,
   multiPackageProducts:[{id:'product',sku:'P1',name:'产品'}],loadedMultiProductId:null,selectedMultiProductId:'product',multiProductLoadRevision:0,
   multiProductViews:new Map([['product',{baseData:'base',baseImage:{},schemeState:createSchemes([{id:'body',x:.5,y:.5,widthRatio:.2}]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'body'}]]),
   renderMultiProductResults:()=>{},queueSchemeCards:()=>{},saveMultiProductView:()=>{},setStatus:()=>{},loadSchemeTargets:()=>{},document:{querySelector:()=>({})},

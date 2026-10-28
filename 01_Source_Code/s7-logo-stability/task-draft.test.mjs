@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as taskState from './task-draft.mjs';
+import {readFile} from 'node:fs/promises';
+import vm from 'node:vm';
 const {createTaskDraft}=taskState;
 
 test('切换尚未加载完成就刷新时，草稿原图仍归属于原产品',()=>{
@@ -37,4 +39,13 @@ test('未改动的保存结束后，后续编辑仍能正常保存',async()=>{
  let state={x:1};const writes=[];
  const draft=createTaskDraft({id:'no-op',delay:10000,capture:()=>state,request:async(_path,body)=>{if(!body)return {revision:0,state:{x:1}};writes.push(body);return {revision:1};}});
  await draft.load();draft.activate();await draft.flush();state={x:2};draft.schedule();await draft.flush();assert.equal(writes.length,1);assert.deepEqual(writes[0].state,{x:2});assert.equal(draft.isDirty(),false);
+});
+
+test('旧任务未改动的大图字符串不在每次布局保存时重复序列化',async()=>{
+ const source=await readFile(new URL('./task-draft.mjs',import.meta.url),'utf8'),image='A'.repeat(1024*1024);let encodes=0,state={baseData:image,targets:[{x:.2}]};const writes=[];
+ const c=vm.createContext({setTimeout,clearTimeout,JSON:{stringify:value=>{if(value===image)encodes++;return JSON.stringify(value);}}});
+ vm.runInContext(source.replaceAll('export ',''),c);
+ const draft=c.createTaskDraft({id:'legacy',capture:()=>state,request:async(_path,body)=>{if(!body)return {revision:0,state};writes.push(body);return {revision:body.revision+1};}});
+ await draft.load();draft.activate();state={...state,targets:[{x:.4}]};await draft.flush();state={...state,targets:[{x:.6}]};await draft.flush();
+ assert.equal(encodes,1);assert.equal(writes.length,2);assert.deepEqual(Object.keys(writes[1].state),['targets']);
 });

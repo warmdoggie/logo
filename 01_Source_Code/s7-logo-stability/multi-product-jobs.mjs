@@ -46,7 +46,7 @@ export function createMultiProductJobs(spaces,{productTemplate,productImage,mock
    if(!Array.isArray(targets)||!targets.length)fail(`${product.sku} 尚无有效的产品 Logo 区域`);
    const schemes=edited?.schemes||createSchemes(targets).schemes;
    if(!Array.isArray(schemes))fail(`${product.sku} 的效果方案无效`);
-   const source=await productImage(product,req),base=await sharp(source.bytes).png().toBuffer();
+   const source=edited?.baseAssetUrl?await spaces.taskAssetFromUrl(user,taskId,edited.baseAssetUrl):await productImage(product,req),base=await sharp(source.bytes).png().toBuffer();
    prepared.push({product:{id:String(product.id),sku:String(product.sku||''),name:String(product.name||'')},base,targets,schemes,schemeSignatures:edited?.schemeSignatures||{}});
   }
   if(active.has(activeKey))fail('当前任务正在生成，请等待完成',409);

@@ -27,7 +27,15 @@ test('batch submission includes cached product edits and the active product late
     readProgressStream:async(response,onEvent)=>{for(const id of ['a','b'])await onEvent('product-done',{product:{id},complete:true,images:[],outputs:['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL']});}
   });
   vm.runInContext(snapshots+submission,context);
+  context.multiProductViews.get('a').baseAssetUrl='/api/my-space/tasks/task/assets/a.png';context.multiProductViews.get('a').baseData='base-a';
+  context.multiProductViews.set('b',{baseAssetUrl:'/api/my-space/tasks/task/assets/b.png'});
   await vm.runInContext('runMultiPackageGeneration()',context);
+  const firstRequest=structuredClone(requestBody);delete context.multiProductViews.get('a').baseData;await context.runMultiPackageGeneration();
+  assert.equal(requestBody.productLayouts[0].baseAssetUrl,'/api/my-space/tasks/task/assets/a.png');
+  assert.deepEqual(requestBody.productLayouts[0].schemeSignatures,firstRequest.productLayouts[0].schemeSignatures,'未访问的产品也应使用相同快照指纹');
+  context.cachedAssetSource=[];context.cachedAssetKey='';
+  vm.runInContext(source.slice(source.indexOf('function assetKey(){'),source.indexOf('function schemeOutput(')),context);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.currentSignatures())),requestBody.productLayouts[1].schemeSignatures,'编辑预览和批量生成应使用同一快照指纹');
   assert.deepEqual(requestBody.productLayouts.map(layout=>layout.productId),['a','b']);
   assert.deepEqual(requestBody.selectedVersions,['BLACK','SILVER FOIL']);
   assert.deepEqual(requestBody.productLayouts[0].targets,aTargets);

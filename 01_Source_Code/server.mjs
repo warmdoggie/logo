@@ -165,7 +165,7 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
    if(/^\/api\/auth\/users\/[^/]+$/.test(path)&&req.method==='POST')return json(users.updateUser(workspaceUser,path.split('/')[4],await input()));
    bad('账号接口不存在',404);
   }
-  if(users&&path!=='/api/health'&&(path.startsWith('/api/')||path.startsWith('/files/'))){workspaceUser=users.requireUser(req);users.guard(workspaceUser,path,req.method);requestScope.getStore().user=workspaceUser;}
+  if(users&&path!=='/api/health'&&(path.startsWith('/api/')||path.startsWith('/files/'))){workspaceUser=users.requireUser(req);users.guard(workspaceUser,path,req.method);requestScope.getStore().user=workspaceUser;res.setHeader('X-Workspace-User',workspaceUser.id);}
   if(req.method==='POST'&&/^\/api\/tasks\/[^/]+\/products$/.test(path)){let data;try{data=await(await body(req)).json();}catch{bad('请求格式不正确');}return json(await additions.append(decodeURIComponent(path.split('/')[3]),data),201);}
   if(req.method==='GET'&&path==='/api/health')return json({ok:true,app:'render-assistant-local',...(process.env.APP_ACCEPTANCE_INSTANCE?{acceptanceInstance:process.env.APP_ACCEPTANCE_INSTANCE}:{})});
   if(path==='/api/acceptance'&&req.method==='GET')return json(acceptance.snapshot());

@@ -16,7 +16,7 @@ test('a newly added product with no requested stages stays in preview after anot
 test('切到尚在加载的产品后立即返回，必须重新呈现原产品并丢弃迟到的加载',async()=>{
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8'),rendered=[];
  let release;const pending=new Promise(r=>release=r);
- const context=vm.createContext({taskLogos:[],selectedMultiProductId:'a',loadedMultiProductId:'a',multiProductLoadRevision:0,multiPackageProducts:[{id:'a',sku:'A'},{id:'b',sku:'B'}],multiProductViews:new Map(),renderMultiProductResults:()=>{},saveMultiProductView:()=>{},setStatus:()=>{},fetch:()=>pending,queueSchemeCards:()=>rendered.push(context.selectedMultiProductId)});
+ const context=vm.createContext({currentTaskId:null,s7User:null,taskLogos:[],selectedMultiProductId:'a',loadedMultiProductId:'a',multiProductLoadRevision:0,multiPackageProducts:[{id:'a',sku:'A'},{id:'b',sku:'B'}],multiProductViews:new Map(),multiProductLoads:new Map(),renderMultiProductResults:()=>{},saveMultiProductView:()=>{},setStatus:()=>{},fetch:()=>pending,queueSchemeCards:()=>rendered.push(context.selectedMultiProductId)});
  vm.runInContext(source.slice(source.indexOf('async function showMultiProduct('),source.indexOf('function renderMultiProductResults()')),context);
  const loading=vm.runInContext("showMultiProduct('b')",context);await vm.runInContext("showMultiProduct('a')",context);
  assert.deepEqual(rendered,['b','a']);release({ok:false});await loading;assert.equal(context.loadedMultiProductId,'a');

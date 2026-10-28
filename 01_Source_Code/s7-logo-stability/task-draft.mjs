@@ -11,7 +11,12 @@ export function normalizeTaskResult(payload,path=value=>value){
 // Serialize autosaves so an older upload/layout snapshot cannot overwrite a newer one.
 export function createTaskDraft({id,request,capture,onSaved,onError,delay=600}){
  let revision=0,ready=false,pending=false,running=null,timer,editVersion=0,savedVersion=0,saved={};
- const encode=state=>Object.fromEntries(Object.entries(state).map(([key,value])=>[key,JSON.stringify(value)]));
+ const strings=new Map();
+ const encode=state=>Object.fromEntries(Object.entries(state).map(([key,value])=>{
+  if(typeof value!=='string')return [key,JSON.stringify(value)];
+  const previous=strings.get(key);if(previous?.value===value)return [key,previous.encoded];
+  const encoded=JSON.stringify(value);strings.set(key,{value,encoded});return [key,encoded];
+ }));
  async function load(){const record=await request(`/api/my-space/tasks/${id}`);revision=record.revision;saved=encode(record.state);return record.state;}
  function activate(){ready=true;}
  async function flush(){

@@ -3,6 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {test} from 'node:test';
 import {dirname,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import vm from 'node:vm';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const DEPLOY=join(ROOT,'..','deploy','s7-logo-stability');
@@ -37,8 +38,8 @@ test('workspace embeds S7 on the main workspace origin',async()=>{
   assert.match(server,/createDemoHandler/);
   assert.match(server,/path==='\/s7'\|\|path\.startsWith\('\/s7\/'\)/);
   const demo=await readFile(join(ROOT,'demo.js'),'utf8');
-  assert.match(demo,/S7_BASE/);
-  assert.match(demo,/s7Path\(product\.imageUrl\)/);
+  const imagePath=vm.runInNewContext(demo.slice(demo.indexOf('const S7_BASE='),demo.indexOf('const nativeFetch='))+"s7Path('/api/product-library/image/one?thumbnail=1')",{location:{pathname:'/s7/demo.html'}});
+  assert.equal(imagePath,'/s7/api/product-library/image/one?thumbnail=1');
 });
 
 test('S7 production config example keeps credentials outside the repository',async()=>{

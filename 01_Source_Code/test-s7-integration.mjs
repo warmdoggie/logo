@@ -59,7 +59,9 @@ test('主工作区同一端口直接提供 S7 页面、静态资源和 API', {ti
     assert.equal((await fetch(base+logo.imageUrl+'?thumbnail=1')).status,401);
     const session=await fetch(base+'/s7/api/session',{headers:{cookie}});
     assert.equal(session.status,200);
-    assert.equal((await session.json()).user.username,'admin');
+    const sessionUser=(await session.json()).user;assert.equal(sessionUser.username,'admin');
+    assert.equal(session.headers.get('X-Workspace-User'),sessionUser.id);
+    assert.equal(full.headers.get('X-Workspace-User'),sessionUser.id);
     const features=await fetch(base+'/s7/api/features',{headers:{cookie}});
     assert.equal(features.status,200);
     assert.equal((await features.json()).multiLogo,true);
