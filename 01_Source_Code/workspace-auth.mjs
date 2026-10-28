@@ -71,7 +71,7 @@ export function workspaceAuth(db,data,storage,{enabled=process.env.APP_MULTI_USE
   requireAdmin(actor);if(!['APPROVED','REJECTED'].includes(decision))fail('审核决定无效',400);
   const row=db.prepare('SELECT role,approvalStatus FROM WorkspaceUser WHERE id=?').get(id);if(!row)fail('账号不存在',404);
   if(row.role!=='USER'||row.approvalStatus!=='PENDING')fail('该账号不处于待审核状态，请刷新列表',409);
-  const result=db.prepare("UPDATE WorkspaceUser SET approvalStatus=? WHERE id=? AND approvalStatus='PENDING'").run(decision,id);
+  const result=db.prepare("UPDATE WorkspaceUser SET approvalStatus=?,canEditProducts=? WHERE id=? AND approvalStatus='PENDING'").run(decision,Number(decision==='APPROVED'),id);
   if(!result.changes)fail('该申请已被审核，请刷新列表',409);
   db.prepare('DELETE FROM WorkspaceSession WHERE userId=?').run(id);return {ok:true};
  }

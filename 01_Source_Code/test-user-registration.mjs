@@ -38,6 +38,29 @@ test('Nginx 后的注册频率限制按访客区分，不把所有访客当作�
  }finally{db.close();await rm(dir,{recursive:true,force:true});}
 });
 
+test('审核通过默认开启图库与母版编辑，拒绝和后续撤权仍受限制',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'registration-permissions-')),db=new DatabaseSync(':memory:');
+ try{
+  db.exec('CREATE TABLE Task(id TEXT PRIMARY KEY)');const storage=new LocalStorage(join(dir,'uploads')),auth=workspaceAuth(db,dir,storage,{enabled:true});
+  const req={headers:{},socket:{remoteAddress:'127.0.0.1'}},admin=auth.users().find(user=>user.role==='ADMIN');
+  const applicant=auth.register(req,{username:'designer',password:'Designer-pass-123',role:'ADMIN',canEditProducts:true});
+  const user=()=>auth.users().find(user=>user.id===applicant.id);
+  assert.equal(user().canEditProducts,false);assert.equal(user().approvalStatus,'PENDING');
+  assert.throws(()=>auth.reviewUser({role:'USER'},applicant.id,'APPROVED'),error=>error.status===403);
+  auth.reviewUser(admin,applicant.id,'APPROVED');assert.equal(user().canEditProducts,true);assert.equal(user().role,'USER');
+  for(const path of ['/api/products','/api/templates','/api/manage/products/example'])assert.doesNotThrow(()=>auth.guard(user(),path,'POST'));
+  assert.throws(()=>auth.guard(user(),'/api/auth/users','POST'),error=>error.status===403);
+  assert.throws(()=>auth.guard(user(),'/api/rules','POST'),error=>error.status===403);
+  assert.throws(()=>auth.updateUser(user(),applicant.id,{canEditProducts:true}),error=>error.status===403);
+  auth.updateUser(admin,applicant.id,{canEditProducts:false});
+  assert.throws(()=>auth.reviewUser(admin,applicant.id,'APPROVED'),error=>error.status===409);
+  const restarted=workspaceAuth(db,dir,storage,{enabled:true});assert.equal(restarted.users().find(user=>user.id===applicant.id).canEditProducts,false);
+  for(const path of ['/api/products','/api/templates','/api/manage/products/example'])assert.throws(()=>restarted.guard(user(),path,'POST'),error=>error.status===403);
+  const rejected=auth.register(req,{username:'rejected',password:'Rejected-pass-123'});auth.reviewUser(admin,rejected.id,'REJECTED');
+  assert.equal(auth.users().find(user=>user.id===rejected.id).canEditProducts,false);
+ }finally{db.close();await rm(dir,{recursive:true,force:true});}
+});
+
 test('注册必须经管理员审核，拒绝和待审核账号不能获取会话或访问个人数据',{timeout:20000},async()=>{
  const dir=await mkdtemp(join(tmpdir(),'registration-'));let child,base;
  async function start(){
@@ -71,6 +94,7 @@ test('注册必须经管理员审核，拒绝和待审核账号不能获取会�
   assert.equal((await call(review,{decision:'APPROVED'},admin)).status,200);
   assert.equal((await call(review,{decision:'REJECTED'},admin)).status,409,'重复审核不得覆盖已有决定');
   const login=await call('/api/auth/login',credentials);assert.equal(login.status,200);const cookie=login.headers.get('set-cookie').split(';')[0];
+  const session=await(await call('/api/auth/session',undefined,cookie)).json();assert.equal(session.canEditProducts,true);assert.equal(session.role,'USER');
   const s7=await call('/s7/api/session',undefined,cookie);assert.equal(s7.status,200);assert.equal((await s7.json()).user.id,applicant.id);
   assert.equal((await call('/api/auth/users',undefined,cookie)).status,403);
   const rejected=await(await call('/api/auth/register',{username:'rejected',password:'Rejected-pass-123'})).json();
