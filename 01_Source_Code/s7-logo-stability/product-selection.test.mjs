@@ -67,7 +67,7 @@ test('恢复非当前产品时读取已保存快照，并继续保存该引用',
  const {c,pending,requests}=workspace(),url='/api/my-space/tasks/task/assets/snapshot.png';
  c.multiProductViews.set('b',{baseAssetUrl:url,targets:[{id:'saved',x:.7,y:.5,widthRatio:.2}],schemeState:createSchemes([{id:'saved',x:.7,y:.5,widthRatio:.2}]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'saved'});
  const loading=c.showMultiProduct('b');pending.resolve({ok:true,blob:async()=>({})});await loading;
- assert.deepEqual(requests,[url]);assert.equal(c.schemeState.schemes[0].targets[0].id,'saved');
+ assert.deepEqual(requests,[url+'?preview=1']);assert.equal(c.schemeState.schemes[0].targets[0].id,'saved');
  vm.runInContext(source.slice(source.indexOf('function captureMultiProductLayouts(){'),source.indexOf('async function showMultiProduct(')),c);
  assert.equal(c.captureMultiProductLayouts().find(layout=>layout.productId==='b').baseAssetUrl,url);
 });

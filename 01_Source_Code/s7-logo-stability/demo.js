@@ -58,6 +58,7 @@ let schemeState=null,activeScheme='ORIGINAL',placementScope='shared',rebuildingT
 let submittedSignatures={},savedSignatures={},schemePhases={},showModifiedPreview=new Set();
 let cachedAssetSource=[],cachedAssetKey='';
 let thumbnailImages=[],thumbnailImageRevision=0;
+const schemeThumbnails=new Map();
 const schemeNames={ORIGINAL:'原色方案',BLACK:'黑白方案','GOLD FOIL':'烫金搭配','SILVER FOIL':'烫银搭配'};
 const carrierNames={BODY:'产品包材',CARTON_FRONT:'彩盒正面',CARTON_BACK:'彩盒背面'};
 let previewScale=1;
@@ -96,7 +97,10 @@ let s7User=null;
 let logoStorage=localStorage;
 function requireLogin(){fullImagePreview.close();previewImages.clear();document.body.replaceChildren();const link=document.createElement('a');link.textContent='登录已失效，请返回主工作空间登录';link.href=S7_BASE?'/':`http://${location.hostname}:3210/`;link.target='_top';document.body.append(link);}
 const fetch=async(input,init)=>{
- if(currentTaskId&&s7User&&init?.method==='POST'&&['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo','/api/process-logo','/api/render'].includes(input)){const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);init={...init,body:JSON.stringify({...JSON.parse(init.body),taskId:currentTaskId,...(logo?.logoAssetUrl?{logoAssetUrl:logo.logoAssetUrl,logoImage:undefined}:{})})};}
+ if(currentTaskId&&s7User&&init?.method==='POST'&&['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo','/api/process-logo','/api/render'].includes(input)){
+  const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);
+  init={...init,body:JSON.stringify({...JSON.parse(init.body),taskId:currentTaskId,...(logo?.logoAssetUrl?{logoAssetUrl:logo.logoAssetUrl,logoImage:undefined}:{})})};
+ }
  const response=await nativeFetch(typeof input==='string'?s7Path(input):input,init);
  if(s7User){
   const owner=response.headers.get('X-Workspace-User');
@@ -195,8 +199,10 @@ async function showMultiProduct(id){
         loading=(async()=>{
           try{
             const snapshot=view?.baseAssetUrl;
-            const [imageResponse,templateResponse]=await Promise.all([fetch(snapshot||product.imageUrl||`/api/product-library/image/${encodeURIComponent(id)}`,!snapshot&&currentTaskId&&s7User?{headers:{'X-S7-Task-Id':currentTaskId}}:undefined),snapshot?null:fetch(`/api/product-library/template/${encodeURIComponent(id)}`)]);
+            const modern=!!(currentTaskId&&s7User),imageUrl=product.imageUrl||`/api/product-library/image/${encodeURIComponent(id)}`;
+            const [imageResponse,templateResponse]=await Promise.all([fetch(snapshot?`${snapshot}?preview=1`:imageUrl+(modern?'?selection=1':''),!snapshot&&modern?{headers:{'X-S7-Task-Id':currentTaskId}}:undefined),snapshot?null:fetch(`/api/product-library/template/${encodeURIComponent(id)}`)]);
             if(!imageResponse.ok||(templateResponse&&!templateResponse.ok))throw Error('产品原图或母版读取失败');
+            if(modern&&!snapshot&&!imageResponse.headers?.get('X-S7-Task-Asset'))throw Error('产品原图未保存，请重试');
             const [loaded,payload]=await Promise.all([fileData(await imageResponse.blob()),templateResponse?.json()]);
             const image=await loadImage(loaded.dataUrl),masterTargets=snapshot?view.targets||view.schemeState.schemes[0].targets:masterTargetsFromTemplate(payload.template);
             if(!masterTargets.length)throw Error('该产品母版没有 Logo 区域');
@@ -476,7 +482,13 @@ function queueSchemeCards(){
 }
 function drawSchemeThumbnail(thumbnail,scheme){
   if(!baseImage){thumbnail.width=320;thumbnail.height=160;thumbnail.getContext('2d').clearRect(0,0,320,160);return;}
-  thumbnail.width=Math.min(768,baseImage.naturalWidth);thumbnail.height=Math.round(thumbnail.width*baseImage.naturalHeight/baseImage.naturalWidth);
+  const key=JSON.stringify([loadedMultiProductId,scheme.version]),signature=schemeSignature(scheme),cached=schemeThumbnails.get(key);
+  if(cached&&cached.signature===signature&&cached.baseImage===baseImage&&cached.logoImage===logoImage){
+    thumbnail.width=cached.canvas.width;thumbnail.height=cached.canvas.height;thumbnail.getContext('2d').drawImage(cached.canvas,0,0);
+    schemeThumbnails.delete(key);schemeThumbnails.set(key,cached);return;
+  }
+  const scale=Math.min(1,768/Math.max(baseImage.naturalWidth,baseImage.naturalHeight));
+  thumbnail.width=Math.max(1,Math.round(baseImage.naturalWidth*scale));thumbnail.height=Math.max(1,Math.round(baseImage.naturalHeight*scale));
   const context=thumbnail.getContext('2d');context.drawImage(baseImage,0,0,thumbnail.width,thumbnail.height);if(!logoImage)return;
   const pixels=context.getImageData(0,0,thumbnail.width,thumbnail.height).data;
   for(const target of scheme.targets){
@@ -486,6 +498,9 @@ function drawSchemeThumbnail(thumbnail,scheme){
     const layer=curvePreviewLogo(renderTintedLogoLayer({createCanvas:(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c;},logoImage,width,height,color:print.color,finish:print.finish}),target.curve);
     if(target.quad)drawQuadPreview(context,layer,target.quad);else{context.save();context.translate(target.x*thumbnail.width,target.y*thumbnail.height);context.rotate((target.rotation||0)*Math.PI/180);context.drawImage(layer,-width/2,-height/2,width,height);context.restore();}
   }
+  const copy=document.createElement('canvas');copy.width=thumbnail.width;copy.height=thumbnail.height;copy.getContext('2d').drawImage(thumbnail,0,0);
+  schemeThumbnails.delete(key);schemeThumbnails.set(key,{signature,baseImage,logoImage,canvas:copy});
+  if(schemeThumbnails.size>8)schemeThumbnails.delete(schemeThumbnails.keys().next().value);
 }
 function taskDownloadOutputs(){
  if(taskLogos.length>1&&multiLogoJob?.product.id===loadedMultiProductId)return multiLogoJob.outputs.filter(output=>taskLogos.some(logo=>logo.id===output.logoId)).map(output=>({...output,productId:multiLogoJob.product.id,dataUrl:s7Path(output.dataUrl)}));
@@ -967,7 +982,8 @@ function restoreGeneration(record){
 }
 function generationRequest(versions,onlyVersion){
  syncSchemeState();submittedSignatures=currentSignatures();
- return {onlyVersion,selectedVersions:versions,preserveResults:true,schemeSignatures:{...submittedSignatures},model:mockupModel.value,baseImage:baseData,logoImage:logoData,targets:collectTargets(),schemes:structuredClone(schemeState.schemes),originalColor:'#000000'};
+ const baseAssetUrl=multiProductViews.get(loadedMultiProductId)?.baseAssetUrl;
+ return {onlyVersion,selectedVersions:versions,preserveResults:true,schemeSignatures:{...submittedSignatures},model:mockupModel.value,...(baseAssetUrl?{baseAssetUrl}:{baseImage:baseData}),logoImage:logoData,targets:collectTargets(),schemes:structuredClone(schemeState.schemes),originalColor:'#000000'};
 }
 async function submitBackgroundGeneration(onlyVersion,versions=onlyVersion?[onlyVersion]:selectedGenerationVersions()){
   if(!baseData||!logoData)throw Error('请先选择产品和 Logo。');
@@ -1128,7 +1144,7 @@ if(currentTaskId&&s7User){
   if(restoredBase&&!multiProductViews.has(restoredBase.id)&&state.schemeState?.schemes?.length)multiProductViews.set(restoredBase.id,{targets:state.targets,schemeState:state.schemeState,activeScheme:state.activeScheme||'ORIGINAL',placementScope:state.placementScope||'shared',selectedTargetId:state.selectedTargetId});
   const baseUrl=state.baseData?`data:image/png;base64,${state.baseData}`:state.baseDataUrl,logoUrl=state.logoData?`data:image/png;base64,${state.logoData}`:state.logoDataUrl;
   const baseAssetUrl=!state.baseData&&baseUrl?.startsWith(`/api/my-space/tasks/${currentTaskId}/assets/`)?baseUrl:'';
-  if(baseAssetUrl){const response=await fetch(baseAssetUrl);if(!response.ok)throw Error('任务产品快照读取失败，请重试');const loaded=await fileData(await response.blob());baseData=loaded.data;baseImage=await loadImage(loaded.dataUrl);}
+  if(baseAssetUrl){const response=await fetch(`${baseAssetUrl}?preview=1`);if(!response.ok)throw Error('任务产品快照读取失败，请重试');const loaded=await fileData(await response.blob());baseData=loaded.data;baseImage=await loadImage(loaded.dataUrl);}
   else baseImage=baseUrl?await loadImage(baseUrl):null;
   logoImage=logoUrl?await loadImage(logoUrl):null;
   if(restoredBase&&baseImage){multiProductViews.set(restoredBase.id,{...multiProductViews.get(restoredBase.id),baseData,baseImage,baseAssetUrl});loadedMultiProductId=restoredBase.id;}

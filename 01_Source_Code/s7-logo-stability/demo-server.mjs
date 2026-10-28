@@ -117,6 +117,7 @@ async function productImage(product,req){
 export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus(),aiMockupStatus=()=>getAiMockupProviderStatus(),mockupRenderer=createAiMockupRenderer(),productCatalog=loadProductCatalog,productTemplate=loadProductTemplate,logoCatalog=loadWorkspaceLogoLibrary,logoImage=loadWorkspaceLogoImage,saveLogoToLibrary=saveWorkspaceLogo,authenticate=process.env.APP_MULTI_USER==='1'?authenticateWorkspace:null,spaceDir=process.env.S7_SPACE_DIR||join(ROOT,'..','data','user-spaces'),multiLogoEnabled=process.env.S7_MULTI_LOGO_ENABLED!=='0'}={}){
   const spaces=userSpace(spaceDir);
   const readLogo=async(input,user)=>input.logoAssetUrl?(await spaces.taskAssetFromUrl(user,input.taskId,input.logoAssetUrl)).bytes:Buffer.from(input.logoImage||'','base64');
+  const readBase=async(input,user)=>input.baseAssetUrl?(await spaces.taskAssetFromUrl(user,input.taskId,input.baseAssetUrl)).bytes:Buffer.from(input.baseImage||'','base64');
   const jobs=createGenerationJobs(spaces);
   const multiLogoJobs=createMultiLogoJobs(spaces,mockupRenderer);
   const multiProductJobs=createMultiProductJobs(spaces,{productTemplate,productImage,mockupRenderer});
@@ -162,7 +163,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
       }
       const taskImageMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/image\/([^/]+)\/([^/]+)$/);
       const taskAssetMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/assets\/([^/]+)$/);
-      if(user&&req.method==='GET'&&taskAssetMatch){const asset=await spaces.taskAsset(user,taskAssetMatch[1],taskAssetMatch[2]);res.writeHead(200,{'content-type':asset.contentType,'cache-control':'private, no-store'});res.end(asset.bytes);return;}
+      if(user&&req.method==='GET'&&taskAssetMatch){const asset=await spaces.taskAsset(user,taskAssetMatch[1],taskAssetMatch[2]),preview=url.searchParams.get('preview')==='1';const bytes=preview?await sharp(asset.bytes).resize({width:1200,height:1200,fit:'inside',withoutEnlargement:true}).webp({quality:85}).toBuffer():asset.bytes;res.writeHead(200,{'content-type':preview?'image/webp':asset.contentType,'cache-control':'private, no-store'});res.end(bytes);return;}
       if(user&&req.method==='GET'&&taskImageMatch){const preview=url.searchParams.get('preview')==='1',bytes=await spaces.image(user,taskImageMatch[2],taskImageMatch[3],taskImageMatch[1],preview);res.writeHead(200,{'content-type':preview?'image/webp':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
       if(user&&req.method==='GET'&&url.pathname==='/api/my-space/history'){json(res,200,await spaces.history(user,url.searchParams.get('taskId')));return;}
       const imageMatch=url.pathname.match(/^\/api\/my-space\/image\/([^/]+)\/([^/]+)$/);
@@ -198,7 +199,10 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
           if(!product)throw Error('产品不存在');
           const output=await productImage(product,req);
           if(url.searchParams.get('thumbnail')==='1'){const bytes=await sharp(output.bytes).resize({width:192,height:192,fit:'inside',withoutEnlargement:true}).webp({quality:76}).toBuffer();res.writeHead(200,{'content-type':'image/webp','cache-control':'private, no-store'});res.end(bytes);return;}
+          const selection=url.searchParams.get('selection')==='1';
+          if(selection&&(!user||!req.headers['x-s7-task-id']))throw Object.assign(Error('请选择个人任务'),{status:400});
           if(user&&req.headers['x-s7-task-id']){await ensureUser();res.setHeader('X-S7-Task-Asset',await spaces.saveTaskAsset(user,req.headers['x-s7-task-id'],output.bytes,output.contentType));}
+          if(selection){const bytes=await sharp(output.bytes).resize({width:1200,height:1200,fit:'inside',withoutEnlargement:true}).webp({quality:85}).toBuffer();res.writeHead(200,{'content-type':'image/webp','cache-control':'private, no-store'});res.end(bytes);return;}
           res.writeHead(200,{'content-type':output.contentType,'cache-control':'no-store'});res.end(output.bytes);return;
         }
         const productTemplateMatch=url.pathname.match(/^\/api\/product-library\/template\/([^/]+)$/);
@@ -299,7 +303,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
         const input=await body(req);
         const selectedVersions=selectGenerationVersions(input);
         if(user&&input.taskId){const task=await spaces.task(user,input.taskId);if(task.state?.mode==='multi-logo')throw Object.assign(Error('请从多 Logo 上样页面生成此任务'),{status:400});}
-        const baseImage=Buffer.from(input.baseImage||'','base64');
+        const baseImage=await readBase(input,user);
         const logoImage=await readLogo(input,user);
         const basePng=await sharp(baseImage).png().toBuffer();
         const logoMeta=await sharp(logoImage).metadata();
@@ -374,7 +378,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
       const input=await body(req);
         if(user&&input.taskId)await spaces.task(user,input.taskId);
       const result=await renderLogoSet({
-        baseImage:Buffer.from(input.baseImage||'', 'base64'),
+        baseImage:await readBase(input,user),
         logoImage:await readLogo(input,user),
         targets:input.targets,schemes:input.schemes
       });

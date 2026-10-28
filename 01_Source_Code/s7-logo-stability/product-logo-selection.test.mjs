@@ -17,14 +17,14 @@ function workspace(ids=['a']){
   taskLogos:[],selectedTaskLogoId:null,loadedTaskLogoId:null,logoLoadRevision:0,logoSelectionBusy:false,logoDecoding:false,logoImportBusy:false,multiLogoViews:new Map(),multiLogoJob:null,multiLogoEnabled:true,currentTaskId:'task',s7User:{id:'user'},
   baseData:'',baseImage:null,logoData:'',logoSourceData:'',logoImage:null,
   schemeState:createSchemes([{id:'placeholder',x:.5,y:.5,widthRatio:.2}]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'placeholder',savedSignatures:{},schemePhases:{},lastResultPayload:null,
-  fetch:url=>{requests.push(url);const id=url.split('/').at(-1);return url.includes('/template/')?Promise.resolve({ok:true,json:async()=>({template:{zones:[{id:'body-'+id,zoneType:'logo',x:id==='a'?.1:.6,y:.2,width:.2,height:.2}]}})}):responses.get(id).promise;},
+  fetch:url=>{requests.push(url);const id=url.split('/').at(-1).split('?')[0];return url.includes('/template/')?Promise.resolve({ok:true,json:async()=>({template:{zones:[{id:'body-'+id,zoneType:'logo',x:id==='a'?.1:.6,y:.2,width:.2,height:.2}]}})}):responses.get(id).promise;},
   fileData:async blob=>({data:'base-'+blob.id,dataUrl:'base:'+blob.id}),loadImage:async src=>({src,naturalWidth:100,naturalHeight:100}),
   collectTargets:()=>c.schemeState.schemes[0].targets,syncSchemeState(){},loadSchemeTargets:()=>renders.push({product:c.loadedMultiProductId,logo:c.loadedTaskLogoId}),
   setSelectedLogoPreview(){},renderMultiProductResults(){},renderProductLibrary(){},renderLogoLibrary(){},queueSchemeCards(){},updateGenerateButton(){},drawPreview(){},taskDraft:{schedule(){}},
   setStatus:(text,type)=>statuses.push({text,type}),document:{querySelector:id=>nodes[id]??= {}},processButton:{disabled:true},processingPanel:{hidden:true},selectedLogoPreview:{hidden:true}
  });
  vm.runInContext(source.slice(source.indexOf('async function removeTaskProduct('),source.indexOf('function renderMultiProductResults(){')),c);
- const complete=(id,ok=true)=>responses.get(id).resolve({ok,blob:async()=>({id})});
+ const complete=(id,ok=true)=>responses.get(id).resolve({ok,headers:new Headers({'X-S7-Task-Asset':`/api/my-space/tasks/task/assets/${id}.png`}),blob:async()=>({id})});
  return {c,complete,responses,requests,renders,statuses};
 }
 
@@ -35,7 +35,7 @@ test('产品加载中选择 Logo，产品就绪后自动应用并使用其母版
  complete('a');await loading;
  assert.equal(c.loadedMultiProductId,'a');assert.equal(c.loadedTaskLogoId,'red');assert.equal(c.logoData,'red-image');
  assert.equal(c.schemeState.schemes.length,4);assert.equal(c.schemeState.schemes[0].targets[0].id,'master-body-a');
- assert.equal(c.logoSelectionBusy,false);assert.equal(requests.filter(url=>url==='/api/product-library/image/a').length,1);
+ assert.equal(c.logoSelectionBusy,false);assert.equal(requests.filter(url=>url==='/api/product-library/image/a?selection=1').length,1);
 });
 
 test('产品加载中连续选择多个 Logo，只应用最后选中的一个',async()=>{
