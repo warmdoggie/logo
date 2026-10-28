@@ -4,6 +4,10 @@
 .s7-module .s7-module-panel{border:0;border-radius:0;background:transparent}
 .s7-module .s7-module-panel>iframe{display:block;height:100dvh}
 .logo-library-upload{margin-bottom:22px}
+.category-fields{display:grid;gap:16px;margin-bottom:20px}
+.category-fields .field{margin:0;min-width:0}
+.category-fields input,.category-fields select{width:100%;min-width:0}
+.category-fields select:disabled,.category-fields input:disabled{background:#f5f7fb;color:var(--muted)}
 .logo-library-upload-row{display:flex;gap:12px;align-items:center}
 .logo-library-upload-row input{max-width:520px}
 .logo-library-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:18px}

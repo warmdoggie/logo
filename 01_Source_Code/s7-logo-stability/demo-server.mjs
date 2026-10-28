@@ -26,6 +26,7 @@ PUBLIC_FILES.add('download-selection.mjs');
 PUBLIC_FILES.add('download-archive.mjs');
 PUBLIC_FILES.add('preview-images.mjs');
 PUBLIC_FILES.add('image-preview.mjs');
+PUBLIC_FILES.add('product-categories.js');
 const PRODUCT_LIBRARY_URL=process.env.S7_PRODUCT_LIBRARY_URL||'http://127.0.0.1:3210/api/products?includeInactive=0';
 for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css'])PUBLIC_FILES.add(file);
 
@@ -47,7 +48,7 @@ async function staticFile(res,path){
   const file=path==='/'?'demo.html':path.slice(1);
   if(!PUBLIC_FILES.has(file))return false;
   try{
-    const bytes=await readFile(join(ROOT,file));
+    const bytes=await readFile(file==='product-categories.js'?join(ROOT,'..','public',file):join(ROOT,file));
     res.writeHead(200,{'content-type':TYPES[file.slice(file.lastIndexOf('.'))]||'application/octet-stream','cache-control':'no-store'});
     res.end(bytes);return true;
   }catch{return false;}
@@ -75,6 +76,7 @@ function productLibraryView(products){
     sku:String(product.sku||''),
     name:String(product.name||''),
     category:String(product.category||''),
+    subcategory:String(product.subcategory||''),
     imageUrl:`/api/product-library/image/${encodeURIComponent(String(product.id))}`,
     templateUrl:`/api/product-library/template/${encodeURIComponent(String(product.id))}`,
     hasMaster:Boolean(product.currentVersion||product.template),

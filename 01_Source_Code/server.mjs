@@ -23,6 +23,7 @@ import {acceptanceService} from './acceptance.mjs';
 import {readSeedLogo} from './seed-logo.mjs';
 import {workspaceAuth,requestScope} from './workspace-auth.mjs';
 import {logoLibrary} from './logo-library.mjs';
+import {buildProductCategories} from './public/product-categories.js';
 import {createDemoHandler} from './s7-logo-stability/demo-server.mjs';
 import {createCleanupHandler} from './logo-cleanup/server.mjs';
 
@@ -31,6 +32,7 @@ const data = process.env.APP_DATA_DIR || join(root, 'data');
 mkdirSync(data, {recursive:true});
 const db = new DatabaseSync(join(data, 'assistant.sqlite'));
 db.exec(readFileSync(join(root, 'schema.sql'), 'utf8'));
+if(!db.prepare('PRAGMA table_info(Product)').all().some(c=>c.name==='subcategory'))db.exec("ALTER TABLE Product ADD COLUMN subcategory TEXT NOT NULL DEFAULT ''");
 db.exec('PRAGMA busy_timeout=5000');
 db.exec(readFileSync(join(root,'logo-schema.sql'),'utf8'));
 if(!db.prepare('PRAGMA table_info(Task)').all().some(c=>c.name==='activeProductionLogoId')) db.exec('ALTER TABLE Task ADD COLUMN activeProductionLogoId TEXT REFERENCES ProductionLogo(id)');
@@ -92,7 +94,7 @@ if(process.env.APP_NO_SEED!=='1'&&!db.prepare("SELECT value FROM AppMeta WHERE k
   for(const [sku,name,category,ext] of catalog) {
    const existing=db.prepare('SELECT id FROM Product WHERE sku=?').get(sku); if(existing){ids.push(existing.id);continue;}
    const key=storage.put(readFileSync(join(root,'seed',`${sku}.${ext}`)),ext); created.push(key);
-   const id=uid(), stamp=now(); db.prepare('INSERT INTO Product VALUES (?,?,?,?,?,?,?)').run(id,sku,name,category,key,stamp,stamp); ids.push(id);
+   const id=uid(), stamp=now(); db.prepare('INSERT INTO Product (id,sku,name,category,standardImage,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?)').run(id,sku,name,category,key,stamp,stamp); ids.push(id);
   }
   const key=storage.put(readSeedLogo(),'png'); created.push(key);
   const id=uid(), stamp=now(); db.prepare('INSERT INTO Task (id,taskCode,customerName,rawRequirement,status,createdAt,updatedAt) VALUES (?,?,?,?,?,?,?)').run(id,'DEMO-RAE-001','Rae.（测试）','单色 Logo', '待处理',stamp,stamp);
@@ -105,10 +107,10 @@ await logos.initializeLegacy();
 const users=workspaceAuth(db,data,storage);
 const s7Handler=createDemoHandler({authenticate:users?req=>users.requireUser(req):null,spaceDir:process.env.S7_SPACE_DIR||join(data,'user-spaces')});
 const cleanupHandler=createCleanupHandler({authenticate:users?req=>users.requireUser(req):null,dataDir:join(data,'logo-cleanup')});
-function products(query='',includeInactive=false) {
+function products(query='',includeInactive=false,category='',subcategory='') {
  const q=query.trim().toUpperCase();
  const rows=db.prepare('SELECT p.*, (SELECT version FROM ProductTemplate WHERE productId=p.id AND isCurrent=1) AS currentVersion FROM Product p ORDER BY createdAt DESC, sku ASC').all();
- return rows.map(p=>({...p,...management.info(p.id)})).filter(p=>(includeInactive||p.status==='ACTIVE')).filter(p=>!q||p.sku.toUpperCase().startsWith(q)||p.name.toUpperCase().includes(q)).sort((a,b)=>Number(b.sku.toUpperCase()===q)-Number(a.sku.toUpperCase()===q));
+ return rows.map(p=>({...p,...management.info(p.id)})).filter(p=>(includeInactive||p.status==='ACTIVE')).filter(p=>(!category||p.category===category)&&(!subcategory||p.subcategory===subcategory)).filter(p=>!q||p.sku.toUpperCase().startsWith(q)||p.name.toUpperCase().includes(q)).sort((a,b)=>Number(b.sku.toUpperCase()===q)-Number(a.sku.toUpperCase()===q));
 }
 function detail(id) {
  const task=db.prepare('SELECT * FROM Task WHERE id=?').get(id); if(!task)bad('任务不存在',404);
@@ -296,12 +298,13 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
     return json(await templates.publish(productId,input),201);
    }
   }
-  if(req.method==='GET'&&path==='/api/products')return json(products(url.searchParams.get('q')||'',url.searchParams.get('includeInactive')==='1'));
+  if(req.method==='GET'&&path==='/api/products/categories')return json(buildProductCategories(db.prepare('SELECT category,subcategory FROM Product ORDER BY category,subcategory').all()));
+  if(req.method==='GET'&&path==='/api/products')return json(products(url.searchParams.get('q')||'',url.searchParams.get('includeInactive')==='1',url.searchParams.get('category')||'',url.searchParams.get('subcategory')||''));
   if(req.method==='POST'&&path==='/api/products') {
-   const form=await(await body(req)).formData(); const code=sku(form.get('sku')), name=field(form.get('name'),'产品名称',120), category=field(form.get('category'),'产品类别',60);
+   const form=await(await body(req)).formData(); const code=sku(form.get('sku')), name=field(form.get('name'),'产品名称',120), category=field(form.get('category'),'产品类别',60),subcategory=form.has('subcategory')?field(form.get('subcategory'),'细分类目',60):'';
    if(db.prepare('SELECT id FROM Product WHERE sku=?').get(code))bad('该 SKU 已存在，请使用不同的 SKU',409);
    const f=await upload(form.get('image')), id=uid(), stamp=now();
-   try { db.prepare('INSERT INTO Product VALUES (?,?,?,?,?,?,?)').run(id,code,name,category,f.key,stamp,stamp); }catch(e){storage.remove(f.key);if(String(e).includes('UNIQUE'))bad('该 SKU 已存在',409);throw e;}
+   try { db.prepare('INSERT INTO Product (id,sku,name,category,standardImage,createdAt,updatedAt,subcategory) VALUES (?,?,?,?,?,?,?,?)').run(id,code,name,category,f.key,stamp,stamp,subcategory); }catch(e){storage.remove(f.key);if(String(e).includes('UNIQUE'))bad('该 SKU 已存在',409);throw e;}
    return json({id,sku:code},201);
   }
   if(req.method==='POST'&&path==='/api/products/batch') {
@@ -331,7 +334,7 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
   if(path==='/pantone-ui.js'&&req.method==='GET'){res.setHeader('Content-Type','text/javascript; charset=utf-8');return res.end(readFileSync(join(root,'public/pantone-ui.js')));}
   if(path==='/pantone-colors.json'&&req.method==='GET'){res.setHeader('Content-Type','application/json; charset=utf-8');return res.end(readFileSync(join(root,'public/data/pantone-colors.json')));}
   if(req.method==='GET') {
-    const assets={'/acceptance.html':'acceptance.html','/acceptance-ui.js':'acceptance-ui.js','/acceptance.css':'acceptance.css','/automatic-ui.js':'automatic-ui.js','/auto-placement.js':'auto-placement.js','/template-automation-ui.js':'template-automation-ui.js','/':'index.html','/app.js':'app.js','/style.css':'style.css','/favicon.svg':'favicon.svg','/template-editor.js':'template-editor.js','/template.css':'template.css','/logo-editor.js':'logo-editor.js','/logo.css':'logo.css','/rule-ui.js':'rule-ui.js','/rule.css':'rule.css','/workspace.js':'workspace.js','/workspace.css':'workspace.css','/batch-ui.js':'batch-ui.js','/batch.css':'batch.css','/mockup-geometry.js':'mockup-geometry.js','/zone-geometry.js':'zone-geometry.js','/task-additions.js':'task-additions.js','/additions.css':'additions.css','/ai-ui.js':'ai-ui.js','/sku-management.js':'sku-management.js','/management-ui.js':'management-ui.js','/management.css':'management.css'};
+    const assets={'/acceptance.html':'acceptance.html','/acceptance-ui.js':'acceptance-ui.js','/acceptance.css':'acceptance.css','/automatic-ui.js':'automatic-ui.js','/auto-placement.js':'auto-placement.js','/template-automation-ui.js':'template-automation-ui.js','/':'index.html','/app.js':'app.js','/product-categories.js':'product-categories.js','/style.css':'style.css','/favicon.svg':'favicon.svg','/template-editor.js':'template-editor.js','/template.css':'template.css','/logo-editor.js':'logo-editor.js','/logo.css':'logo.css','/rule-ui.js':'rule-ui.js','/rule.css':'rule.css','/workspace.js':'workspace.js','/workspace.css':'workspace.css','/batch-ui.js':'batch-ui.js','/batch.css':'batch.css','/mockup-geometry.js':'mockup-geometry.js','/zone-geometry.js':'zone-geometry.js','/task-additions.js':'task-additions.js','/additions.css':'additions.css','/ai-ui.js':'ai-ui.js','/sku-management.js':'sku-management.js','/management-ui.js':'management-ui.js','/management.css':'management.css'};
    const file=assets[path];if(!file)bad('页面不存在',404);
    res.setHeader('Content-Type',mime[file.slice(file.lastIndexOf('.'))]);return res.end(readFileSync(join(root,'public',file)));
   }

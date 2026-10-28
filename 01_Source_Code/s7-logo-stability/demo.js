@@ -6,6 +6,7 @@ import {isCarton,resolveTargetPrint} from './target-print.mjs';
 import {chooseContrastColor} from './contrast-color.mjs';
 import {clearSavedLogo,loadSavedLogo,saveLogo} from './saved-logo.mjs';
 import {masterTargetsFromTemplate} from './product-master.mjs';
+import {buildProductCategories,categoryFields,bindCategoryFields} from './product-categories.js';
 import {triggerTransparentLogoDownload} from './transparent-logo-download.mjs';
 import {rotationGestureMode,rotationHandleLocalPosition} from './rotation-handle.mjs';
 import {createTaskDraft,normalizeTaskResult,restoredBaseProduct} from './task-draft.mjs';
@@ -32,6 +33,7 @@ const productLibraryPanel=document.querySelector('#product-library-panel');
 const closeProductLibraryButton=document.querySelector('#close-product-library');
 const productLibrarySearch=document.querySelector('#product-library-search');
 const productLibraryList=document.querySelector('#product-library-list');
+const productLibraryFilters=document.querySelector('#product-library-filters');
 const chooseLogoLibraryButton=document.querySelector('#choose-logo-library');
 const logoLibraryPanel=document.querySelector('#logo-library-panel');
 const closeLogoLibraryButton=document.querySelector('#close-logo-library');
@@ -70,6 +72,7 @@ const ROTATE_LONG_PRESS_MS=350;
 let baseData='',logoData='',logoSourceData='';
 let baseImage=null,logoImage=null;
 let productLibraryProducts=[];
+let readProductCategory=()=>({category:'',subcategory:''});
 let multiPackageProducts=[],multiPackageBusy=false;
 let multiProductResults=new Map(),selectedMultiProductId=null;
 let multiProductViews=new Map(),loadedMultiProductId=null,multiProductLoadRevision=0,multiProductJob=null;
@@ -113,9 +116,10 @@ function loadImage(dataUrl){return new Promise((resolve,reject)=>{const image=ne
 function setSelectedLogoPreview(dataUrl,name){if(!dataUrl){selectedLogoPreview.hidden=true;return;}const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);if(logo){logo.logoImage=logoData;logo.sourceData=logoSourceData;}multiProductResults=new Map();selectedLogoThumbnail.src=dataUrl;selectedLogoThumbnail.alt=`${name||'已选 Logo'}预览`;document.querySelector('#logo-name').textContent=name||'已选择 Logo';selectedLogoPreview.hidden=false;renderMultiProductResults();}
 function renderProductLibrary(){
   const query=productLibrarySearch.value.trim().toUpperCase();
-  if(!query){productLibraryList.innerHTML='<p class="hint">请输入 SKU 或产品名称后搜索。</p>';return;}
-  const visible=productLibraryProducts.filter(product=>`${product.sku} ${product.name}`.toUpperCase().includes(query));
-  productLibraryList.innerHTML=visible.length?visible.map(product=>`<article class="product-library-item"><img src="${esc(s7Path(product.imageUrl))}" alt="${esc(product.name)}标准图"><div><strong>${esc(product.sku)}</strong><span>${esc(product.name)}${product.category?` · ${esc(product.category)}`:''}${product.hasMaster?'':' · 缺少母版'}</span></div><label class="batch-product-check"><input type="checkbox" data-batch-product-id="${esc(product.id)}" aria-label="选择 ${esc(product.sku)} 的效果图" title="选择 ${esc(product.sku)} 的效果图" ${multiPackageProducts.some(item=>item.id===product.id)?'checked':''} ${product.hasMaster&&!(taskLogos.length>1&&multiPackageProducts.length&& !multiPackageProducts.some(item=>item.id===product.id))&&!multiPackageBusy&&!generationBusy&&!logoSelectionBusy?'':'disabled'}></label></article>`).join(''):'<p class="hint">产品库中没有匹配的启用产品。</p>';
+  const filter=readProductCategory();
+  if(!query&&!filter.category){productLibraryList.innerHTML='<p class="hint">请选择大类、细分类目，或输入 SKU／产品名称搜索。</p>';return;}
+  const visible=productLibraryProducts.filter(product=>(!filter.category||product.category===filter.category)&&(!filter.subcategory||product.subcategory===filter.subcategory)).filter(product=>`${product.sku} ${product.name}`.toUpperCase().includes(query));
+  productLibraryList.innerHTML=visible.length?visible.map(product=>`<article class="product-library-item"><img src="${esc(s7Path(product.imageUrl))}" alt="${esc(product.name)}标准图"><div><strong>${esc(product.sku)}</strong><span>${esc(product.name)}${product.category?` · ${esc([product.category,product.subcategory].filter(Boolean).join(' / '))}`:''}${product.hasMaster?'':' · 缺少母版'}</span></div><label class="batch-product-check"><input type="checkbox" data-batch-product-id="${esc(product.id)}" aria-label="选择 ${esc(product.sku)} 的效果图" title="选择 ${esc(product.sku)} 的效果图" ${multiPackageProducts.some(item=>item.id===product.id)?'checked':''} ${product.hasMaster&&!(taskLogos.length>1&&multiPackageProducts.length&& !multiPackageProducts.some(item=>item.id===product.id))&&!multiPackageBusy&&!generationBusy&&!logoSelectionBusy?'':'disabled'}></label></article>`).join(''):'<p class="hint">没有匹配的产品，请调整分类或 SKU／名称关键词。</p>';
   productLibraryList.querySelectorAll('[data-batch-product-id]').forEach(input=>input.addEventListener('change',()=>{
     if(generationBusy||multiPackageBusy||logoSelectionBusy){renderProductLibrary();return;}
     const product=productLibraryProducts.find(item=>item.id===input.dataset.batchProductId);
@@ -327,7 +331,7 @@ async function openProductLibrary(){
   productLibraryPanel.hidden=!productLibraryPanel.hidden;if(productLibraryPanel.hidden)return;
   logoLibraryPanel.hidden=true;
   productLibraryList.textContent='正在读取产品库…';
-  try{const response=await fetch('/api/product-library');const payload=await response.json();if(!response.ok)throw Error(payload.error||'产品库读取失败');productLibraryProducts=payload;renderProductLibrary();}
+  try{const response=await fetch('/api/product-library');const payload=await response.json();if(!response.ok)throw Error(payload.error||'产品库读取失败');productLibraryProducts=payload;const filter=readProductCategory();productLibraryFilters.innerHTML=categoryFields('s7-product');readProductCategory=bindCategoryFields(productLibraryFilters,'s7-product',buildProductCategories(payload),{value:filter,onChange:renderProductLibrary});renderProductLibrary();}
   catch(error){productLibraryList.innerHTML=`<p class="hint status error">${esc(error.message)}</p>`;}
 }
 productLibrarySearch.addEventListener('input',renderProductLibrary);

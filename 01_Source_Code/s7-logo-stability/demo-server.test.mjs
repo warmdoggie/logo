@@ -102,7 +102,10 @@ test('产品库选择器读取主工作区产品并返回标准图',async()=>{
     assert.equal(html.status,200);
     assert.match(await html.text(),/从产品库选择/);
     const script=await fetch(base+'/demo.js');
-    assert.match(await script.text(),/if\(!query\)/);
+    assert.equal(script.status,200);
+    const categories=await fetch(base+'/product-categories.js');
+    assert.equal(categories.status,200);
+    assert.match(categories.headers.get('content-type'),/^text\/javascript/);
     const catalog=await fetch(base+'/api/product-library');
     assert.equal(catalog.status,200);
     const products=await catalog.json();

@@ -1,14 +1,20 @@
 import assert from 'node:assert/strict';
-import {readFile} from 'node:fs/promises';
 import test from 'node:test';
+import {buildProductCategories} from './01_Source_Code/public/product-categories.js';
 
-test('产品录入和编辑使用四个一级产品大类',async()=>{
-  const app=await readFile(new URL('./01_Source_Code/public/app.js',import.meta.url),'utf8');
-  const management=await readFile(new URL('./01_Source_Code/public/management-ui.js',import.meta.url),'utf8');
-  for(const category of ['唇部','脸部','身体','眼部']){
-    assert.match(app,new RegExp(category));
-    assert.match(management,new RegExp(category));
-  }
-  assert.doesNotMatch(app,/value="唇蜜"/);
-  assert.doesNotMatch(app,/value="修容棒"/);
+test('产品分类提供四个大类及对应细类',()=>{
+ const categories=buildProductCategories();
+ assert.deepEqual(Object.keys(categories),['唇部','脸部','身体','眼部']);
+ assert.ok(categories['唇部'].includes('唇蜜'));
+ assert.ok(categories['脸部'].includes('腮红'));
+ assert.ok(categories['身体'].includes('身体乳'));
+ assert.ok(categories['眼部'].includes('眉胶'));
+});
+
+test('已保存的自定义细类只加入所属大类，旧分类仍可筛选',()=>{
+ const categories=buildProductCategories([{category:'脸部',subcategory:'珠光液'},{category:'脸部',subcategory:'珠光液'},{category:'旧分类',subcategory:''}]);
+ assert.equal(categories['脸部'].filter(value=>value==='珠光液').length,1);
+ assert.ok(!categories['唇部'].includes('珠光液'));
+ assert.deepEqual(categories['旧分类'],[]);
+ assert.ok(!buildProductCategories()['脸部'].includes('珠光液'));
 });

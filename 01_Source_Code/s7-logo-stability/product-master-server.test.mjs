@@ -34,3 +34,21 @@ test('product library exposes a master template endpoint for each product',async
     assert.doesNotMatch(script,/dragTarget\.masterLocked&&dragMode!==['"]scale['"]/);
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
+
+test('product library preserves both category levels and products without a subcategory',async()=>{
+  const {server,base}=await openServer({productCatalog:async()=>[
+    {id:'face',sku:'F0066',name:'液体腮红',category:'脸部',subcategory:'腮红'},
+    {id:'custom',sku:'F0099',name:'珠光液',category:'脸部',subcategory:'珠光液'},
+    {id:'legacy',sku:'L0048',name:'旧产品',category:'唇部'},
+    {id:'inactive',sku:'OFF',name:'停用产品',category:'眼部',subcategory:'眉胶',status:'INACTIVE'}
+  ]});
+  try{
+    const response=await fetch(base+'/api/product-library');assert.equal(response.status,200);
+    const products=await response.json();
+    assert.deepEqual(products.map(({id,category,subcategory})=>({id,category,subcategory})),[
+      {id:'face',category:'脸部',subcategory:'腮红'},
+      {id:'custom',category:'脸部',subcategory:'珠光液'},
+      {id:'legacy',category:'唇部',subcategory:''}
+    ]);
+  }finally{await new Promise(resolve=>server.close(resolve));}
+});

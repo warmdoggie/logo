@@ -15,7 +15,8 @@
         <small id="base-name" class="hint">尚未选择产品</small>
         <div id="product-library-panel" class="product-library-panel" hidden>
           <div class="product-library-head"><strong>选择产品库标准图</strong><div><button id="close-product-library" type="button" class="text-button">关闭</button></div></div>
-          <input id="product-library-search" class="product-library-search" type="search" placeholder="搜索 SKU 或产品名称">
+          <div id="product-library-filters"></div>
+          <input id="product-library-search" class="product-library-search" type="search" placeholder="搜索 SKU 或产品名称" aria-label="搜索 SKU 或产品名称">
           <div id="product-library-list" class="product-library-list" aria-live="polite">正在读取产品库…</div>
         </div>
         <button id="choose-logo-library" type="button" class="button secondary product-library-button">从 Logo 库选择</button>
