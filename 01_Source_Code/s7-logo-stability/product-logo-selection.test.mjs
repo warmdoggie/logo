@@ -86,7 +86,7 @@ for(const inputType of ['library','upload'])for(const decodeFails of [false,true
  const {c,complete}=workspace(),added=Promise.withResolvers(),finishSelection=Promise.withResolvers(),decoding=Promise.withResolvers(),finishDecode=Promise.withResolvers();
  const add=c.addTaskLogo,fetch=c.fetch,fileData=c.fileData;
  c.addTaskLogo=async logo=>{await add(logo);added.resolve();await finishSelection.promise;};
- c.fetch=url=>url.includes('/logo-library/')?Promise.resolve({ok:true,blob:async()=>({logo:true})}):fetch(url);
+ c.fetch=url=>url.includes('/logo-library/')?Promise.resolve({ok:true,headers:new Headers({'X-S7-Task-Asset':'/api/my-space/tasks/task/assets/logo.png'}),blob:async()=>({logo:true})}):fetch(url);
  c.fileData=blob=>blob.id?fileData(blob):Promise.resolve({data:'red-image'});
  c.loadImage=async src=>{if(src.startsWith('base:'))return {src};decoding.resolve();return finishDecode.promise;};
  let select,libraryInput;

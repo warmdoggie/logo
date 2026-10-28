@@ -96,7 +96,7 @@ let s7User=null;
 let logoStorage=localStorage;
 function requireLogin(){fullImagePreview.close();previewImages.clear();document.body.replaceChildren();const link=document.createElement('a');link.textContent='登录已失效，请返回主工作空间登录';link.href=S7_BASE?'/':`http://${location.hostname}:3210/`;link.target='_top';document.body.append(link);}
 const fetch=async(input,init)=>{
- if(currentTaskId&&s7User&&init?.method==='POST'&&['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo','/api/process-logo','/api/render'].includes(input))init={...init,body:JSON.stringify({...JSON.parse(init.body),taskId:currentTaskId})};
+ if(currentTaskId&&s7User&&init?.method==='POST'&&['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo','/api/process-logo','/api/render'].includes(input)){const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);init={...init,body:JSON.stringify({...JSON.parse(init.body),taskId:currentTaskId,...(logo?.logoAssetUrl?{logoAssetUrl:logo.logoAssetUrl,logoImage:undefined}:{})})};}
  const response=await nativeFetch(typeof input==='string'?s7Path(input):input,init);
  if(s7User){
   const owner=response.headers.get('X-Workspace-User');
@@ -128,7 +128,7 @@ async function refreshHistory(){
 function setStatus(message,type=''){status.textContent=message;status.className=`status ${type}`;taskDraft?.schedule();notifyTask(type==='busy'?'生成中…':type==='error'?'操作失败':type==='success'?'已完成':'编辑中',type==='busy');}
 function fileData(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({dataUrl:String(reader.result),data:String(reader.result).split(',')[1]});reader.onerror=reject;reader.readAsDataURL(file);});}
 function loadImage(dataUrl){return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(Error('图片无法读取'));image.src=dataUrl;});}
-function setSelectedLogoPreview(dataUrl,name){if(!dataUrl){selectedLogoPreview.hidden=true;return;}const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);if(logo){logo.logoImage=logoData;logo.sourceData=logoSourceData;}multiProductResults=new Map();selectedLogoThumbnail.src=dataUrl;selectedLogoThumbnail.alt=`${name||'已选 Logo'}预览`;document.querySelector('#logo-name').textContent=name||'已选择 Logo';selectedLogoPreview.hidden=false;renderMultiProductResults();}
+function setSelectedLogoPreview(dataUrl,name){if(!dataUrl){selectedLogoPreview.hidden=true;return;}const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);if(logo){if(logo.logoImage!==logoData)delete logo.logoAssetUrl;logo.logoImage=logoData;logo.sourceData=logoSourceData;}multiProductResults=new Map();selectedLogoThumbnail.src=dataUrl;selectedLogoThumbnail.alt=`${name||'已选 Logo'}预览`;document.querySelector('#logo-name').textContent=name||'已选择 Logo';selectedLogoPreview.hidden=false;renderMultiProductResults();}
 function renderProductLibrary(){
   const query=productLibrarySearch.value.trim().toUpperCase();
   const filter=readProductCategory();
@@ -327,7 +327,7 @@ async function runMultiLogoGeneration(options={}){
   multiPackageBusy=true;updateGenerateButton();renderMultiProductResults();
   try{
     await taskDraft.flush();
-    const response=await fetch('/api/ai-render-logos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...options,taskId:currentTaskId,productId:loadedMultiProductId,baseAssetUrl:multiProductViews.get(loadedMultiProductId)?.baseAssetUrl||undefined,model:mockupModel.value,logos:taskLogos.map(({id,name,logoImage})=>({id,name,logoImage})),logoLayouts})});
+    const response=await fetch('/api/ai-render-logos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...options,taskId:currentTaskId,productId:loadedMultiProductId,baseAssetUrl:multiProductViews.get(loadedMultiProductId)?.baseAssetUrl||undefined,model:mockupModel.value,logos:taskLogos.map(({id,name,logoImage,logoAssetUrl})=>({id,name,...(logoAssetUrl?{logoAssetUrl}:{logoImage})})),logoLayouts})});
     const record=await response.json();if(!response.ok)throw Error(record.error||'多 Logo 生成失败');generationWatcher.track(record);
   }catch(error){multiPackageBusy=false;updateGenerateButton();renderMultiProductResults();setStatus(error.message,'error');}
 }
@@ -382,7 +382,7 @@ function renderLogoLibrary(){
   const key=JSON.stringify(visible.map(item=>[item.id,item.name,item.createdAt,item.imageUrl]));
   if(logoLibraryList.dataset.items!==key){
     logoLibraryList.dataset.items=key;
-    logoLibraryList.innerHTML=visible.length?visible.map(item=>`<article class="product-library-item"><img src="${esc(logoLibraryPath(item.imageUrl+'?thumbnail=1'))}" alt="${esc(item.name)}"><div><strong>${esc(item.name)}</strong><span>${esc(new Date(item.createdAt).toLocaleString())}</span></div><label class="batch-product-check"><input type="checkbox" data-logo-id="${esc(item.id)}" aria-label="选择 ${esc(item.name)}"></label></article>`).join(''):'<p class="hint">Logo 库中没有匹配的图片。</p>';
+    logoLibraryList.innerHTML=visible.length?visible.map(item=>`<article class="product-library-item"><img src="${esc(logoLibraryPath(item.imageUrl+'?thumbnail=1'))}" alt="${esc(item.name)}" loading="lazy" decoding="async"><div><strong>${esc(item.name)}</strong><span>${esc(new Date(item.createdAt).toLocaleString())}</span></div><label class="batch-product-check"><input type="checkbox" data-logo-id="${esc(item.id)}" aria-label="选择 ${esc(item.name)}"></label></article>`).join(''):'<p class="hint">Logo 库中没有匹配的图片。</p>';
     logoLibraryList.querySelectorAll('[data-logo-id]').forEach(input=>input.addEventListener('change',async()=>{
       if(generationBusy||multiPackageBusy||logoSelectionBusy){renderLogoLibrary();return;}
       const item=logoLibraryItems.find(value=>value.id===input.dataset.logoId);if(!item)return;
@@ -390,9 +390,11 @@ function renderLogoLibrary(){
       logoImportBusy=true;logoSelectionBusy=true;logoLibraryList.dataset.loadingLogo=item.id;renderLogoLibrary();updateGenerateButton();
       setStatus('正在加载所选 Logo…','busy');
       try{
-        const response=await fetch(logoLibraryPath(item.imageUrl));if(!response.ok)throw Error('Logo 库图片读取失败');
+        const useSnapshot=!!currentTaskId&&!!s7User;
+        const response=await fetch(useSnapshot?item.imageUrl+'?selection=1':logoLibraryPath(item.imageUrl),useSnapshot?{headers:{'X-S7-Task-Id':currentTaskId}}:undefined);if(!response.ok)throw Error('Logo 库图片读取失败');
+        const logoAssetUrl=useSnapshot?response.headers.get('X-S7-Task-Asset'):null;if(useSnapshot&&!logoAssetUrl)throw Error('Logo 原图快照未保存，请重试');
         const loaded=await fileData(await response.blob());
-        await addTaskLogo({id:item.id,name:item.name.slice(0,120),logoImage:loaded.data});
+        await addTaskLogo({id:item.id,name:item.name.slice(0,120),logoImage:loaded.data,...(useSnapshot?{logoAssetUrl}:{})});
         if(!selectedMultiProductId||selectedMultiProductId===loadedMultiProductId)setStatus(`已选择 ${taskLogos.length} 个 Logo，可关闭选择框后调整预览。`,'success');
       }catch(error){setStatus(error.message,'error');}
       finally{delete logoLibraryList.dataset.loadingLogo;logoImportBusy=false;logoSelectionBusy=logoDecoding;renderLogoLibrary();renderProductLibrary();updateGenerateButton();}
@@ -407,9 +409,9 @@ function renderLogoLibrary(){
 
 async function openLogoLibrary(){
   logoLibraryPanel.hidden=!logoLibraryPanel.hidden;if(logoLibraryPanel.hidden)return;
-  productLibraryPanel.hidden=true;delete logoLibraryList.dataset.items;logoLibraryList.textContent='正在读取 Logo 库…';
+  productLibraryPanel.hidden=true;if(logoLibraryList.dataset.items===undefined)logoLibraryList.textContent='正在读取 Logo 库…';
   try{const response=await fetch(logoLibraryPath('/api/logo-library'));const payload=await response.json();if(!response.ok)throw Error(payload.error||'Logo 库读取失败');logoLibraryItems=payload;renderLogoLibrary();}
-  catch(error){logoLibraryList.innerHTML=`<p class="hint status error">${esc(error.message)}</p>`;}
+  catch(error){delete logoLibraryList.dataset.items;logoLibraryList.innerHTML=`<p class="hint status error">${esc(error.message)}</p>`;}
 }
 
 function rowQuad(row){try{const quad=JSON.parse(row.dataset.quad||'');return Array.isArray(quad)&&quad.length===4?quad:null;}catch{return null;}}
@@ -827,13 +829,12 @@ function endDrag(event){
   dragTarget=null;dragMode=null;rotatePointerId=null;canvas.classList.remove('dragging');if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
 }
 canvas.addEventListener('pointerup',endDrag);canvas.addEventListener('pointercancel',endDrag);
-canvas.addEventListener('contextmenu',event=>{
+canvas.addEventListener('contextmenu',async event=>{
   if(!baseImage||!logoImage||!logoData)return;
   const normalized=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect());
   if(!targetAt(normalized))return;
   event.preventDefault();
-  triggerTransparentLogoDownload(logoData,{filename:'logo-transparent.png'});
-  setStatus('已保存透明 Logo PNG，可直接复用，无需再次调用 AI。','success');
+  try{const asset=taskLogos.find(logo=>logo.id===loadedTaskLogoId)?.logoAssetUrl;let data=logoData;if(asset){const response=await fetch(asset);if(!response.ok)throw Error('Logo 原图读取失败');data=(await fileData(await response.blob())).data;}triggerTransparentLogoDownload(data,{filename:'logo-transparent.png'});setStatus('已保存透明 Logo PNG，可直接复用，无需再次调用 AI。','success');}catch(error){setStatus(error.message,'error');}
 });
 
 document.querySelector('#add-target').onclick=()=>addTarget();
@@ -870,7 +871,7 @@ document.querySelector('#apply-processing').onclick=async()=>{
     const payload=await response.json();if(!response.ok)throw Error(payload.error||'Logo加工失败');
     const logoName=targetColor==='original'?'AI 加工 Logo（保留原色）.png':'AI 加工 Logo（黑色）.png';
     const processedLogo=taskLogos.find(logo=>logo.id===processingLogoId);
-    if(processedLogo){processedLogo.logoImage=payload.dataUrl.split(',')[1];processedLogo.sourceData=sourceData;taskDraft?.schedule();}
+    if(processedLogo){processedLogo.logoImage=payload.dataUrl.split(',')[1];delete processedLogo.logoAssetUrl;processedLogo.sourceData=sourceData;taskDraft?.schedule();}
     if(processingLogoId!==loadedTaskLogoId||processingLogoId&&!processedLogo){renderMultiProductResults();renderLogoLibrary();processingStatus.textContent='Logo 加工完成';setStatus('原选 Logo 已加工完成，当前选择保持不变。','success');return;}
     logoData=payload.dataUrl.split(',')[1];logoImage=await loadImage(payload.dataUrl);saveLogo(logoStorage,{data:logoData,name:logoName,sourceData:logoSourceData});useSavedLogoButton.hidden=false;clearSavedLogoButton.hidden=false;setSelectedLogoPreview(payload.dataUrl,logoName);processingStatus.textContent=`AI 加工完成：${payload.width} × ${payload.height}`;processingPanel.hidden=true;drawPreview();setStatus(payload.logoLibrary?`AI Logo 已加工并保存到 Logo 库（${payload.logoLibrary.name}）。`:`AI Logo 已加工，但 Logo 库保存失败：${payload.logoLibraryError||'请稍后重试'}` ,payload.logoLibrary?'success':'error');
   }catch(error){processingStatus.textContent=error.message||'Logo加工失败';}

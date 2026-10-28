@@ -4,9 +4,9 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
 const source=(await readFile(new URL('./demo.js',import.meta.url),'utf8')).replace(/\r\n/g,'\n');
-function client(nativeFetch){
+function client(nativeFetch,selection={}){
  let expired=0;
- const c=vm.createContext({nativeFetch,s7User:{id:'alice'},currentTaskId:'task',s7Path:value=>'/s7'+value,requireLogin:()=>expired++,refreshHistory:async()=>{}});
+ const c=vm.createContext({nativeFetch,s7User:{id:'alice'},currentTaskId:'task',s7Path:value=>'/s7'+value,requireLogin:()=>expired++,refreshHistory:async()=>{},taskLogos:[],loadedTaskLogoId:null,...selection});
  vm.runInContext(source.slice(source.indexOf('const fetch=async('),source.indexOf('\n{\n',source.indexOf('const fetch=async(')))+'\nglobalThis.request=fetch;',c);
  return {request:c.request,expired:()=>expired};
 }
@@ -26,4 +26,11 @@ test('兼容缺少账号标识的旧接口，仍核实账号后才使用结果',
  const calls=[],c=client(async url=>{calls.push(url);return new Response(url.endsWith('/session')?'"bad"':'{}');});
  await assert.rejects(c.request('/api/product-library'),/登录/);assert.equal(c.expired(),1);
  assert.deepEqual(calls,['/s7/api/product-library','/s7/api/session']);
+});
+
+
+test('生成和加工请求只传 Logo 原图引用，不上传选择预览',async()=>{
+ const bodies=[],c=client(async(_url,init)=>{bodies.push(JSON.parse(init.body));return new Response('{}',{headers:{'X-Workspace-User':'alice'}});},{loadedTaskLogoId:'one',taskLogos:[{id:'one',logoImage:'small-preview',logoAssetUrl:'/api/my-space/tasks/task/assets/original.png'}]});
+ for(const url of ['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo'])await c.request(url,{method:'POST',body:JSON.stringify({logoImage:'small-preview'})});
+ for(const body of bodies){assert.equal(body.logoAssetUrl,'/api/my-space/tasks/task/assets/original.png');assert.equal(body.taskId,'task');assert.equal(body.logoImage,undefined);}
 });

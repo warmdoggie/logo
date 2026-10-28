@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 import {buildTransparentLogoDataUrl,triggerTransparentLogoDownload} from './transparent-logo-download.mjs';
 
 test('transparent Logo data is normalized to a PNG data URL',()=>{
@@ -23,5 +24,13 @@ test('placement canvas saves the transparent Logo only when the context menu is 
   assert.match(script,/canvas\.addEventListener\('contextmenu'/);
   assert.match(script,/const normalized=pointerToNormalized\(event\.clientX,event\.clientY,canvas\.getBoundingClientRect\(\)\)/);
   assert.match(script,/if\(!targetAt\(normalized\)\)return/);
-  assert.match(script,/triggerTransparentLogoDownload\(logoData/);
+
+});
+
+
+for(const snapshot of [false,true])test(`右键下载${snapshot?'任务快照的完整原图':'旧版内联原图'}`,async()=>{
+ const script=fs.readFileSync(new URL('./demo.js',import.meta.url),'utf8'),calls=[];let handler;
+ const c=vm.createContext({canvas:{addEventListener:(_event,fn)=>handler=fn,getBoundingClientRect:()=>({})},baseImage:{},logoImage:{},logoData:'preview',loadedTaskLogoId:'one',taskLogos:[{id:'one',...(snapshot?{logoAssetUrl:'/snapshot'}:{})}],pointerToNormalized:()=>({}),targetAt:()=>true,setStatus(){},fetch:async url=>{assert.equal(url,'/snapshot');return {ok:true,blob:async()=>({})};},fileData:async()=>({data:'full-original'}),triggerTransparentLogoDownload:data=>calls.push(data)});
+ const start=script.indexOf("canvas.addEventListener('contextmenu'");vm.runInContext(script.slice(start,script.indexOf("document.querySelector('#add-target')",start)),c);
+ await handler({preventDefault(){},clientX:0,clientY:0});assert.deepEqual(calls,[snapshot?'full-original':'preview']);
 });
