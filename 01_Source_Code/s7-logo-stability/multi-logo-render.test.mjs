@@ -97,9 +97,9 @@ test('ordinary tasks reject multi-product logo batches and mismatched layouts be
 
 test('partial failure keeps other logo results and retries only missing versions without duplicating successes',async t=>{
  let fail=true;const selections=[];
- const f=await fixture(t,async input=>{selections.push(input.selectedVersions);const outputs=[];for(const version of input.selectedVersions){if(fail&&selections.length===1&&version==='BLACK'){await input.onStage(version,'failed',Error('测试上游失败'));continue;}const output={version,bytes:Buffer.from(input.guides.find(g=>g.version===version).dataUrl.split(',')[1],'base64')};await input.onOutput(output);outputs.push(output);}return outputs;});
+ const f=await fixture(t,async input=>{const first=selections.length===0;selections.push(input.selectedVersions);const outputs=[];for(const version of input.selectedVersions){if(fail&&first&&version==='BLACK'){await input.onStage(version,'failed',Error('测试上游失败'));continue;}const output={version,bytes:Buffer.from(input.guides.find(g=>g.version===version).dataUrl.split(',')[1],'base64')};await input.onOutput(output);outputs.push(output);}return outputs;});
  assert.equal((await f.call('/api/ai-render-logos',f.input)).status,202);const before=await f.wait();
- assert.equal(before.outputs.length,7);assert.equal(before.status,'partial');assert.match(before.stages['red:BLACK'].error,/测试上游失败/);
+ assert.equal(before.outputs.length,7);assert.equal(before.status,'partial');assert.match(Object.values(before.stages).find(stage=>stage.stage==='failed').error,/测试上游失败/);
  fail=false;assert.equal((await f.call('/api/ai-render-logos',{...f.input,retryFailed:true})).status,202);const after=await f.wait();
  assert.equal(after.outputs.length,8);assert.equal(after.status,'complete');assert.deepEqual(selections,[versions,versions,['BLACK']]);
  for(const output of before.outputs)assert.equal(after.outputs.find(x=>x.logoId===output.logoId&&x.version===output.version).dataUrl,output.dataUrl);

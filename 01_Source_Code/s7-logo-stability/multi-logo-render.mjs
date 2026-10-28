@@ -5,6 +5,7 @@ import {validateAiLogoOutput} from './ai-logo-processing.mjs';
 import {createSchemes} from './schemes.mjs';
 import {renderLogoSet} from './index.mjs';
 import {pickAspectRatio} from './ai-mockup-generation.mjs';
+import {runBatches} from './batch-queue.mjs';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const dataUrl=bytes=>`data:image/png;base64,${bytes.toString('base64')}`;
@@ -61,9 +62,9 @@ export function createMultiLogoJobs(spaces,mockupRenderer){
   const update=change=>spaces.updateGeneration(user,taskId,current=>current.id!==job.id?current:{...change(current),updatedAt:new Date().toISOString()});
   void (async()=>{
    try{
-    for(const logo of logos){
+    await runBatches(logos.filter(logo=>selected.get(logo.id).length),async logo=>{
      const {targets,schemes}=logo;
-     const selectedVersions=selected.get(logo.id);if(!selectedVersions.length)continue;
+     const selectedVersions=selected.get(logo.id);
      const onStage=(version,stage,error)=>update(current=>({...current,stages:{...current.stages,[key(logo.id,version)]:{stage,error:error?.message}}}));
      const onOutput=async output=>{
       if(!selectedVersions.includes(output.version))fail('成图版本与请求不一致');
@@ -85,7 +86,7 @@ export function createMultiLogoJobs(spaces,mockupRenderer){
       for(const output of outputs)if((await spaces.generation(user,taskId)).stages[key(logo.id,output.version)]?.stage!=='complete')await onOutput(output);
       for(const version of selectedVersions){const stage=(await spaces.generation(user,taskId)).stages[key(logo.id,version)];if(!['complete','failed'].includes(stage.stage))await onStage(version,'failed',Error('未返回图片，请重试'));}
      }catch(error){for(const version of selectedVersions)if((await spaces.generation(user,taskId)).stages[key(logo.id,version)]?.stage!=='complete')await onStage(version,'failed',error);}
-    }
+    });
     await update(current=>({...current,status:Object.values(current.stages).every(value=>value.stage==='complete')?'complete':current.outputs.length?'partial':'failed'}));
    }catch(error){await update(current=>({...current,status:'failed',stages:Object.fromEntries(Object.entries(current.stages).map(([id,value])=>[id,value.stage==='complete'?value:{stage:'failed',error:error.message||'生成失败'}]))})).catch(error=>console.error('多 Logo 状态保存失败',error));}
    finally{if(active.get(activeKey)===job.id)active.delete(activeKey);}

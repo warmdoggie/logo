@@ -5,6 +5,7 @@ import {createSchemes} from './schemes.mjs';
 import {masterTargetsFromTemplate} from './product-master.mjs';
 import {renderLogoSet} from './index.mjs';
 import {pickAspectRatio} from './ai-mockup-generation.mjs';
+import {runBatches} from './batch-queue.mjs';
 
 const key=(id,version)=>`${id}:${version}`;
 const dataUrl=bytes=>`data:image/png;base64,${bytes.toString('base64')}`;
@@ -61,8 +62,7 @@ export function createMultiProductJobs(spaces,{productTemplate,productImage,mock
   const update=change=>spaces.updateGeneration(user,taskId,current=>current.id!==id?current:{...change(current),updatedAt:new Date().toISOString()});
   void (async()=>{
    try{
-    for(const {product,base,targets,schemes,schemeSignatures} of prepared){
-     if(input.onlyProductId&&product.id!==input.onlyProductId)continue;
+    await runBatches(prepared.filter(({product})=>!input.onlyProductId||product.id===input.onlyProductId),async({product,base,targets,schemes,schemeSignatures})=>{
      const onStage=(version,stage,error)=>update(current=>({...current,stages:{...current.stages,[key(product.id,version)]:{stage,error:error?.message}}}));
      const onOutput=async output=>{
       if(!selected.includes(output.version))fail('成图版本与请求不一致');
@@ -81,7 +81,7 @@ export function createMultiProductJobs(spaces,{productTemplate,productImage,mock
       for(const output of outputs)if((await spaces.generation(user,taskId)).stages[key(product.id,output.version)]?.stage!=='complete')await onOutput(output);
       for(const version of selected)if(!['complete','failed'].includes((await spaces.generation(user,taskId)).stages[key(product.id,version)].stage))await onStage(version,'failed',Error('未返回图片，请重试'));
      }catch(error){for(const version of selected)if((await spaces.generation(user,taskId)).stages[key(product.id,version)]?.stage!=='complete')await onStage(version,'failed',error);}
-    }
+    });
     await update(current=>({...current,status:Object.values(current.stages).every(value=>value.stage==='complete')?'complete':current.outputs.length?'partial':'failed'}));
    }catch(error){await update(current=>({...current,status:'failed',stages:Object.fromEntries(Object.entries(current.stages).map(([id,value])=>[id,value.stage==='complete'?value:{stage:'failed',error:error.message||'生成失败'}]))})).catch(error=>console.error('批量生成状态保存失败',error));}
    finally{if(active.get(activeKey)===id)active.delete(activeKey);}
