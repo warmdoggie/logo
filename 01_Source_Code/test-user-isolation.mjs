@@ -48,6 +48,7 @@ test('用户登录、账号管理、任务和文件隔离、共享图库以及�
   const catalog=await(await call('/api/products',bob)).json();assert.equal(catalog.length,1);
   assert.equal((await call('/api/manage/products/'+product.id,bob)).status,403);
   assert.equal((await call('/files/'+catalog[0].standardImage,alice)).status,200);
+  assert.equal((await call('/files/'+catalog[0].standardImage+'?preview=1',alice)).status,200);
   const logoForm=new FormData();logoForm.set('file',new Blob([image]),'brand-logo.png');logoForm.set('name','品牌 Logo V1');const savedLogo=await call('/api/logo-library',alice,logoForm);assert.equal(savedLogo.status,201);const logo=await savedLogo.json();assert.equal(logo.name,'品牌 Logo V1');
   assert.equal((await(await call('/api/logo-library',alice)).json()).length,1);assert.deepEqual(await(await call('/api/logo-library',bob)).json(),[]);
   assert.equal((await call(logo.imageUrl,alice)).status,200);assert.equal((await call(logo.imageUrl,bob)).status,404);
@@ -61,6 +62,9 @@ test('用户登录、账号管理、任务和文件隔离、共享图库以及�
   for(const path of ['/api/tasks/'+id,'/api/logo/'+id,'/api/batch/'+id,'/api/automatic/'+id,'/api/transparent/'+id,'/api/workspace/'+id,'/api/ai/tasks/'+id,'/api/rule-review/'+id,'/api/manage/tasks/'+id+'/delete-preview','/files/'+detail.logo.filePath])assert.equal((await call(path,bob)).status,404,path);
   assert.equal((await call('/api/render',bob,{taskId:id})).status,404);
   assert.equal((await call('/files/'+detail.logo.filePath,alice)).status,200);
+  assert.equal((await call('/files/'+detail.logo.filePath+'?preview=1',alice)).status,200);
+  assert.equal((await call('/files/'+detail.logo.filePath+'?preview=1',bob)).status,404);
+  assert.equal((await fetch(base+'/files/'+detail.logo.filePath+'?preview=1')).status,401);
   assert.deepEqual(await(await call('/api/batch-summary',bob)).json(),[]);
   assert.equal((await call('/api/manage/storage',bob)).status,403);
   assert.equal((await call('/api/rule-auth',alice,{username:'admin',password})).status,403);

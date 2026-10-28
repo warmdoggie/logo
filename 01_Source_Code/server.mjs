@@ -323,6 +323,11 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
   }
   if(req.method==='GET'&&path.startsWith('/files/')) {
    const key=path.slice(7);let bytes;try{bytes=storage.get(key);}catch{bad('文件不存在',404);}
+   if(!url.searchParams.has('download')&&['png','jpg','webp'].includes(key.split('.').pop())&&(url.searchParams.get('preview')==='1'||url.searchParams.get('thumbnail')==='1')){
+    const meta=await sharp(bytes).metadata(),rotated=meta.orientation>=5,width=rotated?meta.height:meta.width,height=rotated?meta.width:meta.height,edge=url.searchParams.get('thumbnail')==='1'?192:1600;
+    const preview=await sharp(bytes).rotate().resize({width:edge,height:edge,fit:'inside',withoutEnlargement:true}).webp({quality:edge===192?76:85}).toBuffer();
+    res.setHeader('Content-Type','image/webp');res.setHeader('X-Image-Width',width);res.setHeader('X-Image-Height',height);return res.end(preview);
+   }
    const ext=key.split('.').pop();res.setHeader('Content-Type',ext==='jpg'?'image/jpeg':`image/${ext}`);
    if(ext==='svg'){res.setHeader('Content-Type','image/svg+xml');res.setHeader('Content-Disposition','attachment');res.setHeader('Content-Security-Policy',"sandbox; default-src 'none'");}
    if(url.searchParams.has('download')) {const logo=db.prepare('SELECT fileName FROM OriginalLogoVersion WHERE filePath=?').get(key)||db.prepare('SELECT fileName FROM LogoAsset WHERE filePath=?').get(key);res.setHeader('Content-Disposition',`attachment; filename*=UTF-8''${encodeURIComponent(logo?.fileName||key)}`);}
