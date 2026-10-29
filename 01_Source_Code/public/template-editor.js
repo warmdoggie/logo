@@ -1,4 +1,5 @@
 import {mountTemplateAutomation} from './template-automation-ui.js';
+import {fetchPreview} from './preview-fetch.js';
 import {zonePoints,bounds,polygonError,pointInside} from './zone-geometry.js';
 let active=null;
 export function leaveTemplate(){
@@ -120,7 +121,7 @@ export async function renderTemplate(main,productId,helpers){
  });
  const observer=new ResizeObserver(queueDraw);observer.observe(canvas);
  const source=new Image();source.onload=()=>{if(active!==state||!canvas.isConnected)return;W=imageSize.width;H=imageSize.height;canvas.setAttribute('viewBox',`0 0 ${W} ${H}`);canvas.setAttribute('width',W);canvas.setAttribute('height',H);const img=main.querySelector('#base-image');img.setAttribute('width',W);img.setAttribute('height',H);img.setAttribute('href',previewUrl);loaded=true;main.querySelector('#image-loading').hidden=true;draw();};source.onerror=()=>{if(active===state&&canvas.isConnected){main.querySelector('#image-loading').textContent='产品图加载失败，请刷新重试。';error('产品图加载失败，暂不能框选。');}};
- fetch('/files/'+encodeURIComponent(payload.template?.standardImage||payload.product.standardImage)+'?preview=1',{signal:imageController.signal}).then(async response=>{
+ fetchPreview('/files/'+encodeURIComponent(payload.template?.standardImage||payload.product.standardImage)+'?preview=1',{signal:imageController.signal}).then(async response=>{
   if(!response.ok)throw Error('产品图加载失败');const width=Number(response.headers.get('X-Image-Width')),height=Number(response.headers.get('X-Image-Height'));if(!(width>0&&height>0))throw Error('产品图尺寸无法读取');
   const blob=await response.blob();if(active!==state||!canvas.isConnected)return;imageSize={width,height};previewUrl=URL.createObjectURL(blob);source.src=previewUrl;
  }).catch(error=>{if(error.name!=='AbortError')source.onerror();});

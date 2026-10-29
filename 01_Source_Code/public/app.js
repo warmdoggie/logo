@@ -1,4 +1,6 @@
 import {buildProductCategories,categoryFields,bindCategoryFields} from './product-categories.js';
+import {installPreviewImageFallback} from './preview-fetch.js';
+installPreviewImageFallback(document,location.origin);
 import {renderAutomatic} from './automatic-ui.js';
 import {skuManagement} from './sku-management.js';
 import {renderProductManagement,taskManagementControls,renderStorage} from './management-ui.js';

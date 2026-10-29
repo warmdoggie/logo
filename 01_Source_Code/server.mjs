@@ -10,6 +10,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { LocalStorage } from './storage.mjs';
+import {createOssPreviews,LOGO_OSS_ORIGIN} from './oss-previews.mjs';
 import { templateService } from './templates.mjs';
 import { logoService } from './logos.mjs';
 import {ruleService,PROCESSES,FIELDS,OPERATORS} from './rule-engine.mjs';
@@ -39,6 +40,7 @@ if(!db.prepare('PRAGMA table_info(Task)').all().some(c=>c.name==='activeProducti
 
 db.exec(readFileSync(join(root,'ai-schema.sql'),'utf8'));
 const storage = new LocalStorage(join(data, 'uploads'));
+const ossPreviews=process.env.LOGO_OSS_PREVIEWS==='1'?createOssPreviews({directory:join(data,'oss-previews'),client:(await import('./logo-oss-client.mjs')).createLogoOssClients()}):null;
 const logoAssets=logoLibrary(db,storage,()=>requestScope.getStore()?.user?.id||'local');
 for(const [name,type] of [['shapeType',"TEXT DEFAULT 'RECT'"],['rotation','REAL DEFAULT 0'],['pointsJson','TEXT']])if(!db.prepare('PRAGMA table_info(TemplateZone)').all().some(c=>c.name===name))db.exec('ALTER TABLE TemplateZone ADD COLUMN '+name+' '+type);
 const templates = templateService(db,storage);
@@ -126,7 +128,7 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
  const writing=!['GET','HEAD'].includes(req.method);if(writing)activeWrites++;
  res.setHeader('X-Content-Type-Options','nosniff');
  res.setHeader('Cache-Control','no-store');
- res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`);
+ res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob:${ossPreviews?' '+LOGO_OSS_ORIGIN:''}; connect-src 'self'${ossPreviews?' '+LOGO_OSS_ORIGIN:''}; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`);
  const json=(v,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(v));};
  try {
   const requestHost=(req.headers.host||'').split(':')[0];
@@ -186,6 +188,7 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
    const id=decodeURIComponent(logoLibraryMatch[1]);
    if(req.method==='GET'&&logoLibraryMatch[2]){
     const bytes=logoAssets.image(id);
+    if(ossPreviews&&url.searchParams.get('thumbnail')==='1'&&!url.searchParams.has('local')){const remote=await ossPreviews.find(bytes,192);if(remote){res.writeHead(302,{Location:remote.url});return res.end();}}
     if(url.searchParams.get('thumbnail')==='1'){res.setHeader('Content-Type','image/webp');return res.end(await sharp(bytes).resize({width:192,height:192,fit:'inside',withoutEnlargement:true}).webp({quality:76}).toBuffer());}
     res.setHeader('Content-Type','image/png');return res.end(bytes);
    }
@@ -324,6 +327,7 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
   if(req.method==='GET'&&path.startsWith('/files/')) {
    const key=path.slice(7);let bytes;try{bytes=storage.get(key);}catch{bad('文件不存在',404);}
    if(!url.searchParams.has('download')&&['png','jpg','webp'].includes(key.split('.').pop())&&(url.searchParams.get('preview')==='1'||url.searchParams.get('thumbnail')==='1')){
+    if(ossPreviews&&!url.searchParams.has('local')){const remote=await ossPreviews.find(bytes,url.searchParams.get('thumbnail')==='1'?192:1600);if(remote){res.writeHead(302,{Location:remote.url});return res.end();}}
     const meta=await sharp(bytes).metadata(),rotated=meta.orientation>=5,width=rotated?meta.height:meta.width,height=rotated?meta.width:meta.height,edge=url.searchParams.get('thumbnail')==='1'?192:1600;
     const preview=await sharp(bytes).rotate().resize({width:edge,height:edge,fit:'inside',withoutEnlargement:true}).webp({quality:edge===192?76:85}).toBuffer();
     res.setHeader('Content-Type','image/webp');res.setHeader('X-Image-Width',width);res.setHeader('X-Image-Height',height);return res.end(preview);
