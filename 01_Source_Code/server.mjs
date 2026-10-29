@@ -146,7 +146,7 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
   }
   if(path==='/s7'||path.startsWith('/s7/')){
    const originalUrl=req.url;req.url=req.url.replace(/^\/s7(?=\/|\?|$)/,'')||'/';
-   res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'`);
+   res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob: data:${process.env.LOGO_OSS_STORAGE_ROLE_ARN?' '+LOGO_OSS_ORIGIN:''}; connect-src 'self'${process.env.LOGO_OSS_STORAGE_ROLE_ARN?' '+LOGO_OSS_ORIGIN:''}; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'`);
    try{return await s7Handler(req,res);}finally{req.url=originalUrl;}
   }
   if(path==='/api/auth/config'&&req.method==='GET')return json({enabled:!!users});

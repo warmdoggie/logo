@@ -1,4 +1,22 @@
-// Browser fallback for the standalone preview, which has no saved task to export.
+// ZIP creation runs on the user's device so image downloads can use private OSS redirects.
+export async function fetchArchive(files,{request=(...args)=>fetch(...args)}={}){
+ if(!Array.isArray(files)||!files.length||files.length>200)throw Error('请选择 1–200 张图片');
+ const controller=new AbortController(),result=new Array(files.length);let next=0,total=0;
+ const limit=300*1024*1024,tooLarge=()=>Error('本次下载超过 300 MB，请分批选择');
+ async function read(){
+  while(next<files.length){
+   const index=next++,file=files[index],response=await request(file.url,{signal:AbortSignal.any([controller.signal,AbortSignal.timeout(60000)])});
+   if(!response.ok)throw Error('图片读取失败，请重试');
+   if(Number(response.headers.get('content-length'))>limit-total)throw tooLarge();
+   const reader=response.body.getReader(),chunks=[];let size=0;
+   try{for(;;){const {done,value}=await reader.read();if(done)break;total+=value.length;size+=value.length;if(total>limit)throw tooLarge();chunks.push(value);}}
+   finally{reader.releaseLock();}
+   const bytes=new Uint8Array(size);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.length;}
+   result[index]={name:file.name,bytes};
+  }
+ }
+ try{await Promise.all([read(),read()]);return zipStore(result);}catch(error){controller.abort();throw error;}
+}
 const table=Array.from({length:256},(_,n)=>{for(let k=0;k<8;k++)n=n&1?0xedb88320^(n>>>1):n>>>1;return n>>>0;});
 const crc32=bytes=>{let crc=0xffffffff;for(const byte of bytes)crc=table[(crc^byte)&255]^(crc>>>8);return (crc^0xffffffff)>>>0;};
 export function zipStore(files){

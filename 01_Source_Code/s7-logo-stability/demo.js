@@ -108,7 +108,7 @@ const fetch=async(input,init)=>{
   const owner=response.headers.get('X-Workspace-User');
   if(response.status===401||(owner&&owner!==s7User.id)){requireLogin();throw Error('登录已变更，请重新进入个人空间');}
   if(!owner){
-   const session=await nativeFetch(s7Path('/api/session')),value=session.ok?await session.json():null;
+   const session=await nativeFetch(s7Path('/api/session'),{signal:init?.signal}),value=session.ok?await session.json():null;
    if(session.status===401||(session.ok&&value?.user?.id!==s7User.id)){requireLogin();throw Error('登录已变更，请重新进入个人空间');}
    if(!session.ok)throw Error('认证服务暂时无法读取，请稍后重试');
   }
@@ -574,9 +574,10 @@ downloadSelectedButton.onclick=async()=>{
   await taskDraft?.flush();
   let blob,filename='任务图片.zip';
   if(currentTaskId&&s7User){
-   const response=await fetch(`/api/my-space/tasks/${currentTaskId}/download`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({urls:selected.map(output=>output.dataUrl.replace(/^\/s7(?=\/api\/)/,''))})});
+   const response=await fetch(`/api/my-space/tasks/${currentTaskId}/download`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({manifest:true,urls:selected.map(output=>output.dataUrl.replace(/^\/s7(?=\/api\/)/,''))})});
    if(!response.ok)throw Error((await response.json()).error||'图片下载失败');
-   blob=await response.blob();const name=response.headers.get('content-disposition')?.match(/filename\*=UTF-8''(.+)$/)?.[1];if(name)filename=decodeURIComponent(name);
+   const plan=await response.json(),{fetchArchive}=await import('./download-archive.mjs');filename=plan.filename;
+   blob=new Blob([await fetchArchive(plan.files,{request:fetch})],{type:'application/zip'});
   }else{
    const {zipStore}=await import('./download-archive.mjs'),files=[];let total=0;
    if(selected.length>200)throw Error('每次最多下载 200 张');

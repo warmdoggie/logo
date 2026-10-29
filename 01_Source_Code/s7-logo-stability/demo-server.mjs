@@ -158,6 +158,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
         const selected=[...new Set(input.urls)].map(url=>available.get(url));
         if(selected.some(image=>!image))throw Object.assign(Error('选择的图片不属于当前任务，请刷新后重试'),{status:400});
         const clean=value=>value.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').slice(0,120);
+        if(input.manifest===true){await ensureUser();json(res,200,{filename:clean(task.title)+'.zip',files:selected.map((image,index)=>({url:image.url,name:`${index+1}-${clean(image.label)}.png`}))});return;}
         const files=[];let total=0;
         for(const [index,image]of selected.entries()){
           const bytes=await spaces.image(user,image.recordId,image.name,id);total+=bytes.length;

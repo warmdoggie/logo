@@ -17,7 +17,7 @@ test('主工作区同一端口直接提供 S7 页面、静态资源和 API', {ti
   await new Promise((resolve,reject)=>{probe.once('error',reject);probe.listen(0,'127.0.0.1',resolve);});
   const port=probe.address().port;
   await new Promise(resolve=>probe.close(resolve));
-  const child=spawn(process.execPath,[join(root,'server.mjs')],{cwd:root,env:{...process.env,PORT:String(port),HOST:'127.0.0.1',APP_DATA_DIR:dir,APP_NO_SEED:'1',APP_MULTI_USER:'1',APP_PUBLIC_ORIGIN:'',S7_SPACE_DIR:join(dir,'user-spaces'),S7_AI_CONFIG:join(dir,'ai-provider.json')},stdio:'ignore'});
+  const child=spawn(process.execPath,[join(root,'server.mjs')],{cwd:root,env:{...process.env,LOGO_OSS_STORAGE_ROLE_ARN:'acs:ram::123456789012:role/LogoSchedulerStorageRole',PORT:String(port),HOST:'127.0.0.1',APP_DATA_DIR:dir,APP_NO_SEED:'1',APP_MULTI_USER:'1',APP_PUBLIC_ORIGIN:'',S7_SPACE_DIR:join(dir,'user-spaces'),S7_AI_CONFIG:join(dir,'ai-provider.json')},stdio:'ignore'});
   const base=`http://127.0.0.1:${port}`;
   try{
     let ready=false;
@@ -35,6 +35,8 @@ test('主工作区同一端口直接提供 S7 页面、静态资源和 API', {ti
     assert.equal(page.status,200);
     assert.match(await page.text(),/S7 Logo Stability/);
     assert.match(page.headers.get('content-security-policy'),/frame-ancestors 'self'/);
+    assert.match(page.headers.get('content-security-policy'),/img-src[^;]*https:\/\/heci-002\.oss-cn-heyuan\.aliyuncs\.com/);
+    assert.match(page.headers.get('content-security-policy'),/connect-src[^;]*https:\/\/heci-002\.oss-cn-heyuan\.aliyuncs\.com/);
     const script=await fetch(base+'/s7/demo.js');
     assert.equal(script.status,200);
     assert.match(await script.text(),/beginResultProgress/);
