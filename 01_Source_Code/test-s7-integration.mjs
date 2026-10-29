@@ -6,6 +6,8 @@ import {spawn} from 'node:child_process';
 import {createServer} from 'node:net';
 import {test} from 'node:test';
 import sharp from 'sharp';
+import {createSchemes} from './s7-logo-stability/schemes.mjs';
+import {copyProductPreset} from './s7-logo-stability/product-preset.mjs';
 
 const root=process.cwd();
 
@@ -25,6 +27,10 @@ test('主工作区同一端口直接提供 S7 页面、静态资源和 API', {ti
       await new Promise(resolve=>setTimeout(resolve,200));
     }
     assert.equal(ready,true,'主工作区应在测试端口启动');
+    const previewScript=await fetch(base+'/preview-fetch.js');
+    assert.equal(previewScript.status,200,'登录前也应能加载主界面依赖的预览脚本');
+    assert.match(previewScript.headers.get('content-type'),/javascript/);
+    assert.match(await previewScript.text(),/export function installPreviewImageFallback/);
     const page=await fetch(base+'/s7/');
     assert.equal(page.status,200);
     assert.match(await page.text(),/S7 Logo Stability/);
@@ -32,7 +38,7 @@ test('主工作区同一端口直接提供 S7 页面、静态资源和 API', {ti
     const script=await fetch(base+'/s7/demo.js');
     assert.equal(script.status,200);
     assert.match(await script.text(),/beginResultProgress/);
-    for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css','image-preview.mjs']){
+    for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css','image-preview.mjs','target-toolbar.mjs','product-preset.mjs']){
       const asset=await fetch(base+'/s7/'+file);
       assert.equal(asset.status,200,`新增资源应由主工作区提供：${file}`);
       assert.ok((await asset.text()).length>0);
@@ -67,7 +73,20 @@ test('主工作区同一端口直接提供 S7 页面、静态资源和 API', {ti
     assert.equal((await features.json()).multiLogo,true);
     const task=await fetch(base+'/s7/api/my-space/tasks',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({title:'集成测试任务'})});
     assert.equal(task.status,201);
-    assert.equal((await task.json()).title,'集成测试任务');
+    const createdTask=await task.json();
+    assert.equal(createdTask.title,'集成测试任务');
+    const source=createSchemes([{id:'a',carrierType:'BODY',x:.2,y:.3,widthRatio:.26,rotation:25,color:'#bc2345',preserveOriginalColor:false}]);
+    const master={id:'b',masterZoneId:'b-zone',carrierType:'BODY',x:.65,y:.55,widthRatio:.12,rotation:0};
+    const destination=createSchemes([{...master,x:.8,y:.8}]),copied=copyProductPreset(source,destination,[master]);
+    const state={multiPackageProducts:[{id:'a',sku:'A'},{id:'b',sku:'B'}],multiProductLayouts:[{productId:'b',masterTargets:[master],schemeState:copied,targets:copied.schemes[0].targets,activeScheme:'ORIGINAL',selectedTargetId:'b'}]};
+    const saved=await fetch(base+'/s7/api/my-space/tasks/'+createdTask.id,{method:'PUT',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({revision:createdTask.revision,state})});
+    assert.equal(saved.status,200);
+    const restored=await fetch(base+'/s7/api/my-space/tasks/'+createdTask.id,{headers:{cookie}});
+    assert.equal(restored.status,200);const layout=(await restored.json()).state.multiProductLayouts[0];
+    assert.equal(layout.targets[0].x,.65);assert.equal(layout.targets[0].y,.55);assert.equal(layout.targets[0].widthRatio,.26);assert.equal(layout.targets[0].rotation,25);assert.equal(layout.targets[0].color,'#bc2345');
+    assert.equal(layout.targets[0].id,'b');assert.equal(layout.targets[0].masterZoneId,'b-zone');
+    assert.equal(layout.masterTargets[0].x,.65);assert.equal(layout.masterTargets[0].widthRatio,.12);
+    assert.equal((await fetch(base+'/s7/api/my-space/tasks/'+createdTask.id)).status,401);
   }finally{
     child.kill();
     await new Promise(resolve=>child.once('exit',resolve));
