@@ -252,7 +252,11 @@ body { margin: 0; }
 .target-toolbar-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; }
 .target-toolbar-editor-head p { margin: 0; color: #68758d; font-size: 12px; }
 .target-toolbar-editor-head .button { flex-shrink: 0; font-size: 12px; }
-.target-toolbar-editor-actions { display: flex; flex-shrink: 0; gap: 8px; }
+.target-toolbar-editor-actions { display: flex; flex-shrink: 0; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; max-width: 100%; }
+.product-preset-options { display: inline-flex; align-items: center; gap: 10px; }
+.product-preset-options[hidden] { display: none; }
+.product-preset-options label { display: inline-flex; align-items: center; gap: 5px; margin: 0; color: #68758d; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.product-preset-options input { width: auto; margin: 0; accent-color: #5268c9; }
 .target-toolbar-editor-actions button:disabled { opacity: .55; cursor: wait; }
 .target-toolbar .targets { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(280px, 1fr); gap: 10px; overflow-x: auto; padding: 10px 2px; scroll-snap-type: x proximity; }
 .target-toolbar .target-row { min-width: 0; margin: 0; padding: 12px; border-radius: 8px; scroll-snap-align: start; }
