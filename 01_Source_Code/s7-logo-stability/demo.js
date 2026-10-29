@@ -368,7 +368,7 @@ function restoreMultiLogoGeneration(record){
     if(view){lastResultPayload=view.lastResultPayload;schemePhases=view.schemePhases;savedSignatures={...view.savedSignatures};const signatures=currentSignatures();for(const output of lastResultPayload.outputs)if(!savedSignatures[output.version])savedSignatures[output.version]=signatures[output.version];}
   }
   const done=Object.values(record.stages).filter(value=>value.stage==='complete').length,total=Object.keys(record.stages).length;
-  const text=multiPackageBusy?`后台生成中 · ${done}/${total} 张已保存`:done===total?`已生成完成 · ${done}/${total} 张`:`已保存 ${done}/${total} 张，失败方案可单独重试。`;
+  const text=multiPackageBusy?(record.providerActivationPending?'任务已排队，等待启用生成':`后台生成中 · ${done}/${total} 张已保存`):done===total?`已生成完成 · ${done}/${total} 张`:`已保存 ${done}/${total} 张，失败方案可单独重试。`;
   if(status.textContent!==text)setStatus(text,multiPackageBusy?'busy':done===total?'success':'error');
   notifyTask(text,multiPackageBusy);renderMultiProductResults();queueSchemeCards();updateGenerateButton();
 }
@@ -1021,7 +1021,7 @@ function restoreMultiProductGeneration(record){
   }
   const done=Object.values(record.stages).filter(value=>value.stage==='complete').length,total=Object.keys(record.stages).length;
   const failed=Object.values(record.stages).some(value=>value.stage==='failed');
-  const text=multiPackageBusy?`正在生成 · ${done}/${total} 张已完成`:done===total?'已生成完成':`已完成 ${done}/${total} 张，未完成图片可重新生成。`;
+  const text=multiPackageBusy?(record.providerActivationPending?'任务已排队，等待启用生成':`正在生成 · ${done}/${total} 张已完成`):done===total?'已生成完成':`已完成 ${done}/${total} 张，未完成图片可重新生成。`;
   if(status.textContent!==text)setStatus(text,multiPackageBusy?'busy':failed?'error':'success');
   notifyTask(text,multiPackageBusy);renderMultiProductResults();queueSchemeCards();updateGenerateButton();
   const next=multiPackageProducts[(multiPackageProducts.findIndex(product=>product.id===selectedMultiProductId)+1)%multiPackageProducts.length];
@@ -1039,7 +1039,7 @@ function restoreGeneration(record){
   const busy=record.status==='running',failed=Object.values(record.stages).filter(value=>value.stage==='failed').length;
   generationBusy=busy;queueSchemeCards();
   resultMeta.textContent=busy?'后台生成中 · 可继续编辑其他方案':failed?`${failed} 套方案可重试`:'生成结果已保存';
-  const text=busy?'正在后台生成，完成一张就展示一张。':record.status==='interrupted'?'服务已重启，已完成图片保留，可重试未完成方案。':failed?'已保留成功结果，失败方案可单独重试。':'方案已保存，可继续调整。';
+  const text=busy?(record.providerActivationPending?'任务已排队，等待启用生成':'正在后台生成，完成一张就展示一张。'):record.status==='interrupted'?'服务已重启，已完成图片保留，可重试未完成方案。':failed?'已保留成功结果，失败方案可单独重试。':'方案已保存，可继续调整。';
   if(status.textContent!==text)setStatus(text,busy?'busy':failed?'error':'success');
 }
 function generationRequest(versions,onlyVersion){

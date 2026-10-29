@@ -17,6 +17,8 @@ import {masterTargetsFromTemplate} from './product-master.mjs';
 import {createMultiLogoJobs} from './multi-logo-render.mjs';
 import {createMultiProductJobs} from './multi-product-jobs.mjs';
 import {zipStore} from '../zip.mjs';
+import {createScheduledGenerations} from './scheduled-generation.mjs';
+import {prepareGenerationImage} from './prepared-generation.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const MAX_BODY=50*1024*1024;
@@ -116,14 +118,15 @@ async function productImage(product,req){
   return {bytes:Buffer.from(await response.arrayBuffer()),contentType:response.headers.get('content-type')||'application/octet-stream'};
 }
 
-export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus(),aiMockupStatus=()=>getAiMockupProviderStatus(),mockupRenderer=createAiMockupRenderer(),productCatalog=loadProductCatalog,productTemplate=loadProductTemplate,logoCatalog=loadWorkspaceLogoLibrary,logoImage=loadWorkspaceLogoImage,saveLogoToLibrary=saveWorkspaceLogo,authenticate=process.env.APP_MULTI_USER==='1'?authenticateWorkspace:null,spaceDir=process.env.S7_SPACE_DIR||join(ROOT,'..','data','user-spaces'),multiLogoEnabled=process.env.S7_MULTI_LOGO_ENABLED!=='0'}={}){
+export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus(),aiMockupStatus=()=>getAiMockupProviderStatus(),mockupRenderer=createAiMockupRenderer(),productCatalog=loadProductCatalog,productTemplate=loadProductTemplate,logoCatalog=loadWorkspaceLogoLibrary,logoImage=loadWorkspaceLogoImage,saveLogoToLibrary=saveWorkspaceLogo,authenticate=process.env.APP_MULTI_USER==='1'?authenticateWorkspace:null,spaceDir=process.env.S7_SPACE_DIR||join(ROOT,'..','data','user-spaces'),multiLogoEnabled=process.env.S7_MULTI_LOGO_ENABLED!=='0',schedulerOptions}={}){
   const spaces=userSpace(spaceDir);
+  const scheduled=createScheduledGenerations({...schedulerOptions,spaces});
   const readLogo=async(input,user)=>input.logoAssetUrl?(await spaces.taskAssetFromUrl(user,input.taskId,input.logoAssetUrl)).bytes:Buffer.from(input.logoImage||'','base64');
   const readBase=async(input,user)=>input.baseAssetUrl?(await spaces.taskAssetFromUrl(user,input.taskId,input.baseAssetUrl)).bytes:Buffer.from(input.baseImage||'','base64');
   const jobs=createGenerationJobs(spaces);
-  const multiLogoJobs=createMultiLogoJobs(spaces,mockupRenderer);
-  const multiProductJobs=createMultiProductJobs(spaces,{productTemplate,productImage,mockupRenderer});
-  const readGeneration=async(user,id)=>{const record=await spaces.generation(user,id);if(record?.kind==='multi-logo')return multiLogoJobs.read(user,id);if(record?.status==='running'&&record.kind!=='multi-product')return jobs.read(user,id);return multiProductJobs.read(user,id);};
+  const multiLogoJobs=createMultiLogoJobs(spaces,mockupRenderer,scheduled);
+  const multiProductJobs=createMultiProductJobs(spaces,{productTemplate,productImage,mockupRenderer,scheduled});
+  const readGeneration=async(user,id)=>{const record=scheduled?await scheduled.read(user,id):await spaces.generation(user,id);if(record?.scheduler)return record;if(record?.kind==='multi-logo')return multiLogoJobs.read(user,id);if(record?.status==='running'&&record.kind!=='multi-product')return jobs.read(user,id);return multiProductJobs.read(user,id);};
   return async(req,res)=>{
     try{
       const url=new URL(req.url||'/',`http://${req.headers.host||'localhost'}`);
@@ -247,6 +250,7 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
       }
       if(req.method==='POST'&&url.pathname==='/api/ai-render-multi'){
         const input=await body(req),productIds=input.productIds;
+        if(scheduled&&input.background!==true)throw Object.assign(Error('请在个人任务中使用后台生成'),{status:400});
         if(!Array.isArray(productIds)||productIds.length<2||productIds.some(id=>typeof id!=='string')||new Set(productIds).size!==productIds.length)throw Object.assign(Error('请选择至少两个且不重复的产品包材'),{status:400});
         const layouts=input.productLayouts??[];
         if(!Array.isArray(layouts)||layouts.some(layout=>!layout||!productIds.includes(layout.productId))||new Set(layouts.map(layout=>layout.productId)).size!==layouts.length)throw Object.assign(Error('产品方案与所选包材不匹配'),{status:400});
@@ -303,10 +307,20 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
       }
       if(req.method==='POST'&&url.pathname==='/api/ai-render'){
         const input=await body(req);
+        if(scheduled&&input.background!==true)throw Object.assign(Error('请在个人任务中使用后台生成'),{status:400});
         const selectedVersions=selectGenerationVersions(input);
         if(user&&input.taskId){const task=await spaces.task(user,input.taskId);if(task.state?.mode==='multi-logo')throw Object.assign(Error('请从多 Logo 上样页面生成此任务'),{status:400});}
         const baseImage=await readBase(input,user);
         const logoImage=await readLogo(input,user);
+        if(scheduled&&input.background===true){
+          if(!user||!input.taskId)throw Object.assign(Error('后台生成需要登录并选择任务'),{status:400});
+          const previous=await readGeneration(user,input.taskId);
+          if(previous?.status==='running')throw Object.assign(Error('当前任务正在生成，请等待完成'),{status:409});
+          const prepared=await prepareGenerationImage({...input,baseImage,logoImage,selectedVersions});
+          const preserve=input.onlyVersion||input.preserveResults===true;
+          const metadata={...prepared.metadata,model:input.model,onlyVersion:input.onlyVersion,selectedVersions,schemeSignatures:input.schemeSignatures,outputs:preserve?previous?.outputs||[]:[],stages:preserve?previous?.stages||{}:{}};
+          json(res,202,await scheduled.start(user,input.taskId,metadata,[{input:prepared.input,schemeSignatures:input.schemeSignatures}]));return;
+        }
         const basePng=await sharp(baseImage).png().toBuffer();
         const logoMeta=await sharp(logoImage).metadata();
         const guideSet=await renderLogoSet({baseImage:basePng,logoImage,targets:input.targets,schemes:input.schemes,originalColor:input.originalColor});

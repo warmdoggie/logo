@@ -36,6 +36,15 @@ export function getAiMockupProviderStatus(configPath=process.env.S7_AI_CONFIG||D
   return {configured:!!config,provider:config?.provider||null,defaultModel:config?.model||null,models:config?.models||[]};
 }
 
+export function mockupResumeCheckpoint(plan,checkpoint,configPath=process.env.S7_AI_CONFIG||DEFAULT_CONFIG){
+  if(!checkpoint)return null;
+  const config=configAt(configPath);if(!config)return null;
+  const {local,...original}=plan;
+  const hash=createHash('sha256').update(JSON.stringify([config.endpoint,config.apiKey,original])).digest('hex');
+  if(checkpoint.requestHash!==hash||(!checkpoint.taskId&&!checkpoint.imageUrl))return null;
+  return {...(checkpoint.taskId?{taskId:checkpoint.taskId}:{}),...(checkpoint.imageUrl?{imageUrl:checkpoint.imageUrl}:{})};
+}
+
 function selectedModel(config,requestedModel){
   if(requestedModel===undefined||requestedModel===null||requestedModel==='')return config.model;
   if(typeof requestedModel!=='string'||!config.models.includes(requestedModel))throw Error(`请求的 AI 成图模型未配置或不可用：${requestedModel}`);
@@ -55,7 +64,7 @@ async function download(urlValue,{transport,signal}){
   return bytes;
 }
 
-async function preservePrintSurface(plan,generatedImage){
+export async function preservePrintSurface(plan,generatedImage){
   if(!plan.maskImage||!plan.placementGuide)return generatedImage;
   const imageBytes=value=>Buffer.from(value.slice(value.indexOf(',')+1),'base64');
   return lockOutsideLogo({baseImage:imageBytes(plan.baseImage),generatedImage,guideImage:imageBytes(plan.placementGuide),maskImage:imageBytes(plan.maskImage),foilMaskImage:plan.foilMaskImage?imageBytes(plan.foilMaskImage):undefined,goldMaskImage:plan.goldMaskImage?imageBytes(plan.goldMaskImage):undefined,surfaceResponse:!!plan.foilMaskImage,feather:0,useGeneratedLighting:!!plan.foilMaskImage||plan.version==='GOLD FOIL'||plan.version==='SILVER FOIL',foilFinish:plan.goldMaskImage||plan.version==='GOLD FOIL'?'gold':undefined});
@@ -68,8 +77,10 @@ async function hasMaskPixels(dataUrl){
   return pixels.some(value=>value>0);
 }
 
+export async function isLocalSilver(plan){return plan.version==='SILVER FOIL'&&!!plan.foilMaskImage&&!await hasMaskPixels(plan.goldMaskImage);}
+
 async function renderSilverLocally(plan,{onStage}){
-  if(plan.version!=='SILVER FOIL'||!plan.foilMaskImage||await hasMaskPixels(plan.goldMaskImage))return null;
+  if(!await isLocalSilver(plan))return null;
   try{await onStage?.(plan.version,'generating');}catch{}
   const imageBytes=value=>Buffer.from(value.slice(value.indexOf(',')+1),'base64');
   const bytes=await preservePrintSurface(plan,imageBytes(plan.baseImage));

@@ -1,0 +1,41 @@
+name: logo-scheduler
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: logo-scheduler-postgres
+    env_file: /etc/logo-scheduler/database.env
+    command: ["postgres", "-c", "shared_buffers=128MB", "-c", "max_connections=30", "-c", "max_wal_size=256MB"]
+    volumes: ["/var/lib/logo-scheduler/postgres:/var/lib/postgresql/data"]
+    networks: [database]
+    mem_limit: 512m
+    memswap_limit: 512m
+    cpus: 0.5
+    pids_limit: 100
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scheduler -d scheduler"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "3"}}
+  redis:
+    image: redis:7-alpine
+    container_name: logo-scheduler-redis
+    env_file: /etc/logo-scheduler/database.env
+    command: ["sh", "-c", "exec redis-server --appendonly yes --appendfsync everysec --maxmemory 160mb --maxmemory-policy noeviction --requirepass \"$$REDIS_PASSWORD\""]
+    volumes: ["/var/lib/logo-scheduler/redis:/data"]
+    networks: [database]
+    mem_limit: 256m
+    memswap_limit: 256m
+    cpus: 0.25
+    pids_limit: 50
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "3"}}
+networks:
+  database:
+    internal: true

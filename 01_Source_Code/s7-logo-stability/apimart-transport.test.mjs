@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {createApimartTransport} from './apimart-transport.mjs';
 
+test('bounded background downloads reject oversized streamed responses',async()=>{
+ const request=createApimartTransport({maxResponseBytes:4,transport:async()=>new Response(new Uint8Array(5))});
+ await assert.rejects(request('https://images.getapib.org/fixture.png'),/response_too_large/);
+});
+
 const disconnected=()=>Object.assign(new TypeError('fetch failed'),{cause:{code:'UND_ERR_SOCKET'}});
 
 test('APIMart retries interrupted reads without resubmitting a generation',async()=>{

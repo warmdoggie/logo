@@ -6,15 +6,17 @@ import {masterTargetsFromTemplate} from './product-master.mjs';
 import {renderLogoSet} from './index.mjs';
 import {pickAspectRatio} from './ai-mockup-generation.mjs';
 import {runBatches} from './batch-queue.mjs';
+import {prepareGenerationImage} from './prepared-generation.mjs';
 
 const key=(id,version)=>`${id}:${version}`;
 const dataUrl=bytes=>`data:image/png;base64,${bytes.toString('base64')}`;
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 
-export function createMultiProductJobs(spaces,{productTemplate,productImage,mockupRenderer}){
+export function createMultiProductJobs(spaces,{productTemplate,productImage,mockupRenderer,scheduled}){
  const active=new Map(),taskKey=(user,id)=>`${user.id}:${id}`;
  async function read(user,taskId){
   let record=await spaces.generation(user,taskId);
+  if(record?.scheduler&&scheduled)return scheduled.read(user,taskId);
   if(!record||(!['multi-product','multi-logo'].includes(record.kind)&&record.status!=='running')){
    const task=await spaces.task(user,taskId),products=task.state?.multiPackageProducts;
    if(!Array.isArray(products)||products.length<2)return record;
@@ -51,6 +53,14 @@ export function createMultiProductJobs(spaces,{productTemplate,productImage,mock
    prepared.push({product:{id:String(product.id),sku:String(product.sku||''),name:String(product.name||'')},base,targets,schemes,schemeSignatures:edited?.schemeSignatures||{}});
   }
   if(active.has(activeKey))fail('当前任务正在生成，请等待完成',409);
+  if(scheduled){
+   const inputs=[];
+   for(const {product,base,targets,schemes,schemeSignatures} of prepared.filter(({product})=>!input.onlyProductId||product.id===input.onlyProductId)){
+    const image=await prepareGenerationImage({...input,baseImage:base,logoImage:logo,targets,schemes,selectedVersions:selected});
+    inputs.push({input:image.input,output:{productId:product.id},schemeSignatures,label:product.sku});
+   }
+   return scheduled.start(user,taskId,{kind:'multi-product',model:input.model,products:prepared.map(item=>item.product),outputs:previous?.kind==='multi-product'?(previous.outputs||[]).filter(output=>products.some(product=>String(product.id)===output.productId)):[],stages:input.onlyProductId?previous.stages:{}},inputs);
+  }
   const id=randomUUID();active.set(activeKey,id);
   let job;
   try{job=await spaces.updateGeneration(user,taskId,current=>{

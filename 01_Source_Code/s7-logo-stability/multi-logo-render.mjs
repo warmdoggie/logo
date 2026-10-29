@@ -6,16 +6,18 @@ import {createSchemes} from './schemes.mjs';
 import {renderLogoSet} from './index.mjs';
 import {pickAspectRatio} from './ai-mockup-generation.mjs';
 import {runBatches} from './batch-queue.mjs';
+import {prepareGenerationImage} from './prepared-generation.mjs';
 
 const fail=(message,status=400)=>{throw Object.assign(Error(message),{status});};
 const dataUrl=bytes=>`data:image/png;base64,${bytes.toString('base64')}`;
 const key=(id,version)=>`${id}:${version}`;
 
 // Runs multi-logo batches from both ordinary tasks and saved legacy tasks.
-export function createMultiLogoJobs(spaces,mockupRenderer){
+export function createMultiLogoJobs(spaces,mockupRenderer,scheduled){
  const active=new Map(),taskKey=(user,id)=>`${user.id}:${id}`;
  async function read(user,taskId){
   const record=await spaces.generation(user,taskId);
+  if(record?.scheduler&&scheduled)return scheduled.read(user,taskId);
   if(record?.kind==='multi-logo'&&record.status==='running'&&active.get(taskKey(user,taskId))!==record.id){
    return spaces.updateGeneration(user,taskId,current=>current.kind!=='multi-logo'||current.id!==record.id||current.status!=='running'||active.get(taskKey(user,taskId))===current.id?current:{...current,status:'interrupted',stages:Object.fromEntries(Object.entries(current.stages).map(([id,value])=>[id,value.stage==='complete'?value:{stage:'failed',error:'服务重启导致生成中断，请重试未完成图片'}]))});
   }
@@ -51,6 +53,15 @@ export function createMultiLogoJobs(spaces,mockupRenderer){
   if(retry&&(!previous||previous.kind!=='multi-logo'||previous.logos.length!==logos.length||logos.some(logo=>previous.logos.find(old=>old.id===logo.id)?.fingerprint!==logo.fingerprint)))fail('素材、产品或模型已修改，请重新生成全部 Logo',409);
   const selected=new Map(logos.map(logo=>[logo.id,input.onlyLogoId&&logo.id!==input.onlyLogoId?[]:requested.filter(version=>!retry||(previous.stages[key(logo.id,version)]&&previous.stages[key(logo.id,version)].stage!=='complete'))]));
   if(![...selected.values()].some(list=>list.length))fail('所有图片均已完成');
+  if(scheduled){
+   const inputs=[];
+   for(const logo of logos.filter(logo=>selected.get(logo.id).length)){
+    const prepared=await prepareGenerationImage({baseImage:basePng,logoImage:logo.bytes,targets:logo.targets,schemes:logo.schemes,model:input.model,selectedVersions:selected.get(logo.id)});
+    inputs.push({input:prepared.input,output:{logoId:logo.id,logoName:logo.name},schemeSignatures:logo.schemeSignatures,label:`${input.product.sku} · ${logo.name}`});
+   }
+   const preserve=retry||input.onlyLogoId;
+   return scheduled.start(user,taskId,{kind:'multi-logo',product:input.product,model:input.model,logos:logos.map(({id,name,fingerprint})=>({id,name,fingerprint})),outputs:preserve?previous.outputs.filter(output=>logos.some(logo=>logo.id===output.logoId)):[],stages:preserve?Object.fromEntries(Object.entries(previous.stages).filter(([id])=>logos.some(logo=>id.startsWith(logo.id+':')))):{}},inputs);
+  }
   const job=await spaces.updateGeneration(user,taskId,current=>{
    if(current?.status==='running')fail('当前任务正在生成，请等待完成',409);
    const stamp=new Date().toISOString();

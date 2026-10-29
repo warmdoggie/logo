@@ -1,0 +1,1 @@
+{"name":"logo-generation-scheduler","version":"0.1.0","private":true,"type":"module","engines":{"node":">=24"},"scripts":{"test":"node --test *.test.mjs","api":"node api.mjs","worker":"node worker.mjs","images":"node worker.mjs images"},"dependencies":{"bullmq":"^5.63.0","ioredis":"^5.8.0","pg":"^8.16.0","sharp":"0.35.4"}}

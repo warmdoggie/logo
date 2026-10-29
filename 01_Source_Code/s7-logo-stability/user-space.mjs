@@ -62,10 +62,13 @@ export function userSpace(root){
    await rm(folder,{recursive:true,force:true});
   });
  }
- async function save(user,{taskId,kind,model,images}){
+ async function save(user,{taskId,kind,model,images,recordId}){
   const persist=async()=>{
   if(taskId)await ensureTask(user,taskId);
-  const parent=directory(user),id=randomUUID(),pending=join(parent,'.'+id),target=join(parent,id);await mkdir(pending,{recursive:true});
+  if(recordId&&!/^[0-9a-f-]{36}$/.test(recordId))fail('结果编号无效',400);
+  const parent=directory(user),id=recordId||randomUUID(),pending=join(parent,'.'+randomUUID()),target=join(parent,id);
+  if(recordId){try{const existing=JSON.parse(await readFile(join(target,'record.json'),'utf8'));if(existing.taskId!==taskId||existing.kind!==kind||existing.model!==(model||null)||existing.images.map(image=>image.label).join('\n')!==images.map(image=>image.label).join('\n'))fail('结果编号冲突',409);return existing;}catch(error){if(error.code!=='ENOENT')throw error;}}
+  await mkdir(pending,{recursive:true});
   try{const entries=[];for(let i=0;i<images.length;i++){const image=images[i],name=`image-${i}.png`;await writeFile(join(pending,name),image.bytes,{flag:'wx'});entries.push({name,label:image.label,url:taskId?`/api/my-space/tasks/${taskId}/image/${id}/${name}`:`/api/my-space/image/${id}/${name}`});}
    const record={id,taskId:taskId||null,kind,model:model||null,createdAt:new Date().toISOString(),images:entries};await writeFile(join(pending,'record.json'),JSON.stringify(record),{flag:'wx'});await rename(pending,target);return record;
   }catch(error){await rm(pending,{recursive:true,force:true});throw error;}

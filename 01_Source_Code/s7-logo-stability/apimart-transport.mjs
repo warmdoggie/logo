@@ -11,7 +11,7 @@ function proxyAgent(proxyUrl){
   return agents.get(normalized);
 }
 
-export function createApimartTransport({proxyUrl='',transport=fetch}={}){
+export function createApimartTransport({proxyUrl='',transport=fetch,maxResponseBytes=Infinity}={}){
   const dispatcher=proxyAgent(proxyUrl);
   return async(url,options={})=>{
     const method=String(options.method||'GET').toUpperCase();
@@ -32,7 +32,13 @@ export function createApimartTransport({proxyUrl='',transport=fetch}={}){
             return response;
           }
           // A connection can break after headers, while reading JSON or the image.
-          const bytes=await response.arrayBuffer();
+          let bytes;
+          if(Number.isFinite(maxResponseBytes)){
+            if(Number(response.headers.get('content-length'))>maxResponseBytes){await response.body.cancel();throw Error('response_too_large');}
+            const chunks=[];let size=0;
+            for await(const chunk of response.body){size+=chunk.length;if(size>maxResponseBytes)throw Error('response_too_large');chunks.push(chunk);}
+            bytes=Buffer.concat(chunks);
+          }else bytes=await response.arrayBuffer();
           const completeResponse=new Response(bytes,{status:response.status,statusText:response.statusText,headers:response.headers});
           if(!completeResponse.ok&&routeIndex+1<routes.length){lastResponse=completeResponse;break;}
           return completeResponse;

@@ -53,7 +53,7 @@ function renderJob(record){
   }group.append(cards);$('results').append(group);
  }
  const total=record.logos.length*4;$('progress').textContent=`${record.product.sku} · ${record.outputs.length}/${total} 张已保存`;
- status(record.status==='running'?`后台生成中 · 已保存 ${record.outputs.length}/${total} 张，可切换任务或刷新页面。`:record.status==='complete'?`已完成：${record.logos.length} 个 Logo，共 ${record.outputs.length} 张效果图。`:`已保存 ${record.outputs.length}/${total} 张，未完成图片可单独重试。`,['partial','failed','interrupted'].includes(record.status));controls();
+ status(record.status==='running'?(record.providerActivationPending?'任务已排队，等待启用生成':`后台生成中 · 已保存 ${record.outputs.length}/${total} 张，可切换任务或刷新页面。`):record.status==='complete'?`已完成：${record.logos.length} 个 Logo，共 ${record.outputs.length} 张效果图。`:`已保存 ${record.outputs.length}/${total} 张，未完成图片可单独重试。`,['partial','failed','interrupted'].includes(record.status));controls();
 }
 async function refreshHistory(){const records=await api('/api/my-space/history?taskId='+encodeURIComponent(taskId));$('history').replaceChildren();for(const record of records.filter(record=>record.kind==='多 Logo 印刷效果'))for(const image of record.images){const link=element('a',`${new Date(record.createdAt).toLocaleString()} · ${image.label}`);link.href=path(image.url);link.download=image.label+'.png';$('history').append(link);}}
 async function generate(retryFailed=false){
