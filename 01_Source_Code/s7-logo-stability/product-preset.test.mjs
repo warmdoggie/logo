@@ -13,6 +13,40 @@ async function copyPreset(){
 }
 const target=(id,carrierType='BODY')=>({id,carrierType,x:.5,y:.5,widthRatio:.15,rotation:0,curve:0,surface:'free',color:'#000000',preserveOriginalColor:true,autoContrast:true,masterZoneId:id,masterLocked:true});
 
+for(let mask=0;mask<16;mask++)test(`四维同步组合 ${mask} 只改变勾选的大小、颜色、工艺和角度`,async()=>{
+  const copy=await copyPreset(),names=['size','color','printFinish','rotation'];
+  const options=Object.fromEntries(names.map((name,index)=>[name,Boolean(mask&(1<<index))]));
+  const source=createSchemes([{...target('a'),widthRatio:.28,rotation:35,color:'#bc2345',printFinish:'INK',autoContrast:false,preserveOriginalColor:false}]);
+  const destination=createSchemes([{...target('b'),widthRatio:.18,rotation:-20,color:'#123456',printFinish:'GOLD FOIL'}]);
+  destination.schemes[1].independentGeometry=true;destination.schemes[1].targets[0].rotation=-45;
+  const before=structuredClone(destination),copied=copy(source,destination,destination.sharedTargets,options);
+  for(const [result,previous,preset] of [[copied.sharedTargets[0],before.sharedTargets[0],source.sharedTargets[0]],...copied.schemes.map((scheme,i)=>[scheme.targets[0],before.schemes[i].targets[0],source.schemes[i].targets[0]])]){
+    for(const [key,selected]of [['widthRatio',options.size],['rotation',options.rotation],['color',options.color],['autoContrast',options.color],['preserveOriginalColor',options.color],['printFinish',options.printFinish]])assert.deepEqual(result[key],(selected?preset:previous)[key],`${mask}: ${key}`);
+  }
+  assert.deepEqual(destination,before);
+  if(options.size!==options.rotation)assert.equal(copied.schemes[1].independentGeometry,true,'单项几何同步不能清除接收方案原有的独立布局');
+});
+
+for(const dimension of ['size','rotation'])test(`仅同步${dimension==='size'?'大小':'角度'}时，四点区域保留当前位置和另一项几何设置`,async()=>{
+  const copy=await copyPreset(),source=createSchemes([{...target('a'),widthRatio:.4,rotation:90}]);
+  const destination=createSchemes([{...target('b'),x:.6,y:.5,widthRatio:.2,quad:[{x:.5,y:.45},{x:.7,y:.45},{x:.7,y:.55},{x:.5,y:.55}]}]);
+  const options={size:false,color:false,printFinish:false,rotation:false,[dimension]:true};
+  const copied=copy(source,destination,[{...target('b'),x:.9}],options),result=copied.schemes[0].targets[0];
+  assert.equal(result.x,.6);assert.equal(result.y,.5);
+  assert.deepEqual(result.quad,dimension==='size'?[{x:.4,y:.4},{x:.8,y:.4},{x:.8,y:.6},{x:.4,y:.6}]:[{x:.65,y:.4},{x:.65,y:.6},{x:.55,y:.6},{x:.55,y:.4}]);
+  assert.equal(result.widthRatio,dimension==='size'?.4:.2);assert.equal(result.rotation,dimension==='rotation'?90:0);
+});
+
+for(const dimension of ['size','rotation'])test(`四点中心偏离锚点时，仅同步相同${dimension==='size'?'大小':'角度'}不能导致区域跳位`,async()=>{
+  const copy=await copyPreset(),source=createSchemes([{...target('a'),widthRatio:.2}]);
+  const quad=[{x:.5,y:.5},{x:.7,y:.5},{x:.7,y:.6},{x:.5,y:.6}];
+  const destination=createSchemes([{...target('b'),widthRatio:.2,quad}]);
+  const options={size:false,color:false,printFinish:false,rotation:false,[dimension]:true};
+  const copied=copy(source,destination,[],options);
+  assert.deepEqual(copied.schemes[0].targets[0].quad,quad);
+  assert.deepEqual(copied.sharedTargets[0].quad,quad);
+});
+
 test('按载体及出现顺序复制各方案的大小、角度和颜色，保留接收产品的区域标识',async()=>{
   const copy=await copyPreset();
   const source=createSchemes([target('source-body'),target('source-box','CARTON_FRONT'),target('source-body-2')]);
@@ -63,11 +97,11 @@ test('只同步颜色时保留每个方案的位置、大小、角度、透视�
   const copy=await copyPreset(),source=createSchemes([{...target('source'),widthRatio:.9,rotation:90,color:'#bc2345',printFinish:'INK',preserveOriginalColor:false,autoContrast:true}]);
   const destination=createSchemes([{...target('recipient'),x:.7,y:.6,widthRatio:.18,rotation:15,quad:[{x:.6,y:.5},{x:.8,y:.5},{x:.79,y:.7},{x:.61,y:.7}],color:'#112233',printFinish:'GOLD FOIL'}]);
   destination.schemes[1].independentGeometry=true;destination.schemes[1].targets[0].rotation=-30;
-  const before=structuredClone(destination),copied=copy(source,destination,[],{geometry:false,color:true});
+  const before=structuredClone(destination),copied=copy(source,destination,[],{size:false,rotation:false,color:true,printFinish:false});
   for(let i=0;i<copied.schemes.length;i++){
     const result=copied.schemes[i].targets[0],previous=before.schemes[i].targets[0];
     for(const key of ['x','y','widthRatio','rotation','quad'])assert.deepEqual(result[key],previous[key],key);
-    assert.equal(copied.schemes[i].independentGeometry,before.schemes[i].independentGeometry);assert.equal(result.color,'#bc2345');assert.equal(result.printFinish,'INK');assert.equal(result.preserveOriginalColor,false);assert.equal(result.autoContrast,true);
+    assert.equal(copied.schemes[i].independentGeometry,before.schemes[i].independentGeometry);assert.equal(result.color,'#bc2345');assert.equal(result.printFinish,'GOLD FOIL');assert.equal(result.preserveOriginalColor,false);assert.equal(result.autoContrast,true);
   }
   assert.equal(copied.sharedTargets[0].widthRatio,.18);assert.deepEqual(destination,before);
 });
@@ -75,27 +109,35 @@ test('只同步颜色时保留每个方案的位置、大小、角度、透视�
 test('只同步大小角度时，颜色、工艺和自动配色均保留接收产品原有设置',async()=>{
   const copy=await copyPreset(),source=createSchemes([{...target('source'),widthRatio:.25,rotation:45,color:'#bc2345',printFinish:'INK',autoContrast:true,preserveOriginalColor:false}]);
   const destination=createSchemes([{...target('recipient'),x:.7,y:.6,color:'#123456',printFinish:'GOLD FOIL',autoContrast:false}]);
-  const copied=copy(source,destination,destination.sharedTargets,{geometry:true,color:false});
+  const copied=copy(source,destination,destination.sharedTargets,{size:true,rotation:true,color:false,printFinish:false});
   for(const scheme of copied.schemes){const t=scheme.targets[0];assert.equal(t.widthRatio,.25);assert.equal(t.rotation,45);assert.equal(t.color,'#123456');assert.equal(t.printFinish,'GOLD FOIL');assert.equal(t.autoContrast,false);assert.equal(t.preserveOriginalColor,true);}
 });
 
-test('两个同步项都未选中时不修改任何布局',async()=>{
+test('四个同步项都未选中时不修改任何布局',async()=>{
   const copy=await copyPreset(),source=createSchemes([{...target('source'),widthRatio:.9,color:'#ff0000'}]),destination=createSchemes([{...target('recipient'),x:.8}]);
-  assert.deepEqual(copy(source,destination,[],{geometry:false,color:false}),destination);
+  assert.deepEqual(copy(source,destination,[],{size:false,rotation:false,color:false,printFinish:false}),destination);
 });
 
-test('界面只选颜色时跳过母版校验，两个选项都取消时不保存或修改任务',async()=>{
+test('界面只选颜色时跳过母版校验，四个选项都取消时不保存或修改任务',async()=>{
   const copy=await copyPreset(),source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
-  const nodes={'#copy-preset-geometry':{checked:false},'#copy-preset-color':{checked:true}};
-  const sourceState=createSchemes([{...target('a'),widthRatio:.9,rotation:90,color:'#bc2345',preserveOriginalColor:false}]);
-  const recipient={schemeState:createSchemes([{...target('b'),x:.7,widthRatio:.18,rotation:15}]),activeScheme:'ORIGINAL',placementScope:'current'};
+  const nodes={'#copy-preset-size':{checked:false},'#copy-preset-rotation':{checked:false},'#copy-preset-print-finish':{checked:false},'#copy-preset-color':{checked:true}};
+  const sourceState=createSchemes([{...target('a'),widthRatio:.3,rotation:90,color:'#bc2345',printFinish:'INK',preserveOriginalColor:false}]);
+  const recipient={schemeState:createSchemes([{...target('b'),x:.7,widthRatio:.18,rotation:15,printFinish:'GOLD FOIL'}]),activeScheme:'ORIGINAL',placementScope:'current'};
   let saves=0;
   const c=vm.createContext({structuredClone,copyProductPreset:copy,copyingProductPreset:false,generationBusy:false,multiPackageBusy:false,logoSelectionBusy:false,selectedMultiProductId:'a',loadedMultiProductId:'a',multiPackageProducts:[{id:'a'},{id:'b'}],multiProductViews:new Map([['b',recipient]]),schemeState:sourceState,document:{querySelector:selector=>nodes[selector]},saveMultiProductView(){saves++;},updateGenerateButton(){},queueSchemeCards(){},renderMultiProductResults(){},loadSchemeTargets(){},setStatus(){},taskDraft:{schedule(){saves++;}}});
   vm.runInContext(source.slice(source.indexOf('async function applyPresetToOtherProducts()'),source.indexOf('function saveMultiLogoView(){')),c);
   c.loadPresetMasterTargets=async()=>assert.fail('只改颜色不应校验或重载产品母版');c.loadMultiProductView=async()=>recipient;
   await c.applyPresetToOtherProducts();
   const copied=c.multiProductViews.get('b');assert.equal(copied.schemeState.schemes[0].targets[0].color,'#bc2345');assert.equal(copied.schemeState.schemes[0].targets[0].widthRatio,.18);assert.equal(copied.schemeState.schemes[0].targets[0].rotation,15);assert.equal(copied.schemeState.schemes[0].targets[0].x,.7);assert.equal(copied.placementScope,'current');
-  const before=structuredClone(copied),saved=saves;nodes['#copy-preset-color'].checked=false;await c.applyPresetToOtherProducts();assert.equal(saves,saved);assert.deepEqual(structuredClone(c.multiProductViews.get('b')),before);
+  nodes['#copy-preset-color'].checked=false;
+  for(const [name,key]of [['size','widthRatio'],['print-finish','printFinish'],['rotation','rotation']]){
+    const previous=structuredClone(c.multiProductViews.get('b').schemeState.schemes[0].targets[0]);nodes['#copy-preset-'+name].checked=true;
+    await c.applyPresetToOtherProducts();nodes['#copy-preset-'+name].checked=false;
+    const result=c.multiProductViews.get('b').schemeState.schemes[0].targets[0];
+    assert.equal(result[key],sourceState.schemes[0].targets[0][key],name);
+    for(const untouched of ['widthRatio','rotation','color','printFinish','x','y'].filter(field=>field!==key))assert.deepEqual(result[untouched],previous[untouched],`${name}: ${untouched}`);
+  }
+  const before=structuredClone(c.multiProductViews.get('b')),saved=saves;await c.applyPresetToOtherProducts();assert.equal(saves,saved);assert.deepEqual(structuredClone(c.multiProductViews.get('b')),before);
 });
 
 test('一键复制会加载未打开的产品，保存最新编辑，并让保存和生成读取复制后的布局',async()=>{
@@ -145,6 +187,6 @@ test('同步配置期间，普通生成和重新生成都不能提交旧布局',
     const start=source.indexOf(`async function ${name}(`),end=source.indexOf('\n}',start)+2;
     vm.runInContext(source.slice(start,end),c);await c[name](['ORIGINAL']);
   }
-  c.copyingProductPreset=false;buttons.get('#copy-preset-geometry').checked=false;buttons.get('#copy-preset-color').checked=true;c.updateGenerateButton();assert.equal(buttons.get('#apply-product-preset').disabled,false);
+  c.copyingProductPreset=false;for(const name of ['size','rotation','print-finish'])buttons.get('#copy-preset-'+name).checked=false;buttons.get('#copy-preset-color').checked=true;c.updateGenerateButton();assert.equal(buttons.get('#apply-product-preset').disabled,false);
   buttons.get('#copy-preset-color').checked=false;c.updateGenerateButton();assert.equal(buttons.get('#apply-product-preset').disabled,true);
 });

@@ -237,14 +237,14 @@ async function loadMultiProductView(product){
 
 async function applyPresetToOtherProducts(){
   if(copyingProductPreset||generationBusy||multiPackageBusy||logoSelectionBusy||selectedMultiProductId!==loadedMultiProductId||multiPackageProducts.length<2)return;
-  const options={geometry:document.querySelector('#copy-preset-geometry').checked,color:document.querySelector('#copy-preset-color').checked};
-  if(!options.geometry&&!options.color)return;
+  const options={size:document.querySelector('#copy-preset-size').checked,color:document.querySelector('#copy-preset-color').checked,printFinish:document.querySelector('#copy-preset-print-finish').checked,rotation:document.querySelector('#copy-preset-rotation').checked};
+  if(!Object.values(options).some(Boolean))return;
   saveMultiProductView();
   const sourceId=loadedMultiProductId,preset=structuredClone(schemeState),products=multiPackageProducts.filter(product=>product.id!==sourceId);
   copyingProductPreset=true;updateGenerateButton();queueSchemeCards();
   try{
     const masterTargets=new Map(await Promise.all(products.map(async product=>{
-      if(options.geometry)return [product.id,await loadPresetMasterTargets(product)];
+      if(options.size&&options.rotation)return [product.id,await loadPresetMasterTargets(product)];
       await loadMultiProductView(product);return [product.id,[]];
     })));
     saveMultiProductView();
@@ -254,7 +254,7 @@ async function applyPresetToOtherProducts(){
       const view=multiProductViews.get(product.id);
       if(!view.schemeState.sharedTargets.some(target=>preset.sharedTargets.some(item=>(item.carrierType||'BODY')===(target.carrierType||'BODY'))))continue;
       const copied=copyProductPreset(preset,view.schemeState,masterTargets.get(product.id),options),current=copied.schemes.find(scheme=>scheme.version===view.activeScheme);
-      updates.push([product.id,{...view,schemeState:copied,targets:structuredClone(current.targets),placementScope:options.geometry?(current.independentGeometry?'current':'shared'):view.placementScope}]);
+      updates.push([product.id,{...view,schemeState:copied,targets:structuredClone(current.targets),placementScope:options.size||options.rotation?(current.independentGeometry?'current':'shared'):view.placementScope}]);
     }
     for(const [id,view]of updates)multiProductViews.set(id,view);
     const count=updates.length;
@@ -262,7 +262,7 @@ async function applyPresetToOtherProducts(){
       const view=multiProductViews.get(loadedMultiProductId);schemeState=structuredClone(view.schemeState);placementScope=view.placementScope;loadSchemeTargets();
     }
     taskDraft?.schedule();renderMultiProductResults();
-    const label=options.geometry?(options.color?'大小、角度和颜色':'大小与角度'):'颜色',position=options.geometry?'Logo 均放在各自母版位置':'各产品的位置、大小与角度保持不变';
+    const label=[[options.size,'大小'],[options.color,'颜色'],[options.printFinish,'印刷工艺'],[options.rotation,'角度']].filter(([selected])=>selected).map(([,name])=>name).join('、'),position=options.size&&options.rotation?'Logo 均放在各自母版位置':'未勾选的设置与当前位置保持不变';
     setStatus(count?`已将${label}应用到 ${count} 个其他产品，${position}，可继续微调。`:'其他产品没有对应的 Logo 载体，未修改布局。',count?'success':'error');
   }catch(error){setStatus(`未能复制预设：${error.message}`,'error');}
   finally{copyingProductPreset=false;updateGenerateButton();queueSchemeCards();}
@@ -988,12 +988,12 @@ const selectedGenerationVersions=()=>versionInputs.filter(input=>input.checked).
 let generationBusy=false;
 function updateGenerateButton(){
  const apply=document.querySelector('#apply-product-preset');
- const geometry=document.querySelector('#copy-preset-geometry'),color=document.querySelector('#copy-preset-color');
+ const options=['size','color','print-finish','rotation'].map(name=>document.querySelector('#copy-preset-'+name));
  apply.hidden=multiPackageProducts.length<2||taskLogos.length>1;
  document.querySelector('#product-preset-options').hidden=apply.hidden;
- geometry.disabled=color.disabled=copyingProductPreset||generationBusy||multiPackageBusy||logoSelectionBusy;
- apply.disabled=geometry.disabled||selectedMultiProductId!==loadedMultiProductId||(!geometry.checked&&!color.checked);
- apply.title=!geometry.checked&&!color.checked?'请至少选择一项同步内容':'将勾选的设置应用到当前任务的其他已选产品';
+ for(const input of options)input.disabled=copyingProductPreset||generationBusy||multiPackageBusy||logoSelectionBusy;
+ apply.disabled=options[0].disabled||selectedMultiProductId!==loadedMultiProductId||!options.some(input=>input.checked);
+ apply.title=!options.some(input=>input.checked)?'请至少选择一项同步内容':'将勾选的设置应用到当前任务的其他已选产品';
  apply.textContent=copyingProductPreset?'正在应用…':'应用到其他产品';
  multiProductTabs.querySelectorAll('.remove-task-asset').forEach(button=>button.disabled=generationBusy||multiPackageBusy||logoSelectionBusy);
  const count=selectedGenerationVersions().length,button=document.querySelector('#generate');
@@ -1003,7 +1003,7 @@ function updateGenerateButton(){
  retry.hidden=(multiPackageProducts.length>1&&!(currentTaskId&&s7User))||!modified.length;retry.textContent=`重新生成已修改的 ${modified.length} 套方案`;retry.disabled=copyingProductPreset||generationBusy||multiPackageBusy;
 }
 for(const input of versionInputs)input.addEventListener('change',()=>{updateGenerateButton();taskDraft?.schedule();});
-for(const id of ['#copy-preset-geometry','#copy-preset-color'])document.querySelector(id).addEventListener('change',updateGenerateButton);
+for(const id of ['#copy-preset-size','#copy-preset-color','#copy-preset-print-finish','#copy-preset-rotation'])document.querySelector(id).addEventListener('change',updateGenerateButton);
 let resultCards=new Map();
 function restoreMultiProductGeneration(record){
   multiProductJob=record;multiPackageBusy=record.status==='running';generationBusy=false;

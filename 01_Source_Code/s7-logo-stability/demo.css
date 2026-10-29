@@ -253,7 +253,7 @@ body { margin: 0; }
 .target-toolbar-editor-head p { margin: 0; color: #68758d; font-size: 12px; }
 .target-toolbar-editor-head .button { flex-shrink: 0; font-size: 12px; }
 .target-toolbar-editor-actions { display: flex; flex-shrink: 0; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; max-width: 100%; }
-.product-preset-options { display: inline-flex; align-items: center; gap: 10px; }
+.product-preset-options { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .product-preset-options[hidden] { display: none; }
 .product-preset-options label { display: inline-flex; align-items: center; gap: 5px; margin: 0; color: #68758d; font-size: 12px; white-space: nowrap; cursor: pointer; }
 .product-preset-options input { width: auto; margin: 0; accent-color: #5268c9; }
