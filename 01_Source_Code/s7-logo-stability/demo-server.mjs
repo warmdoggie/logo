@@ -19,6 +19,7 @@ import {createMultiProductJobs} from './multi-product-jobs.mjs';
 import {zipStore} from '../zip.mjs';
 import {createScheduledGenerations} from './scheduled-generation.mjs';
 import {prepareGenerationImage} from './prepared-generation.mjs';
+import {createGenerationStorage} from '../logo-generation-storage.mjs';
 
 const ROOT=dirname(fileURLToPath(import.meta.url));
 const MAX_BODY=50*1024*1024;
@@ -118,8 +119,8 @@ async function productImage(product,req){
   return {bytes:Buffer.from(await response.arrayBuffer()),contentType:response.headers.get('content-type')||'application/octet-stream'};
 }
 
-export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus(),aiMockupStatus=()=>getAiMockupProviderStatus(),mockupRenderer=createAiMockupRenderer(),productCatalog=loadProductCatalog,productTemplate=loadProductTemplate,logoCatalog=loadWorkspaceLogoLibrary,logoImage=loadWorkspaceLogoImage,saveLogoToLibrary=saveWorkspaceLogo,authenticate=process.env.APP_MULTI_USER==='1'?authenticateWorkspace:null,spaceDir=process.env.S7_SPACE_DIR||join(ROOT,'..','data','user-spaces'),multiLogoEnabled=process.env.S7_MULTI_LOGO_ENABLED!=='0',schedulerOptions}={}){
-  const spaces=userSpace(spaceDir);
+export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=()=>getAiLogoProviderStatus(),aiMockupStatus=()=>getAiMockupProviderStatus(),mockupRenderer=createAiMockupRenderer(),productCatalog=loadProductCatalog,productTemplate=loadProductTemplate,logoCatalog=loadWorkspaceLogoLibrary,logoImage=loadWorkspaceLogoImage,saveLogoToLibrary=saveWorkspaceLogo,authenticate=process.env.APP_MULTI_USER==='1'?authenticateWorkspace:null,spaceDir=process.env.S7_SPACE_DIR||join(ROOT,'..','data','user-spaces'),multiLogoEnabled=process.env.S7_MULTI_LOGO_ENABLED!=='0',schedulerOptions,generationStorage=process.env.LOGO_OSS_STORAGE_ROLE_ARN?createGenerationStorage():null}={}){
+  const spaces=userSpace(spaceDir,{storage:generationStorage});
   const scheduled=createScheduledGenerations({...schedulerOptions,spaces});
   const readLogo=async(input,user)=>input.logoAssetUrl?(await spaces.taskAssetFromUrl(user,input.taskId,input.logoAssetUrl)).bytes:Buffer.from(input.logoImage||'','base64');
   const readBase=async(input,user)=>input.baseAssetUrl?(await spaces.taskAssetFromUrl(user,input.taskId,input.baseAssetUrl)).bytes:Buffer.from(input.baseImage||'','base64');
@@ -169,10 +170,10 @@ export function createDemoHandler({aiProcessor=createAiLogoProcessor(),aiStatus=
       const taskImageMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/image\/([^/]+)\/([^/]+)$/);
       const taskAssetMatch=url.pathname.match(/^\/api\/my-space\/tasks\/([^/]+)\/assets\/([^/]+)$/);
       if(user&&req.method==='GET'&&taskAssetMatch){const asset=await spaces.taskAsset(user,taskAssetMatch[1],taskAssetMatch[2]),preview=url.searchParams.get('preview')==='1';const bytes=preview?await sharp(asset.bytes).resize({width:1200,height:1200,fit:'inside',withoutEnlargement:true}).webp({quality:85}).toBuffer():asset.bytes;res.writeHead(200,{'content-type':preview?'image/webp':asset.contentType,'cache-control':'private, no-store'});res.end(bytes);return;}
-      if(user&&req.method==='GET'&&taskImageMatch){const preview=url.searchParams.get('preview')==='1',bytes=await spaces.image(user,taskImageMatch[2],taskImageMatch[3],taskImageMatch[1],preview);res.writeHead(200,{'content-type':preview?'image/webp':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
+      if(user&&req.method==='GET'&&taskImageMatch){const preview=url.searchParams.get('preview')==='1',location=await spaces.imageRedirect(user,taskImageMatch[2],taskImageMatch[3],taskImageMatch[1],preview);if(location){res.writeHead(302,{Location:location,'cache-control':'private, no-store'});res.end();return;}const bytes=await spaces.image(user,taskImageMatch[2],taskImageMatch[3],taskImageMatch[1],preview);res.writeHead(200,{'content-type':preview?'image/webp':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
       if(user&&req.method==='GET'&&url.pathname==='/api/my-space/history'){json(res,200,await spaces.history(user,url.searchParams.get('taskId')));return;}
       const imageMatch=url.pathname.match(/^\/api\/my-space\/image\/([^/]+)\/([^/]+)$/);
-      if(user&&req.method==='GET'&&imageMatch){const preview=url.searchParams.get('preview')==='1',bytes=await spaces.image(user,imageMatch[1],imageMatch[2],undefined,preview);res.writeHead(200,{'content-type':preview?'image/webp':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
+      if(user&&req.method==='GET'&&imageMatch){const preview=url.searchParams.get('preview')==='1',location=await spaces.imageRedirect(user,imageMatch[1],imageMatch[2],undefined,preview);if(location){res.writeHead(302,{Location:location,'cache-control':'private, no-store'});res.end();return;}const bytes=await spaces.image(user,imageMatch[1],imageMatch[2],undefined,preview);res.writeHead(200,{'content-type':preview?'image/webp':'image/png','cache-control':'private, no-store'});res.end(bytes);return;}
       if(req.method==='GET'){
         if(url.pathname==='/healthz'){json(res,200,{ok:true,service:'s7-logo-stability'});return;}
         if(url.pathname==='/api/ai-logo/status'){json(res,200,aiStatus());return;}

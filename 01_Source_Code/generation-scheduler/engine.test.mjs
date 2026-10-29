@@ -18,6 +18,10 @@ test('turning paid generation off also blocks submit jobs already waiting in Red
 function fixture(){
  const changes=[];return {changes,store:{startSubmit:async j=>j,transition:async(...args)=>changes.push(args),retry:async(...args)=>changes.push(args)}};
 }
+test('OSS outages keep retrying only storage and never exhaust successful image processing',async()=>{
+ const {changes,store}=fixture();await runStage('process',{id:'job',process_attempts:30},{store,processImage:async()=>{throw Object.assign(Error('upload failed'),{code:'STORAGE_PENDING'});}});
+ assert.equal(changes[0][1],'DOWNLOADED');assert.equal(changes[0][2],'storage_pending');assert.equal(changes[0][3],60000);
+});
 test('lost submit acknowledgement never retries generation and keeps the slot',async()=>{
  const {changes,store}=fixture();await runStage('submit',{id:'job'}, {store,provider:{submit:async()=>{throw Error('timeout');}}});
  assert.equal(changes[0][1],'SUBMISSION_UNKNOWN');assert.equal(changes[0][3],false);

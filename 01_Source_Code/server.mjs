@@ -128,7 +128,7 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
  const writing=!['GET','HEAD'].includes(req.method);if(writing)activeWrites++;
  res.setHeader('X-Content-Type-Options','nosniff');
  res.setHeader('Cache-Control','no-store');
- res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob:${ossPreviews?' '+LOGO_OSS_ORIGIN:''}; connect-src 'self'${ossPreviews?' '+LOGO_OSS_ORIGIN:''}; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`);
+ res.setHeader('Content-Security-Policy',`default-src 'self'; img-src 'self' blob:${ossPreviews||process.env.LOGO_OSS_STORAGE_ROLE_ARN?' '+LOGO_OSS_ORIGIN:''}; connect-src 'self'${ossPreviews||process.env.LOGO_OSS_STORAGE_ROLE_ARN?' '+LOGO_OSS_ORIGIN:''}; style-src 'self'; script-src 'self'; frame-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`);
  const json=(v,status=200)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(v));};
  try {
   const requestHost=(req.headers.host||'').split(':')[0];

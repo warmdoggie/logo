@@ -53,6 +53,7 @@ mv "$root/$stamp.artifacts.tar.tmp" "$root/$stamp.artifacts.tar"
 sha256sum "$root/$stamp.artifacts.tar" > "$root/$stamp.artifacts.tar.sha256"
 mv "$file.tmp" "$file"
 sha256sum "$file" > "$file.sha256"
+/opt/node-v24.17.0/bin/node /srv/logo-scheduler/offsite-backup.mjs "$stamp"
 python3 - "$root" <<'PY'
 import pathlib,sys,re,json,datetime
 root=pathlib.Path(sys.argv[1]);files=sorted(p for p in root.iterdir() if re.fullmatch(r'\d{8}T\d{6}Z\.dump',p.name))

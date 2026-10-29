@@ -52,13 +52,18 @@ test('single, multi-product and multi-logo batches survive the page process and 
   assert.equal(adoptedJob.status,'GENERATING');assert.equal(adoptedJob.provider_task_id,'legacy-remote');
   for(const {task,record,batch,extra} of batches){
    assert.equal(await store.batch('bob',record.id),null);
-   await pool.query("UPDATE jobs SET status='SUCCEEDED',result_path=$2 WHERE id=$1",[batch.jobs[0].id,join(folder,batch.jobs[0].id+'.png')]);
+   const storage={original:'s7-logo/generations/v1/'+batch.jobs[0].id+'/original.png',preview:'s7-logo/generations/v1/'+batch.jobs[0].id+'/preview.webp'};
    await writeFile(join(folder,batch.jobs[0].id+'.png'),bytes);
+   await pool.query("UPDATE jobs SET status='DOWNLOADED',error_code='storage_pending' WHERE id=$1",[batch.jobs[0].id]);
+   const pending=await restarted.read(user,task.id);assert.equal(pending.status,'running');assert.equal(pending.outputs.length,1,'an OSS outage must not hide the finished local image');
+   await pool.query("UPDATE jobs SET status='SUCCEEDED',result_path=$2 WHERE id=$1",[batch.jobs[0].id,join(folder,batch.jobs[0].id+'.png')]);
+   await writeFile(join(folder,batch.jobs[0].id+'.storage.json'),JSON.stringify(storage));
    const recovered=await restarted.read(user,task.id);
    assert.equal(recovered.status,'complete');assert.equal(recovered.outputs.length,1);
    for(const [key,value] of Object.entries(extra))assert.equal(recovered.outputs[0][key],value);
    const again=module.createScheduledGenerations(options);await again.read(user,task.id);
    assert.equal((await spaces.history(user,task.id)).length,1,'recovery must not duplicate history');
+   assert.deepEqual((await spaces.history(user,task.id))[0].images[0].storage,storage,'completed synchronization must update the existing history item');
    await assert.rejects(restarted.read({id:'bob'},task.id),{status:404});
   }
   const orphan=await spaces.createTask(user,{title:'restart during upload'}),orphanId=randomUUID();

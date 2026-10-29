@@ -10,7 +10,7 @@ export async function authenticateWorkspace(req){
  if(!response.ok)fail(response.status===401?'请先在主工作空间登录':'工作空间认证暂不可用',response.status===401?401:503);
  return response.json();
 }
-export function userSpace(root){
+export function userSpace(root,{storage}={}){
  const directory=user=>join(root,safe(user.id));
  const taskFile=(user,id)=>join(directory(user),'tasks',safe(id),'task.json');
  const updates=new Map();
@@ -67,15 +67,19 @@ export function userSpace(root){
   if(taskId)await ensureTask(user,taskId);
   if(recordId&&!/^[0-9a-f-]{36}$/.test(recordId))fail('结果编号无效',400);
   const parent=directory(user),id=recordId||randomUUID(),pending=join(parent,'.'+randomUUID()),target=join(parent,id);
-  if(recordId){try{const existing=JSON.parse(await readFile(join(target,'record.json'),'utf8'));if(existing.taskId!==taskId||existing.kind!==kind||existing.model!==(model||null)||existing.images.map(image=>image.label).join('\n')!==images.map(image=>image.label).join('\n'))fail('结果编号冲突',409);return existing;}catch(error){if(error.code!=='ENOENT')throw error;}}
+  if(recordId){try{const existing=JSON.parse(await readFile(join(target,'record.json'),'utf8'));if(existing.taskId!==taskId||existing.kind!==kind||existing.model!==(model||null)||existing.images.map(image=>image.label).join('\n')!==images.map(image=>image.label).join('\n'))fail('结果编号冲突',409);let changed=false;for(let n=0;n<images.length;n++)if(images[n].storage&&JSON.stringify(existing.images[n].storage)!==JSON.stringify(images[n].storage)){existing.images[n].storage=images[n].storage;changed=true;}if(changed){const file=join(target,'record.json'),temporary=file+'.'+randomUUID();try{await writeFile(temporary,JSON.stringify(existing),{flag:'wx'});await rename(temporary,file);}finally{await rm(temporary,{force:true});}}return existing;}catch(error){if(error.code!=='ENOENT')throw error;}}
   await mkdir(pending,{recursive:true});
-  try{const entries=[];for(let i=0;i<images.length;i++){const image=images[i],name=`image-${i}.png`;await writeFile(join(pending,name),image.bytes,{flag:'wx'});entries.push({name,label:image.label,url:taskId?`/api/my-space/tasks/${taskId}/image/${id}/${name}`:`/api/my-space/image/${id}/${name}`});}
+  try{const entries=[];for(let i=0;i<images.length;i++){const image=images[i],name=`image-${i}.png`;await writeFile(join(pending,name),image.bytes,{flag:'wx'});entries.push({name,label:image.label,url:taskId?`/api/my-space/tasks/${taskId}/image/${id}/${name}`:`/api/my-space/image/${id}/${name}`,...(image.storage?{storage:image.storage}:{})});}
    const record={id,taskId:taskId||null,kind,model:model||null,createdAt:new Date().toISOString(),images:entries};await writeFile(join(pending,'record.json'),JSON.stringify(record),{flag:'wx'});await rename(pending,target);return record;
   }catch(error){await rm(pending,{recursive:true,force:true});throw error;}
   };
   return taskId?serialized(taskFile(user,taskId),persist):persist();
  }
  async function history(user,taskId){if(taskId)await ensureTask(user,taskId);let names;try{names=await readdir(directory(user));}catch(e){if(e.code==='ENOENT')return [];throw e;}const records=[];for(const name of names){if(!/^[a-f0-9-]{36}$/.test(name))continue;let record;try{record=JSON.parse(await readFile(join(directory(user),name,'record.json'),'utf8'));}catch(e){if(e.code==='ENOENT')continue;throw e;}if((record.taskId||null)===(taskId||null))records.push(record);}return records.sort((a,b)=>b.createdAt.localeCompare(a.createdAt));}
+ async function imageRedirect(user,id,name,taskId,preview=false){
+  if(!storage)return null;safe(id);if(!/^image-\d+\.png$/.test(name))fail('文件不存在',404);if(taskId)await ensureTask(user,taskId);
+  try{const record=JSON.parse(await readFile(join(directory(user),id,'record.json'),'utf8'));if((record.taskId||null)!==(taskId||null))fail('文件不存在',404);const image=record.images.find(image=>image.name===name);if(!image)fail('文件不存在',404);if(!image.storage)return null;try{return await storage.url(image.storage,preview);}catch{console.error('generation_image_signing_failed');return null;}}catch(error){if(error.code==='ENOENT')fail('文件不存在',404);throw error;}
+ }
  async function image(user,id,name,taskId,preview=false){safe(id);if(!/^image-\d+\.png$/.test(name))fail('文件不存在',404);if(taskId)await ensureTask(user,taskId);try{
   const folder=join(directory(user),id),record=JSON.parse(await readFile(join(folder,'record.json'),'utf8'));if((record.taskId||null)!==(taskId||null))fail('文件不存在',404);
   if(!preview)return await readFile(join(folder,name));
@@ -90,5 +94,5 @@ export function userSpace(root){
   const record=await change(await readGeneration(user,id)),file=join(taskFile(user,id),'..','generation.json'),temporary=file+'.'+randomUUID();
   try{await writeFile(temporary,JSON.stringify(record),{flag:'wx'});await rename(temporary,file);}catch(e){await rm(temporary,{force:true});throw e;}return record;
  });}
- return {save,history,image,task,taskSummary,tasks,createTask,updateTask,deleteTask,generation,updateGeneration,saveTaskAsset,taskAsset,taskAssetFromUrl};
+ return {save,history,image,imageRedirect,task,taskSummary,tasks,createTask,updateTask,deleteTask,generation,updateGeneration,saveTaskAsset,taskAsset,taskAssetFromUrl};
 }

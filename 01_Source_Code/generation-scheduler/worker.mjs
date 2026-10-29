@@ -5,6 +5,7 @@ import {createProvider} from './provider.mjs';
 import {runStage} from './engine.mjs';
 import {hasDiskSpace} from './capacity.mjs';
 import {processScheduledImage} from './images.mjs';
+import {appModule} from './plans.mjs';
 
 const images=process.argv[2]==='images',directory=process.env.RESULT_DIRECTORY;
 if(!directory)throw Error('RESULT_DIRECTORY required');
@@ -12,7 +13,8 @@ const provider=createProvider({directory});
 let processImage;
 if(images){
  const {default:sharp}=await import('sharp');sharp.concurrency(1);sharp.cache({memory:64,files:0,items:16});
- processImage=job=>processScheduledImage(job,{directory});
+ const storage=process.env.LOGO_OSS_STORAGE_ROLE_ARN?(await import(appModule('logo-generation-storage.mjs'))).createGenerationStorage():null;
+ processImage=job=>processScheduledImage(job,{directory,storage});
 }
 const stages=images?['process']:['submit','poll','download'];
 const concurrency={submit:number('PROVIDER_SUBMIT_CONCURRENCY',2,1,10),poll:4,download:2,process:1};

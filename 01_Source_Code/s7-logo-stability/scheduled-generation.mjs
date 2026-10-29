@@ -39,12 +39,13 @@ export function createScheduledGenerations({spaces,url,token,configPath,autoStar
   for(const item of items)if(!batch.jobs.some(job=>job.key===item.key))phases[item.key]=batch.status==='ABORTED'?{stage:'failed',error:'任务准备中断，尚未提交，可重试'}:{stage:'queued',label:'正在保存任务参数'};
   for(const job of batch.jobs){
    const item=items.find(item=>item.key===job.key);
-   phases[item.key]={stage:stages[job.status]||'failed',schedulerJobId:job.id,...(job.status==='QUEUED'&&!job.local&&!batch.providerEnabled?{label:'已排队，等待启用生成'}:{}),...(errors[job.status]?{error:errors[job.status]}:{})};
+   const storageReady=phases[item.key]?.storageReady;
+   phases[item.key]={stage:stages[job.status]||'failed',schedulerJobId:job.id,...(job.storage?{storageReady:true}:{}),...(job.localResult?{label:'图片已生成，正在同步存储'}:{}),...(job.status==='QUEUED'&&!job.local&&!batch.providerEnabled?{label:'已排队，等待启用生成'}:{}),...(errors[job.status]?{error:errors[job.status]}:{})};
    if(job.providerTaskId)remoteTasks[item.key]={taskId:job.providerTaskId,schedulerJobId:job.id};
-   if(job.status==='SUCCEEDED'){
-    if(!outputs.some(output=>output.schedulerJobId===job.id)){
+   if(job.status==='SUCCEEDED'||job.localResult){
+    if(!outputs.some(output=>output.schedulerJobId===job.id)||job.storage&&!storageReady){
      const bytes=await request(user,'/v1/jobs/'+job.id+'/result',{binary:true});
-     const saved=await spaces.save(user,{recordId:job.id,taskId,kind:generation.kind==='multi-logo'?'多 Logo 印刷效果':generation.kind==='multi-product'?'多包材印刷效果':'AI上样',model:generation.model,images:[{label:item.label,bytes}]});
+     const saved=await spaces.save(user,{recordId:job.id,taskId,kind:generation.kind==='multi-logo'?'多 Logo 印刷效果':generation.kind==='multi-product'?'多包材印刷效果':'AI上样',model:generation.model,images:[{label:item.label,bytes,...(job.storage?{storage:job.storage}:{})}]});
      const output={...item.output,version:item.version,dataUrl:saved.images[0].url,schedulerJobId:job.id};
      const same=old=>old.version===output.version&&old.productId===output.productId&&old.logoId===output.logoId;
      for(let n=outputs.length-1;n>=0;n--)if(same(outputs[n]))outputs.splice(n,1);

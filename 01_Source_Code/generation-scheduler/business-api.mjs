@@ -52,12 +52,16 @@ export async function businessApi(req,res,{store,user,directory,enabled,send}){
   if(action==='ack'&&req.method==='POST'){await store.acknowledgeBatch(user,id);send(res,200,{ok:true});return true;}
   if(action==='abort'&&req.method==='POST'){await store.abortBatch(user,id);send(res,200,{ok:true});return true;}
   if(!action&&req.method==='GET'){
-   send(res,200,{id,userId:user,createdAt:batch.created_at,descriptor:batch.descriptor,status:batch.status,providerEnabled:enabled,jobs:batch.jobs.map(job=>({id:job.id,key:job.params.key,status:job.status,errorCode:job.error_code,providerTaskId:job.provider_task_id,local:!!job.params.local}))});return true;
+   const jobs=await Promise.all(batch.jobs.map(async job=>{
+    let storage;if(job.status==='SUCCEEDED'){try{storage=JSON.parse(await readFile(join(directory,job.id+'.storage.json'),'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}}
+    return {id:job.id,key:job.params.key,status:job.status,errorCode:job.error_code,providerTaskId:job.provider_task_id,local:!!job.params.local,localResult:job.error_code==='storage_pending',...(storage?{storage}:{})};
+   }));
+   send(res,200,{id,userId:user,createdAt:batch.created_at,descriptor:batch.descriptor,status:batch.status,providerEnabled:enabled,jobs});return true;
   }
  }
  const result=/^\/v1\/jobs\/([0-9a-f-]{36})\/result$/.exec(req.url);
  if(result&&uuid.test(result[1])&&req.method==='GET'){
-  const job=await store.get(user,result[1]);if(!job||job.status!=='SUCCEEDED')fail(404,'result_not_ready');
+  const job=await store.get(user,result[1]);if(!job||(job.status!=='SUCCEEDED'&&job.error_code!=='storage_pending'))fail(404,'result_not_ready');
   const bytes=await readFile(join(directory,job.id+(job.params.batchId?'.png':'.webp')));
   res.writeHead(200,{'Content-Type':job.params.batchId?'image/png':'image/webp','Content-Length':bytes.length,'Cache-Control':'no-store'});res.end(bytes);return true;
  }

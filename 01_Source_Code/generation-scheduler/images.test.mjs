@@ -18,9 +18,16 @@ test('the image worker preserves the product outside the print mask at original 
   const plan=JSON.stringify({version:'BLACK',baseImage:data(base),placementGuide:data(generated),maskImage:data(mask)}),hash=createHash('sha256').update(plan).digest('hex');
   const {mkdir}=await import('node:fs/promises');await mkdir(join(folder,'plans'));await writeFile(join(folder,'plans',hash+'.json'),plan);
   const original=join(folder,'download.original');await writeFile(original,generated);
-  const path=await module.processScheduledImage({id:randomUUID(),lease_token:randomUUID(),params:{batchId:randomUUID(),planHash:hash},file_path:original},{directory:folder});
+  const id=randomUUID(),descriptor={original:'s7-logo/generations/v1/original.png',preview:'s7-logo/generations/v1/preview.webp'};
+  const path=await module.processScheduledImage({id,lease_token:randomUUID(),params:{batchId:randomUUID(),planHash:hash},file_path:original},{directory:folder,storage:{async publish(jobId,file){assert.equal(jobId,id);assert.equal((await sharp(await readFile(file)).metadata()).width,80);return descriptor;}}});
   const {data:pixel,info}=await sharp(await readFile(path)).raw().toBuffer({resolveWithObject:true});
   assert.equal(info.width,80);assert.equal(info.height,80);assert.deepEqual([...pixel.subarray(0,3)],[238,238,238]);
   const center=(35*80+35)*info.channels;assert.ok(pixel[center]>pixel[center+1]);
+  assert.deepEqual(JSON.parse(await readFile(join(folder,id+'.storage.json'),'utf8')),descriptor);
+  const pending={id:randomUUID(),lease_token:randomUUID(),params:{batchId:randomUUID(),planHash:hash},file_path:original};
+  await assert.rejects(module.processScheduledImage(pending,{directory:folder,storage:{async publish(){throw Error('OSS unavailable');}}}),{code:'STORAGE_PENDING'});
+  await rm(join(folder,'plans',hash+'.json'));await rm(original);
+  await module.processScheduledImage({...pending,error_code:'storage_pending'},{directory:folder,storage:{async publish(){return descriptor;}}});
+  assert.deepEqual(JSON.parse(await readFile(join(folder,pending.id+'.storage.json'),'utf8')),descriptor);
  }finally{await rm(folder,{recursive:true,force:true});}
 });

@@ -7,6 +7,26 @@ import sharp from 'sharp';
 import {createDemoServer} from './demo-server.mjs';
 import {userSpace} from './user-space.mjs';
 
+test('only the owning account receives a short signed OSS image redirect, while local copies remain readable',async()=>{
+ const dir=await mkdtemp(join(tmpdir(),'s7-private-oss-')),user={id:'alice'};
+ let signingFails=false;
+ const descriptor={original:'private-original',preview:'private-preview'},generationStorage={async url(value,preview){if(signingFails)throw Error('STS temporarily unavailable');assert.deepEqual(value,descriptor);return 'https://heci-002.oss-cn-heyuan.aliyuncs.com/'+(preview?'preview.webp':'original.png')+'?signed';}};
+ const image=await sharp({create:{width:20,height:20,channels:4,background:'#000'}}).png().toBuffer();
+ const spaces=userSpace(dir),task=await spaces.createTask(user,{title:'private'});
+ const record=await spaces.save(user,{taskId:task.id,kind:'AI上样',images:[{label:'BLACK',bytes:image,storage:descriptor}]});
+ const server=createDemoServer({spaceDir:dir,generationStorage,authenticate:async req=>({id:req.headers.cookie||'bob'})});
+ await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+server.address().port;
+ try{
+  for(const [suffix,name] of [['','original.png'],['?preview=1','preview.webp']]){
+   const response=await fetch(base+record.images[0].url+suffix,{headers:{cookie:'alice'},redirect:'manual'});
+   assert.equal(response.status,302);assert.equal(response.headers.get('location'),'https://heci-002.oss-cn-heyuan.aliyuncs.com/'+name+'?signed');assert.equal(response.headers.get('cache-control'),'private, no-store');
+  }
+  assert.equal((await fetch(base+record.images[0].url,{headers:{cookie:'bob'},redirect:'manual'})).status,404);
+  signingFails=true;const fallback=await fetch(base+record.images[0].url,{headers:{cookie:'alice'},redirect:'manual'});assert.equal(fallback.status,200);assert.deepEqual(Buffer.from(await fallback.arrayBuffer()),image);
+  assert.deepEqual(await spaces.image(user,record.id,'image-0.png',task.id),image);
+ }finally{await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});}
+});
+
 test('草稿增量保存保留素材且返回轻量摘要',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'s7-delta-')),spaces=userSpace(dir),user={id:'alice'};
  try{

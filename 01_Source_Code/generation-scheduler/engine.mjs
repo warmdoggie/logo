@@ -25,7 +25,11 @@ export async function runStage(stage,job,{store,provider,processImage,pollMs=500
   await store.transition(job,'DOWNLOADED',{file_path:file,error_code:null});
  }else if(stage==='process'){
   let result;
-  try{result=await processImage(job);}catch{await store.retry(job,job.process_attempts>=3?'PROCESS_FAILED':'DOWNLOADED','image_processing_failed',5000);return;}
+  try{result=await processImage(job);}catch(error){
+   if(error.code==='STORAGE_PENDING')await store.retry(job,'DOWNLOADED','storage_pending',60000);
+   else await store.retry(job,job.process_attempts>=3?'PROCESS_FAILED':'DOWNLOADED','image_processing_failed',5000);
+   return;
+  }
   await store.transition(job,'SUCCEEDED',{result_path:result,error_code:null});
  }
 }
