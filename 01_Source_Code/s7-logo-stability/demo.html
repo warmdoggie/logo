@@ -45,21 +45,6 @@
         <label class="auto-contrast-field"><input id="auto-contrast" type="checkbox" checked> 根据底色自动使用黑色或白色 Logo</label>
         <select id="preview-version" hidden aria-label="当前预览方案"><option value="ORIGINAL">原色</option><option value="BLACK">黑色</option><option value="GOLD FOIL">烫金</option><option value="SILVER FOIL">烫银</option></select>
 
-        <div class="section-title targets-title"><h2>2. 上样目标</h2><button id="add-target" type="button" class="button secondary">+ 添加目标</button></div>
-        <div id="targets" class="targets"></div>
-
-        <label class="model-field">成图模型<select id="mockup-model" required><option value="">正在读取模型配置…</option></select></label>
-        <fieldset id="generation-versions" class="generation-versions" hidden>
-          <legend>选择生成版本</legend>
-          <label><input type="checkbox" value="ORIGINAL" checked> 原色</label>
-          <label><input type="checkbox" value="BLACK" checked> 黑色</label>
-          <label><input type="checkbox" value="GOLD FOIL" checked> 烫金</label>
-          <label><input type="checkbox" value="SILVER FOIL" checked> 烫银</label>
-          <small class="hint">默认全选，取消任意一项即可生成三张；至少选择一项。</small>
-        </fieldset>
-        <button id="generate" type="button" class="button primary">AI 生成 4 个版本</button>
-        <button id="generate-modified" type="button" class="button secondary regenerate-modified" hidden>重新生成已修改方案</button>
-        <p id="status" class="status" role="status">等待上传素材。</p>
       </section>
 
       <section class="panel results-panel">
@@ -78,6 +63,32 @@
       </section>
     </div>
   </main>
+  <section id="target-toolbar" class="target-toolbar" aria-label="上样目标悬浮工具栏">
+    <div class="target-toolbar-head">
+      <button id="target-toolbar-drag" class="target-toolbar-drag" type="button" aria-label="拖动工具栏，也可使用方向键移动" title="拖动工具栏 · 方向键也可移动"><svg width="16" height="20" viewBox="0 0 16 20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="4" r="1.5"/><circle cx="11" cy="4" r="1.5"/><circle cx="5" cy="10" r="1.5"/><circle cx="11" cy="10" r="1.5"/><circle cx="5" cy="16" r="1.5"/><circle cx="11" cy="16" r="1.5"/></svg></button>
+      <div class="target-toolbar-title"><strong>上样目标</strong><span id="target-toolbar-summary">拖动 Logo 调整位置</span></div>
+      <button id="toggle-target-toolbar" class="target-toolbar-toggle" type="button" aria-expanded="false" aria-controls="target-toolbar-body">展开 <span aria-hidden="true">⌄</span></button>
+      <button id="generate" type="button" class="button primary">AI 生成 4 个版本</button>
+    </div>
+    <div id="target-toolbar-body" class="target-toolbar-body" hidden>
+      <div class="target-toolbar-editor-head"><p>点击“移动位置”后拖动 Logo；在下方调整载体与工艺。</p><div class="target-toolbar-editor-actions"><button id="apply-product-preset" type="button" class="button secondary" title="复制大小、角度和颜色，其他产品的 Logo 放在各自母版位置" hidden>应用到其他产品</button><button id="add-target" type="button" class="button secondary">+ 添加目标</button></div></div>
+      <div id="targets" class="targets"></div>
+      <div class="target-toolbar-footer">
+        <details class="target-toolbar-settings"><summary>生成设置</summary><label class="model-field">成图模型<select id="mockup-model" required><option value="">正在读取模型配置…</option></select></label></details>
+        <button id="reset-target-toolbar" type="button" class="text-button">回到画布上方</button>
+      </div>
+      <fieldset id="generation-versions" class="generation-versions" hidden>
+        <legend>选择生成版本</legend>
+        <label><input type="checkbox" value="ORIGINAL" checked> 原色</label>
+        <label><input type="checkbox" value="BLACK" checked> 黑色</label>
+        <label><input type="checkbox" value="GOLD FOIL" checked> 烫金</label>
+        <label><input type="checkbox" value="SILVER FOIL" checked> 烫银</label>
+        <small class="hint">默认全选，取消任意一项即可生成三张；至少选择一项。</small>
+      </fieldset>
+      <button id="generate-modified" type="button" class="button secondary regenerate-modified" hidden>重新生成已修改方案</button>
+      <p id="status" class="status" role="status">等待上传素材。</p>
+    </div>
+  </section>
   <div id="image-preview" class="image-preview" hidden role="dialog" aria-modal="true" aria-label="图片预览">
     <div class="image-preview-backdrop" data-close-preview></div>
     <div class="image-preview-panel">
@@ -98,5 +109,6 @@
     </div>
   </div>
   <script type="module" src="demo.js"></script>
+  <script type="module" src="target-toolbar.mjs"></script>
 </body>
 </html>

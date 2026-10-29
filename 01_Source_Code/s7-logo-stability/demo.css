@@ -235,3 +235,43 @@ body { margin: 0; }
 .remove-task-asset:hover { background: #edf0ff; color: #5268c9; }
 .remove-task-asset:focus-visible { outline: 2px solid #5369d9; outline-offset: 1px; }
 .remove-task-asset:disabled { color: #b0b8c8; background: transparent; cursor: not-allowed; }
+
+.target-toolbar { position: fixed; z-index: 10; width: min(510px, calc(100vw - 24px)); border: 1px solid #dce2ef; border-radius: 12px; background: #fff; box-shadow: 0 8px 28px #18223524, 0 2px 6px #1822350d; }
+.target-toolbar.expanded { width: min(920px, calc(100vw - 24px)); }
+.target-toolbar-head { display: flex; align-items: center; gap: 12px; padding: 9px 12px 9px 8px; }
+.target-toolbar-drag { display: grid; place-items: center; flex: 0 0 28px; height: 36px; padding: 0; border: 0; border-radius: 6px; color: #929bad; background: transparent; cursor: grab; touch-action: none; }
+.target-toolbar-drag:hover { color: #5369d9; background: #f1f3f9; }
+.target-toolbar.dragging, .target-toolbar.dragging .target-toolbar-drag { cursor: grabbing; user-select: none; }
+.target-toolbar-title { display: flex; flex: 1; align-items: center; gap: 12px; min-width: 0; white-space: nowrap; }
+.target-toolbar-title strong { color: #243049; font-size: 14px; }
+.target-toolbar-title span { overflow: hidden; color: #68758d; font-size: 12px; text-overflow: ellipsis; }
+.target-toolbar-toggle { display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 34px; padding: 0 10px; border: 0; border-radius: 6px; color: #5268c9; background: #f1f3ff; font: inherit; font-size: 12px; cursor: pointer; }
+.target-toolbar-toggle:hover { background: #e6eaff; }
+.target-toolbar #generate { flex-shrink: 0; width: auto; margin: 0; padding: 9px 13px; font-size: 12px; white-space: nowrap; }
+.target-toolbar-body { max-height: calc(100dvh - 100px); overflow-y: auto; padding: 0 16px 12px; border-top: 1px solid #edf0f5; }
+.target-toolbar-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 12px; }
+.target-toolbar-editor-head p { margin: 0; color: #68758d; font-size: 12px; }
+.target-toolbar-editor-head .button { flex-shrink: 0; font-size: 12px; }
+.target-toolbar-editor-actions { display: flex; flex-shrink: 0; gap: 8px; }
+.target-toolbar-editor-actions button:disabled { opacity: .55; cursor: wait; }
+.target-toolbar .targets { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(280px, 1fr); gap: 10px; overflow-x: auto; padding: 10px 2px; scroll-snap-type: x proximity; }
+.target-toolbar .target-row { min-width: 0; margin: 0; padding: 12px; border-radius: 8px; scroll-snap-align: start; }
+.target-toolbar .target-head { gap: 8px; }
+.target-toolbar .target-actions { gap: 4px; }
+.target-toolbar .target-actions button { padding: 2px; font-size: 11px; white-space: nowrap; }
+.target-toolbar .target-grid label { font-size: 11px; }
+.target-toolbar-footer { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding-top: 4px; }
+.target-toolbar-footer .text-button, .target-toolbar-settings summary { padding: 4px 0; color: #68758d; font-size: 12px; cursor: pointer; }
+.target-toolbar-settings .model-field { width: 220px; margin-top: 8px; }
+.target-toolbar .status { margin: 8px 0 0; font-size: 12px; }
+.target-toolbar button:focus-visible, .target-toolbar summary:focus-visible { outline: 2px solid #5369d9; outline-offset: 2px; }
+@media (max-width: 560px) {
+  .target-toolbar-head { gap: 6px; padding-right: 8px; }
+  .target-toolbar-title span { display: none; }
+  .target-toolbar-title strong { font-size: 13px; }
+  .target-toolbar #generate { padding: 9px; }
+  .target-toolbar-body { padding-inline: 10px; }
+  .target-toolbar-editor-head p { max-width: 180px; }
+  .target-toolbar-editor-head { flex-wrap: wrap; }
+  .target-toolbar .targets { grid-auto-columns: minmax(270px, 1fr); }
+}

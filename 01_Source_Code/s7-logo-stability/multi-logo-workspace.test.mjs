@@ -7,7 +7,7 @@ import {createSchemes,editScheme,schemeSignature} from './schemes.mjs';
 async function workspace(){
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
  const start=source.indexOf('function saveMultiLogoView(){');
- const context=vm.createContext({structuredClone,createSchemes,schemeSignature,crypto,
+ const context=vm.createContext({structuredClone,createSchemes,schemeSignature,crypto,copyingProductPreset:false,
   taskLogos:[{id:'red',name:'红标',logoImage:'red-image'},{id:'blue',name:'蓝标',logoImage:'blue-image'}],
   selectedTaskLogoId:'red',loadedTaskLogoId:'red',multiLogoViews:new Map(),logoLoadRevision:0,logoSelectionBusy:false,logoDecoding:false,logoImportBusy:false,multiLogoJob:null,multiLogoEnabled:true,
   logoData:'red-image',logoSourceData:'',logoImage:{},baseData:'product-image',baseImage:{},multiProductViews:new Map(),
