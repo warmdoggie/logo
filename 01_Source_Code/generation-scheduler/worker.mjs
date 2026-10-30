@@ -12,7 +12,7 @@ if(!directory)throw Error('RESULT_DIRECTORY required');
 const provider=createProvider({directory});
 let processImage;
 if(images){
- const {default:sharp}=await import('sharp');sharp.concurrency(1);sharp.cache({memory:64,files:0,items:16});
+ const {default:sharp}=await import('sharp');sharp.concurrency(2);sharp.cache({memory:64,files:0,items:16});
  const storage=process.env.LOGO_OSS_STORAGE_ROLE_ARN?(await import(appModule('logo-generation-storage.mjs'))).createGenerationStorage():null;
  processImage=job=>processScheduledImage(job,{directory,storage});
 }

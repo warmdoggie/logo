@@ -37,7 +37,7 @@ for role in api network images; do
   case "$role" in
     api) entry=api.mjs; memory=512M; cpu=50% ;;
     network) entry=worker.mjs; memory=512M; cpu=50% ;;
-    images) entry='worker.mjs images'; memory=768M; cpu=100% ;;
+    images) entry='worker.mjs images'; memory=768M; cpu=200% ;;
   esac
   cat > "/etc/systemd/system/logo-scheduler-$role.service" <<UNIT
 [Unit]
