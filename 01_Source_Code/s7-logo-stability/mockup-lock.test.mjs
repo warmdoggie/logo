@@ -58,6 +58,24 @@ test('silver retains fine foil grain in midtones and bright reflections without 
  }
 });
 
+test('silver highlights stay visible against white packaging without losing foil texture',async()=>{
+ for(const luma of [235,248,255])for(const color of [[191,195,201],[255,255,255]]){
+  const f=await printFixture(color);
+  const baseImage=await sharp({create:{width:f.width,height:f.height,channels:4,background:{r:luma,g:luma,b:luma,alpha:1}}}).png().toBuffer();
+  const raw=await sharp(await lockOutsideLogo({...f,baseImage,generatedImage:baseImage,feather:0,surfaceResponse:true,foilMaskImage:f.maskImage,foilFinish:'silver'})).ensureAlpha().raw().toBuffer();
+  const samples=[];
+  for(let i=0;i<f.rawMask.length;i++){
+   if(!f.rawMask[i]){assert.deepEqual([...raw.subarray(i*4,i*4+4)],[luma,luma,luma,255]);continue;}
+   assert.ok(Math.max(...raw.subarray(i*4,i*4+3))<=luma-16,`银箔亮部不能融进亮度为 ${luma} 的白色包材`);
+  }
+  for(let y=10;y<16;y++)for(let x=12;x<26;x++)samples.push(raw[(y*f.width+x)*4]);
+  const mean=samples.reduce((sum,value)=>sum+value)/samples.length;
+  const deviation=Math.sqrt(samples.reduce((sum,value)=>sum+(value-mean)**2,0)/samples.length);
+  assert.ok(mean>=155,'浅底上的银箔仍应保留金属亮度');
+  assert.ok(deviation>=1.5&&new Set(samples).size>=8,`控制高光后仍须保留细密箔纹，不能裁成均匀灰块：底色 ${luma}，银色 ${color}，标准差 ${deviation}，灰阶数 ${new Set(samples).size}`);
+ }
+});
+
 test('silver has a thin bonded edge and clustered foil variation within its original mask',async()=>{
  const f=await printFixture([191,195,201]);
  const baseImage=await sharp({create:{width:f.width,height:f.height,channels:4,background:'#bda39a'}}).png().toBuffer();

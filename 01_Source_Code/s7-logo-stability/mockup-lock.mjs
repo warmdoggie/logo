@@ -59,9 +59,13 @@ export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskI
           const rim=slope*(slope>0?28:22);
           const tone=silver+detail,highlight=tone>245?245+8*Math.tanh((tone-245)/8):tone;
           const layer=rim<0?rim*Math.min(1,Math.max(.35,(highlight-110)/80)):rim;
+          // Keep silver reflections below a bright substrate, including the light-facing rim.
+          const whiteSurface=Math.max(0,Math.min(1,(sceneLuma-210)/25));
+          const highlightLimit=253+(sceneLuma-24-253)*whiteSurface;
           for(let channel=0;channel<3;channel++){
             const silverChannel=Math.max(0,Math.min(253,highlight+layer+(core[channel]-peak)*.15));
-            output[offset+channel]=Math.round(silverChannel*alpha+base[offset+channel]*(1-alpha));
+            const visibleSilver=silverChannel-(253-highlightLimit)*Math.max(0,Math.min(1,(silverChannel-140)/80));
+            output[offset+channel]=Math.round(visibleSilver*alpha+base[offset+channel]*(1-alpha));
           }
         }else{
           // An additive, restrained ink reflection remains visible even for RGB black.
