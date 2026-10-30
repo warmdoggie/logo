@@ -7,6 +7,8 @@
 01_Source_Code/outputs/
 01_Source_Code/logs/
 01_Source_Code/uploads/
+outputs/
+workspace-release-tests.txt
 
 # Local database and provider configuration
 **/*.sqlite

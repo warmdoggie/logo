@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm,writeFile} from 'node:fs/promises';
+import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import sharp from 'sharp';
@@ -54,26 +54,22 @@ for(const kind of ['product','logo'])test(`${kind} 批次同时运行两组，�
  }
 });
 
-for(const fixedGold of [false,true])test(`真实提交链路在任一远端任务完成前发出 ${fixedGold?8:6} 个 APIMart 请求`,{timeout:15000},async()=>{
+for(const kind of ['product','logo'])for(const fixedGold of [false,true])test(`${kind} 批次的四种方案全部本地生成，固定烫金=${fixedGold}`,{timeout:15000},async()=>{
  const dir=await mkdtemp(join(tmpdir(),'s7-apimart-batch-')),configPath=join(dir,'config.json');
- await writeFile(configPath,JSON.stringify({provider:'APIMART',model:'gpt-image-2.5-flare',endpoint:'https://api.apimart.ai',apiKey:'test-key'}));
  const image=await sharp({create:{width:32,height:32,channels:4,background:'#ccc'}}).png().toBuffer();
- const gate=Promise.withResolvers(),submitted=Promise.withResolvers(),requests=[],count=fixedGold?8:6;
- const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async(url,options)=>{
-  if(String(url).endsWith('/v1/images/generations')){requests.push(JSON.parse(options.body));if(requests.length===count)submitted.resolve();return Response.json({data:[{task_id:'remote-'+requests.length}]});}
-  if(String(url).includes('/v1/tasks/')){await gate.promise;return Response.json({data:{status:'completed',result:{images:[{url:'https://upload.apimart.ai/result.png'}]}}});}
-  return new Response(image);
- }});
+ const logo=await sharp(Buffer.from('<svg width="24" height="12"><path fill="black" fill-rule="evenodd" d="M0 0H24V12H0Z M7 3V9H17V3Z"/></svg>')).png().toBuffer();
+ let requests=0;
+ const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async()=>{requests++;throw Error('本地上样不能调用外部服务');}});
  const targets=[{id:'body',x:.5,y:.5,widthRatio:.25,rotation:0,...(fixedGold?{printFinish:'GOLD FOIL'}:{})}],schemes=createSchemes(targets).schemes;
- const server=createDemoServer({spaceDir:dir,authenticate:async()=>({id:'alice'}),productCatalog:async()=>['a','b'].map(id=>({id,sku:id,name:id,imageBytes:image})),mockupRenderer:renderer});
+ const server=createDemoServer({spaceDir:dir,authenticate:async()=>({id:'alice'}),productCatalog:async()=>['a','b'].map(id=>({id,sku:id,name:id,imageBytes:image,template:{zones:[{id:'body',zoneType:'logo',x:.4,y:.4,width:.25,height:.1}]}})),mockupRenderer:renderer});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin=`http://127.0.0.1:${server.address().port}`;
  const call=(path,input)=>fetch(origin+path,{method:input?'POST':'GET',headers:{'content-type':'application/json'},...(input?{body:JSON.stringify(input)}:{})});
- const task=await(await call('/api/my-space/tasks',{title:'APIMart concurrency'})).json();
+ const task=await(await call('/api/my-space/tasks',{title:'Local batch'})).json();
  const wait=async()=>{for(let n=0;n<300;n++){const record=await(await call(`/api/my-space/tasks/${task.id}/generation`)).json();if(record.status!=='running')return record;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('批次未完成');};
  try{
-  const response=await call('/api/ai-render-multi',{taskId:task.id,background:true,productIds:['a','b'],productLayouts:['a','b'].map(productId=>({productId,targets,schemes})),logoImage:image.toString('base64'),model:'gpt-image-2.5-flare'});assert.equal(response.status,202);
-  await ready(submitted.promise);assert.equal(requests.length,count);assert.ok(requests.every(request=>request.n===1));
-  const running=await(await call(`/api/my-space/tasks/${task.id}/generation`)).json();assert.equal(running.status,'running');assert.ok(running.outputs.length<=2);
-  gate.resolve();const complete=await wait();assert.equal(complete.status,'complete');assert.equal(complete.outputs.length,8);
- }finally{gate.resolve();await wait();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});}
+  const input=kind==='product'?{background:true,productIds:['a','b'],productLayouts:['a','b'].map(productId=>({productId,targets,schemes})),logoImage:logo.toString('base64')}:{productId:'a',logoLayouts:['a','b'].map(logoId=>({logoId,targets,schemes})),logos:['a','b'].map(id=>({id,name:id,logoImage:logo.toString('base64')}))};
+  const response=await call(kind==='product'?'/api/ai-render-multi':'/api/ai-render-logos',{...input,taskId:task.id,model:'local'});assert.equal(response.status,202,await response.text());
+  const complete=await wait();assert.equal(complete.status,'complete');assert.equal(complete.outputs.length,8);assert.equal(requests,0);
+  for(const id of ['a','b'])assert.deepEqual(complete.outputs.filter(output=>(kind==='product'?output.productId:output.logoId)===id).map(output=>output.version).sort(),[...versions].sort());
+ }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});}
 });

@@ -1,7 +1,7 @@
 import {readFileSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
-import {getAiMockupProviderStatus,isLocalSilver,mockupResumeCheckpoint} from './ai-mockup-provider.mjs';
+import {getAiMockupProviderStatus,isLocalMockup,mockupResumeCheckpoint} from './ai-mockup-provider.mjs';
 
 const terminal=new Set(['SUCCEEDED','FAILED','CANCELLED','DOWNLOAD_FAILED','PROCESS_FAILED']);
 const stages={QUEUED:'queued',SUBMITTING:'submitting',GENERATING:'generating',REMOTE_SUCCEEDED:'saving',DOWNLOADING:'saving',DOWNLOADED:'saving',PROCESSING:'saving',SUCCEEDED:'complete'};
@@ -82,19 +82,28 @@ export function createScheduledGenerations({spaces,url,token,configPath,autoStar
    await spaces.task(user,taskId);
    const previous=await spaces.generation(user,taskId);
    if(previous?.status==='running')fail('当前任务正在生成，请等待完成',409);
-   const provider=getAiMockupProviderStatus(configPath);
-   if(!provider.configured||!provider.models.includes(metadata.model))fail('请选择已配置的成图模型',400);
    const id=randomUUID(),stamp=new Date().toISOString(),plans=[];
    for(const item of inputs)for(const plan of buildAiMockupPlan(item.input)){
-    if(await isLocalSilver(plan))plan.local=true;
+    if(isLocalMockup(plan))plan.local=true;
     const output={...item.output,...(item.schemeSignatures?.[plan.version]?{schemeSignature:item.schemeSignatures[plan.version]}:{})};
     plans.push({plan,key:[output.productId||output.logoId,plan.version].filter(Boolean).join(':'),version:plan.version,output,label:item.label?`${item.label} · ${plan.version}`:plan.version,requestId:randomUUID()});
+   }
+   if(plans.some(item=>!item.plan.local)){
+    const provider=getAiMockupProviderStatus(configPath);
+    if(!provider.configured||!provider.models.includes(metadata.model))fail('请选择已配置的成图模型',400);
    }
    const generation={...metadata,id,scheduler:true,status:'running',createdAt:stamp,updatedAt:stamp,remoteTasks:{},stages:{...metadata.stages,...Object.fromEntries(plans.map(item=>[item.key,{stage:'queued'}]))}};
    const descriptor={taskId,generation,items:plans.map(({plan,requestId,...item})=>item)};
    try{
     await request(user,'/v1/batches',{method:'POST',body:{id,descriptor}});
-    for(const item of plans)await request(user,`/v1/batches/${id}/jobs/${item.requestId}`,{method:'PUT',body:{key:item.key,plan:item.plan,resumeJobId:previous?.stages?.[item.key]?.schedulerJobId,resumeTask:mockupResumeCheckpoint(item.plan,previous?.remoteTasks?.[item.key],configPath)}});
+    for(const item of plans){
+     const plan={...item.plan},imageRefs={};
+     for(const field of ['baseImage','placementGuide','maskImage','foilMaskImage','goldMaskImage']){
+      const index=typeof plan[field]==='string'?plan.request.image_urls.indexOf(plan[field]):-1;
+      if(index>=0){imageRefs[field]=index;plan[field]=null;}
+     }
+     await request(user,`/v1/batches/${id}/jobs/${item.requestId}`,{method:'PUT',body:{key:item.key,plan,imageRefs,resumeJobId:previous?.stages?.[item.key]?.schedulerJobId,resumeTask:mockupResumeCheckpoint(item.plan,previous?.remoteTasks?.[item.key],configPath)}});
+    }
     await spaces.updateGeneration(user,taskId,current=>{if(current?.status==='running'&&current.id!==id)fail('当前任务正在生成，请等待完成',409);return current?.id===id?current:generation;});
     await request(user,'/v1/batches/'+id+'/commit',{method:'POST'});
    }catch(error){

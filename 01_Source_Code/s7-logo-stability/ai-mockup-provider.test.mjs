@@ -37,22 +37,36 @@ test('GPT and Flux preserve thin silver and surface-aware black ink in the same 
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 
-test('silver without a gold target renders locally and skips the moderated provider request',async()=>{
-  const dir=await mkdtemp(join(tmpdir(),'s7-local-silver-'));
+for(const version of ['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL'])test(`${version} renders locally without provider configuration and preserves ink and cutouts`,async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'s7-local-mockup-'));
   try{
     const configPath=join(dir,'ai-provider.json');
-    await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',model:'flux-3-image',endpoint:'https://api.apimart.ai',apiKey:'test-key'}));
-    const base=await sharp({create:{width:48,height:32,channels:4,background:'#c9aaa0'}}).png().toBuffer();
-    const logo=await sharp(Buffer.from('<svg width="20" height="8"><text x="0" y="7" font-size="8">LOGO</text></svg>')).png().toBuffer();
-    const targets=[{id:'body',x:.5,y:.5,widthRatio:.4,printFinish:'VERSION'}];
+    const base=await sharp({create:{width:128,height:64,channels:4,background:'#c9aaa0'}}).png().toBuffer();
+    const logo=await sharp(Buffer.from('<svg width="24" height="12"><path fill="#235689" fill-rule="evenodd" d="M0 0H24V12H0Z M7 3V9H17V3Z"/></svg>')).png().toBuffer();
+    const targets=[{id:'body',x:.25,y:.5,widthRatio:.4,printFinish:'VERSION',preserveOriginalColor:true},{id:'carton',x:.75,y:.5,widthRatio:.4,carrierType:'CARTON_FRONT',printFinish:'INK',color:'#000000'}];
     const set=await renderLogoSet({baseImage:base,logoImage:logo,targets,originalColor:'#000000'});
-    const silver=set.outputs.find(item=>item.version==='SILVER FOIL');
+    const guide=set.outputs.find(item=>item.version===version);
     let calls=0;const stages=[];
-    const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async()=>{calls++;throw Error('silver must not be sent to APIMart');}});
-    const [result]=await renderer({model:'flux-3-image',onlyVersion:'SILVER FOIL',baseImage:`data:image/png;base64,${base.toString('base64')}`,logoImage:`data:image/png;base64,${logo.toString('base64')}`,targets,originalColor:'#000000',guides:[{version:'SILVER FOIL',dataUrl:`data:image/png;base64,${silver.bytes.toString('base64')}`,maskDataUrl:`data:image/png;base64,${silver.mask.toString('base64')}`,foilMaskDataUrl:`data:image/png;base64,${silver.foilMask.toString('base64')}`,goldMaskDataUrl:`data:image/png;base64,${silver.goldMask.toString('base64')}`}],onStage:(_version,stage)=>stages.push(stage)});
+    const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async()=>{calls++;throw Error('local mockups must not be sent to APIMart');}});
+    const [result]=await renderer({model:'local',onlyVersion:version,baseImage:`data:image/png;base64,${base.toString('base64')}`,logoImage:`data:image/png;base64,${logo.toString('base64')}`,targets,originalColor:'#000000',guides:[{version,dataUrl:`data:image/png;base64,${guide.bytes.toString('base64')}`,maskDataUrl:`data:image/png;base64,${guide.mask.toString('base64')}`,foilMaskDataUrl:`data:image/png;base64,${guide.foilMask.toString('base64')}`,goldMaskDataUrl:`data:image/png;base64,${guide.goldMask.toString('base64')}`}],onStage:(_version,stage)=>stages.push(stage)});
     assert.equal(calls,0);
     assert.ok(!result.bytes.equals(base));
     assert.deepEqual(stages,['generating','saving']);
+    const pixels=await sharp(result.bytes).ensureAlpha().raw().toBuffer(),original=await sharp(base).ensureAlpha().raw().toBuffer();
+    const mask=await sharp(guide.mask).greyscale().raw().toBuffer(),foil=await sharp(guide.foilMask).greyscale().raw().toBuffer();
+    const tones=new Set();let ink=0;
+    for(let i=0;i<mask.length;i++){
+      const k=i*4;
+      if(!mask[i])assert.deepEqual(pixels.subarray(k,k+4),original.subarray(k,k+4));
+      if(mask[i]!==255)continue;
+      if(!foil[i]){ink++;if(version!=='ORIGINAL'||i%128>=64)assert.ok(pixels[k]<=22);continue;}
+      tones.add(pixels[k]);
+      if(version==='GOLD FOIL')assert.ok(pixels[k]>pixels[k+1]&&pixels[k+1]>pixels[k+2]);
+    }
+    assert.ok(ink>0);
+    if(version==='ORIGINAL')assert.deepEqual([...pixels.subarray((32*128+13)*4,(32*128+13)*4+3)],[35,86,137]);
+    if(version==='ORIGINAL'||version==='BLACK')assert.deepEqual(pixels,await sharp(guide.bytes).ensureAlpha().raw().toBuffer(),'ordinary ink must retain the exact guide colors and antialiased edges');
+    else assert.ok(tones.size>2);
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 

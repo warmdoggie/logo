@@ -17,6 +17,9 @@ body { margin: 0; }
 .section-title h2 { margin: 0; font-size: 17px; }
 .section-title > span { color: #8b95a7; font-size: 12px; }
 .file-field { display: grid; gap: 7px; margin: 15px 0; font-size: 13px; font-weight: 700; }
+.logo-dropzone { display: grid; gap: 7px; padding: 14px 10px; border: 1px solid #e1e6f0; border-radius: 10px; cursor: text; }
+.logo-dropzone.drag-over,.logo-dropzone:focus { outline: 2px solid #5369d9; outline-offset: 2px; background-color: #f2f4ff; }
+.logo-dropzone>small { white-space: normal; line-height: 1.5; }
 .file-field input { width: 100%; border: 1px dashed #b9c3d6; border-radius: 10px; padding: 11px; background: #fafbfe; font-size: 12px; }
 .file-field small { color: #8a94a6; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selected-logo-preview { display: flex; align-items: center; gap: 10px; min-height: 74px; padding: 7px; border: 1px solid #e1e6f0; border-radius: 8px; background-color: #fff; background-image: linear-gradient(45deg,#edf0f5 25%,transparent 25%),linear-gradient(-45deg,#edf0f5 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#edf0f5 75%),linear-gradient(-45deg,transparent 75%,#edf0f5 75%); background-size: 16px 16px; background-position: 0 0,0 8px,8px -8px,-8px 0; }

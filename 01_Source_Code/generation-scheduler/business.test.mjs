@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtemp,readFile,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {randomUUID,createHash} from 'node:crypto';
+import {randomUUID,createHash,randomBytes} from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
@@ -13,6 +13,7 @@ import {userSpace} from '../s7-logo-stability/user-space.mjs';
 import {createStore} from './store.mjs';
 import {createDemoServer} from '../s7-logo-stability/demo-server.mjs';
 import {buildAiMockupPlan} from '../s7-logo-stability/ai-mockup-generation.mjs';
+import {readPlan} from './plans.mjs';
 
 test('single, multi-product and multi-logo batches survive the page process and project history once',async()=>{
  const source=new URL('../s7-logo-stability/scheduled-generation.mjs',import.meta.url);
@@ -43,6 +44,21 @@ test('single, multi-product and multi-logo batches survive the page process and 
    const batch=await store.batch(user.id,record.id);assert.equal(batch.status,'READY');assert.equal(batch.jobs.length,1);
    assert.equal(batch.jobs[0].status,'QUEUED','disabled provider must not make a paid request');batches.push({task,record,batch,extra});
   }
+  const large=await sharp(randomBytes(1600*1400*3),{raw:{width:1600,height:1400,channels:3}}).png().toBuffer();
+  const largeImage='data:image/png;base64,'+large.toString('base64'),largeInput={...input,baseImage:largeImage,guides:[{version:'BLACK',dataUrl:largeImage}]};
+  const largePlan=buildAiMockupPlan(largeInput)[0],largeTask=await spaces.createTask(user,{title:'large original image'});
+  assert.ok(Buffer.byteLength(JSON.stringify({key:'BLACK',plan:largePlan}))>32*1024*1024,'fixture must reproduce the scheduler body limit');
+  const legacyBatchId=randomUUID();
+  await store.beginBatch(user.id,legacyBatchId,{taskId:largeTask.id,generation:{id:legacyBatchId},items:[{key:'BLACK'}]});
+  let legacyUpload;
+  await assert.doesNotReject(async()=>{legacyUpload=await fetch(`http://127.0.0.1:${port}/v1/batches/${legacyBatchId}/jobs/${randomUUID()}`,{method:'PUT',headers:{Authorization:'Bearer '+token,'X-User-ID':user.id,'Content-Type':'application/json'},body:JSON.stringify({key:'BLACK',plan:largePlan})});assert.equal(legacyUpload.status,202);},'existing clients must accept a valid original-image plan larger than 32 MiB');
+  await store.abortBatch(user.id,legacyBatchId);
+  let largeRecord;
+  await assert.doesNotReject(async()=>{largeRecord=await service.start(user,largeTask.id,{model:'gpt-image-2',outputs:[]},[{input:largeInput}]);},'validated original images must reach the scheduler without duplicate image payloads');
+  const largeBatch=await store.batch(user.id,largeRecord.id);
+  assert.equal(largeBatch.status,'READY');assert.equal(largeBatch.jobs[0].status,'QUEUED');
+  assert.equal(largeBatch.jobs[0].params.planHash,createHash('sha256').update(JSON.stringify(largePlan)).digest('hex'),'transport must preserve existing retry fingerprints');
+  assert.deepEqual(await readPlan(folder,largeBatch.jobs[0].params.planHash),JSON.parse(JSON.stringify(largePlan)),'worker must receive every original image byte and print mask');
   const restarted=module.createScheduledGenerations(options);
   const legacy=await spaces.createTask(user,{title:'legacy remote resume'}),plan=buildAiMockupPlan(input)[0];
   const requestHash=createHash('sha256').update(JSON.stringify(['https://api.apimart.ai','test-never-sent',plan])).digest('hex');

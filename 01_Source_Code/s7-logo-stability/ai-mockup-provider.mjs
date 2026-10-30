@@ -37,7 +37,7 @@ export function getAiMockupProviderStatus(configPath=process.env.S7_AI_CONFIG||D
 }
 
 export function mockupResumeCheckpoint(plan,checkpoint,configPath=process.env.S7_AI_CONFIG||DEFAULT_CONFIG){
-  if(!checkpoint)return null;
+  if(plan.local||!checkpoint)return null;
   const config=configAt(configPath);if(!config)return null;
   const {local,...original}=plan;
   const hash=createHash('sha256').update(JSON.stringify([config.endpoint,config.apiKey,original])).digest('hex');
@@ -67,23 +67,17 @@ async function download(urlValue,{transport,signal}){
 export async function preservePrintSurface(plan,generatedImage){
   if(!plan.maskImage||!plan.placementGuide)return generatedImage;
   const imageBytes=value=>Buffer.from(value.slice(value.indexOf(',')+1),'base64');
+  if(plan.local&&(!plan.foilMaskImage||!(await sharp(imageBytes(plan.foilMaskImage)).greyscale().raw().toBuffer()).some(value=>value>0)))return imageBytes(plan.placementGuide);
   return lockOutsideLogo({baseImage:imageBytes(plan.baseImage),generatedImage,guideImage:imageBytes(plan.placementGuide),maskImage:imageBytes(plan.maskImage),foilMaskImage:plan.foilMaskImage?imageBytes(plan.foilMaskImage):undefined,goldMaskImage:plan.goldMaskImage?imageBytes(plan.goldMaskImage):undefined,surfaceResponse:!!plan.foilMaskImage,feather:0,useGeneratedLighting:!!plan.foilMaskImage||plan.version==='GOLD FOIL'||plan.version==='SILVER FOIL',foilFinish:plan.goldMaskImage||plan.version==='GOLD FOIL'?'gold':undefined});
 }
 
-async function hasMaskPixels(dataUrl){
-  if(!dataUrl)return false;
-  const bytes=Buffer.from(dataUrl.slice(dataUrl.indexOf(',')+1),'base64');
-  const pixels=await sharp(bytes).greyscale().raw().toBuffer();
-  return pixels.some(value=>value>0);
-}
+export function isLocalMockup(plan){return ['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL'].includes(plan.version)&&!!plan.foilMaskImage&&!!plan.maskImage&&!!plan.placementGuide;}
 
-export async function isLocalSilver(plan){return plan.version==='SILVER FOIL'&&!!plan.foilMaskImage&&!await hasMaskPixels(plan.goldMaskImage);}
-
-async function renderSilverLocally(plan,{onStage}){
-  if(!await isLocalSilver(plan))return null;
+async function renderLocally(plan,{onStage}){
+  if(!isLocalMockup(plan))return null;
   try{await onStage?.(plan.version,'generating');}catch{}
   const imageBytes=value=>Buffer.from(value.slice(value.indexOf(',')+1),'base64');
-  const bytes=await preservePrintSurface(plan,imageBytes(plan.baseImage));
+  const bytes=await preservePrintSurface({...plan,local:true},imageBytes(plan.baseImage));
   try{await onStage?.(plan.version,'saving');}catch{}
   return {version:plan.version,bytes};
 }
@@ -152,13 +146,17 @@ async function renderOne(config,plan,{transport,pollIntervalMs,onStage,onCheckpo
 export function createAiMockupRenderer({configPath=process.env.S7_AI_CONFIG||DEFAULT_CONFIG,transport=fetch,pollIntervalMs=3000}={}){
   return async input=>{
     const config=configAt(configPath);
-    if(!config)throw Error('S7 AI 成图需要配置可用的 APIMART 图片模型');
-    const plan=buildAiMockupPlan({...input,model:selectedModel(config,input.model)});
-    const requestTransport=createApimartTransport({proxyUrl:config.proxyUrl||process.env.S7_APIMART_PROXY_URL||process.env.APIMART_PROXY_URL,transport});
+    const plan=buildAiMockupPlan({...input,model:input.model||config?.model||'local'});
+    let requestTransport;
+    if(plan.some(item=>!isLocalMockup(item))){
+      if(!config)throw Error('S7 AI 成图需要配置可用的 APIMART 图片模型');
+      selectedModel(config,input.model);
+      requestTransport=createApimartTransport({proxyUrl:config.proxyUrl||process.env.S7_APIMART_PROXY_URL||process.env.APIMART_PROXY_URL,transport});
+    }
     const onStage=input.onStage,onOutput=input.onOutput;
     const settled=await Promise.allSettled(plan.map(async item=>{
       try{
-        const localOutput=await renderSilverLocally(item,{onStage});
+        const localOutput=await renderLocally(item,{onStage});
         const output=localOutput||await renderOne(config,item,{transport:requestTransport,pollIntervalMs,onStage,onCheckpoint:input.onCheckpoint,resumeTasks:input.resumeTasks});
         await onOutput?.(output);
         return output;

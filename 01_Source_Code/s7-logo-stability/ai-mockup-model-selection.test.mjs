@@ -44,8 +44,10 @@ test('selected mockup model is forwarded to APIMart without changing the default
     }});
     await renderer({model:'flux-3-image',baseImage:'data:image/png;base64,BASE',logoImage:'data:image/png;base64,LOGO',guides,originalColor:'#000000'});
     assert.equal(sent[0].model,'flux-3-image');
+    assert.equal(sent[0].resolution,'1k');
     await renderer({baseImage:'data:image/png;base64,BASE',logoImage:'data:image/png;base64,LOGO',guides,originalColor:'#000000'});
     assert.equal(sent[4].model,'gpt-image-2.5-flare');
+    assert.ok(sent.slice(4).every(request=>request.resolution==='1K'));
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 

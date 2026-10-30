@@ -119,11 +119,11 @@ function fluxPromptFor(variant,{targets=[],logoAspectRatio=1,placementGuide=fals
 
 function buildGptRequest(variant,{model,size,baseImage,compositionMaster,logoImage,guide,finishReference,targets,originalColor}){
   const useCompositionMaster=variant.version!=='ORIGINAL'&&Boolean(asDataUrl(compositionMaster));
-  return {model:model.trim(),n:1,size,resolution:'2K',prompt:promptFor(variant,{compositionMaster:useCompositionMaster,targets,originalColor,finishReference:Boolean(finishReference)}),image_urls:[logoImage,useCompositionMaster?compositionMaster:baseImage,guide,...(finishReference?[finishReference]:[])]};
+  return {model:model.trim(),n:1,size,resolution:'1K',prompt:promptFor(variant,{compositionMaster:useCompositionMaster,targets,originalColor,finishReference:Boolean(finishReference)}),image_urls:[logoImage,useCompositionMaster?compositionMaster:baseImage,guide,...(finishReference?[finishReference]:[])]};
 }
 
 function buildFluxRequest(variant,{model,size,baseImage,logoImage,placementGuide,finishReference,targets,logoAspectRatio,originalColor}){
-  return {model:model.trim(),n:1,aspect_ratio:size,resolution:'2k',safety_tolerance:2,grounding:false,prompt:fluxPromptFor(variant,{targets,logoAspectRatio,placementGuide:Boolean(placementGuide),finishReference:Boolean(finishReference),originalColor}),image_urls:[baseImage,logoImage,...(placementGuide?[placementGuide]:[]),...(finishReference?[finishReference]:[])]};
+  return {model:model.trim(),n:1,aspect_ratio:size,resolution:'1k',safety_tolerance:2,grounding:false,prompt:fluxPromptFor(variant,{targets,logoAspectRatio,placementGuide:Boolean(placementGuide),finishReference:Boolean(finishReference),originalColor}),image_urls:[baseImage,logoImage,...(placementGuide?[placementGuide]:[]),...(finishReference?[finishReference]:[])]};
 }
 
 export function pickAspectRatio(width,height){

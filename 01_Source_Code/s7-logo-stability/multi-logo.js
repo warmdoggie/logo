@@ -2,6 +2,7 @@ import {createTaskDraft} from './task-draft.mjs';
 import {createGenerationWatcher} from './generation-client.mjs';
 import {masterTargetsFromTemplate} from './product-master.mjs';
 import {generationVersions as versions} from './generation-versions.mjs';
+import {bindLogoImageTransfer} from './logo-image-transfer.mjs';
 
 const base=location.pathname.startsWith('/s7/')?'/s7':'',path=value=>value.startsWith('/api/')?base+value:value;
 const $=id=>document.getElementById(id),taskId=new URLSearchParams(location.search).get('task');
@@ -60,7 +61,9 @@ async function generate(retryFailed=false){
  processing=true;controls();
  try{await draft.flush();const record=await api('/api/ai-render-logos',{taskId,productId:$('product').value,model:$('model').value,logos,retryFailed});watcher.track(record);}catch(error){status(error.message,true);}finally{processing=false;controls();}
 }
-$('uploads').onchange=async event=>{processing=true;controls();try{for(const file of event.target.files)addLogo(file.name,await readFile(file));}catch(error){status(error.message,true);}finally{event.target.value='';processing=false;controls();}};
+async function importLogoFiles(files){if(!enabled||!ready||processing||job?.status==='running')return;processing=true;controls();try{for(const file of files)addLogo(file.name||'粘贴的 Logo.png',await readFile(file));}catch(error){status(error.message,true);}finally{processing=false;controls();}}
+$('uploads').onchange=async event=>{try{await importLogoFiles([...event.target.files]);}finally{event.target.value='';}};
+bindLogoImageTransfer({dropzone:$('logo-dropzone'),onFiles:importLogoFiles});
 $('logo-search').oninput=renderLibrary;$('product').onchange=()=>{save();selectProduct();};$('model').onchange=save;
 $('generate').onclick=()=>generate();$('retry').onclick=()=>generate(true);$('close-preview').onclick=()=>$('preview').close();$('history-panel').ontoggle=()=>{if($('history-panel').open)refreshHistory().catch(error=>status(error.message,true));};
 $('back').hidden=window.parent!==window;
@@ -71,7 +74,7 @@ try{
  const state=await draft.load();if(state.mode!=='multi-logo')throw Error('此任务为原有上样任务，请从任务列表打开。');
  logos=state.logos||[];renderLogos();
  const products=await api('/api/product-library');for(const product of products)$('product').append(new Option(`${product.sku} · ${product.name}`,product.id));$('product').value=state.productId||'';
- try{const models=await api('/api/ai-models');$('model').replaceChildren(...(models.models||[]).map(model=>new Option(model,model)));$('model').value=Array.from($('model').options).some(option=>option.value===state.model)?state.model:models.models?.includes('flux-3-image')?'flux-3-image':models.defaultModel||models.models?.[0]||'';}catch{$('model').replaceChildren(new Option('暂无可用模型',''));}
+ $('model').replaceChildren(new Option('本地合成','local'));$('model').value='local';$('model').disabled=true;
  await selectProduct();draft.activate();ready=true;controls();
  watcher=createGenerationWatcher({request:()=>api(`/api/my-space/tasks/${taskId}/generation`),onChange:renderJob,onError:error=>{status('进度暂时无法读取：'+error.message,true);if(error.status===401){ready=false;controls();}}});await watcher.refresh();
  if(!job)status(enabled?'选择一个产品并添加多个 Logo。':'多 Logo 生成功能已关闭，已有结果仍可查看。');

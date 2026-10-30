@@ -15,6 +15,7 @@ import {downloadKey,syncDownloadSelection,selectedDownloadOutputs} from './downl
 import {createPreviewImages,previewImageUrl} from './preview-images.mjs';
 import {createImagePreview} from './image-preview.mjs';
 import {copyProductPreset} from './product-preset.mjs';
+import {bindLogoImageTransfer} from './logo-image-transfer.mjs';
 
 const targets=document.querySelector('#targets');
 const status=document.querySelector('#status');
@@ -87,7 +88,7 @@ const currentTaskId=new URLSearchParams(location.search).get('task');
 let taskDraft=null,lastResultPayload=null,generationWatcher=null,generationId=null,dismissedGenerationId=null,taskActive=true;
 let downloadSelection={},downloadingSelected=false,downloadSelectionReady=!currentTaskId;
 window.addEventListener('message',event=>{if(event.origin!==location.origin||event.source!==window.parent||event.data?.type!=='s7-task-visibility'||event.data.taskId!==currentTaskId)return;taskActive=event.data.active;generationWatcher?.setActive(taskActive);});
-function notifyTask(text,busy=false,updatedAt){if(currentTaskId&&window.parent!==window)window.parent.postMessage({type:'s7-task-status',taskId:currentTaskId,text,busy,updatedAt},location.origin);}
+function notifyTask(text,busy=false,updatedAt,title){if(currentTaskId&&window.parent!==window)window.parent.postMessage({type:'s7-task-status',taskId:currentTaskId,text,busy,updatedAt,title},location.origin);}
 
 const esc=value=>String(value).replace(/[&<>"']/g,character=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]));
 const S7_BASE=location.pathname==='/s7'||location.pathname.startsWith('/s7/')?'/s7':'';
@@ -504,7 +505,7 @@ function updateSchemeHeading(){
 function loadSchemeTargets(){
   rebuildingTargets=true;targets.replaceChildren();targetNumber=0;
   const current=schemeState.schemes.find(scheme=>scheme.version===activeScheme);
-  if(!current.targets.some(target=>target.id===selectedTargetId))selectedTargetId=current.targets[0]?.id;
+  if(selectedTargetId!==null&&!current.targets.some(target=>target.id===selectedTargetId))selectedTargetId=current.targets[0]?.id;
   current.targets.forEach(addTarget);rebuildingTargets=false;
   refreshTargetSelection();updateSchemeHeading();drawPreview();
 }
@@ -753,7 +754,7 @@ function refreshTargetSelection(){
   document.querySelector('#keep-original-colors').checked=keepOriginal;
   originalColorInput.disabled=print?.version!=='ORIGINAL'||keepOriginal;
   autoContrastInput.checked=autoContrast;
-  autoContrastInput.disabled=isCarton({carrierType:selectedRow?.querySelector('[data-key="carrierType"]').value})||selectedRow?.querySelector('[data-key="printFinish"]').value==='INK';
+  autoContrastInput.disabled=!selectedRow||isCarton({carrierType:selectedRow.querySelector('[data-key="carrierType"]').value})||selectedRow.querySelector('[data-key="printFinish"]').value==='INK';
   originalColorValue.textContent=print?.version==='ORIGINAL'&&keepOriginal?'Logo 原色':color.toUpperCase();
   document.querySelector('#selected-target').textContent=selectedTargetId?`当前：${selectedTargetId}`:'未选择目标';
 }
@@ -764,7 +765,21 @@ function targetRect(target){
 }
 function targetAt(point){
   const list=collectTargets();
-  for(let i=list.length-1;i>=0;i--){const rect=targetRect(list[i]);if(point.x*canvas.width>=rect.left&&point.x*canvas.width<=rect.left+rect.width&&point.y*canvas.height>=rect.top&&point.y*canvas.height<=rect.top+rect.height)return list[i];}
+  for(let i=list.length-1;i>=0;i--){
+    const target=list[i];
+    if(target.quad){
+      let inside=false;
+      for(let j=0,k=target.quad.length-1;j<target.quad.length;k=j++){
+        const a=target.quad[j],b=target.quad[k],cross=(point.x-a.x)*(b.y-a.y)-(point.y-a.y)*(b.x-a.x);
+        if(Math.abs(cross)<1e-9&&point.x>=Math.min(a.x,b.x)&&point.x<=Math.max(a.x,b.x)&&point.y>=Math.min(a.y,b.y)&&point.y<=Math.max(a.y,b.y))return target;
+        if((a.y>point.y)!==(b.y>point.y)&&point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x)inside=!inside;
+      }
+      if(inside)return target;
+    }else{
+      const rect=targetRect(target),angle=-(target.rotation||0)*Math.PI/180,dx=(point.x-target.x)*canvas.width,dy=(point.y-target.y)*canvas.height;
+      if(Math.abs(dx*Math.cos(angle)-dy*Math.sin(angle))<=rect.width/2&&Math.abs(dx*Math.sin(angle)+dy*Math.cos(angle))<=rect.height/2)return target;
+    }
+  }
   return null;
 }
 function canvasPoint(event){
@@ -858,7 +873,7 @@ function drawPreview(){
       logoImage,width,height,color:print.color,finish:print.finish
     });
     const curvedLayer=curvePreviewLogo(logoLayer,target.curve);
-    if(target.quad)drawQuadPreview(context,curvedLayer,target.quad);else{context.save();context.translate(target.x*canvas.width,target.y*canvas.height);context.rotate(target.rotation*Math.PI/180);context.globalAlpha=1;context.drawImage(curvedLayer,-width/2,-height/2,width,height);context.strokeStyle=target.id===selectedTargetId?'#5369d9':'#ffffff';context.lineWidth=Math.max(2,canvas.width/500);context.setLineDash(target.id===selectedTargetId?[]:[8,6]);context.strokeRect(-width/2,-height/2,width,height);context.restore();}
+    if(target.quad)drawQuadPreview(context,curvedLayer,target.quad);else{context.save();context.translate(target.x*canvas.width,target.y*canvas.height);context.rotate(target.rotation*Math.PI/180);context.globalAlpha=1;context.drawImage(curvedLayer,-width/2,-height/2,width,height);if(target.id===selectedTargetId){context.strokeStyle='#5369d9';context.lineWidth=Math.max(2,canvas.width/500);context.setLineDash([]);context.strokeRect(-width/2,-height/2,width,height);}context.restore();}
     if(target.id===selectedTargetId){const handles=handlePoints(target),size=Math.max(10,canvas.width/80);context.setLineDash([]);context.strokeStyle='#5369d9';context.lineWidth=Math.max(2,canvas.width/500);context.beginPath();context.moveTo(handles.center.x,handles.center.y);context.lineTo(handles.rotation.x,handles.rotation.y);context.stroke();context.fillStyle='#5369d9';context.fillRect(handles.scale.x-size/2,handles.scale.y-size/2,size,size);drawRotationArrow(context,handles.rotation,size*1.55,target.rotation);if(target.quad){const points=target.quad.map(point=>({x:point.x*context.canvas.width,y:point.y*context.canvas.height}));context.beginPath();context.moveTo(points[0].x,points[0].y);for(const point of points.slice(1))context.lineTo(point.x,point.y);context.closePath();context.stroke();for(const point of points)context.fillRect(point.x-size/2,point.y-size/2,size,size);}}
   }
 }
@@ -877,7 +892,7 @@ canvas.addEventListener('pointerdown',event=>{
     rotateTimer=setTimeout(()=>{if(dragTarget===selected&&dragMode==='rotate-pending'&&rotatePointerId===event.pointerId)dragMode='rotate';},ROTATE_LONG_PRESS_MS);
   }
   else{dragTarget=targetAt(normalized);if(dragTarget&&!canMoveTarget(dragTarget)){selectedTargetId=dragTarget.id;refreshTargetSelection();drawPreview();setStatus('该 Logo 的母版位置已锁定，请先点击目标卡片中的“移动位置”。','success');dragTarget=null;return;}dragMode=dragTarget?'move':null;}
-  if(!dragTarget)return;selectedTargetId=dragTarget.id;canvas.setPointerCapture(event.pointerId);canvas.classList.add('dragging');refreshTargetSelection();drawPreview();
+  if(!dragTarget){selectedTargetId=null;refreshTargetSelection();drawPreview();return;}selectedTargetId=dragTarget.id;canvas.setPointerCapture(event.pointerId);canvas.classList.add('dragging');refreshTargetSelection();drawPreview();
 });
 canvas.addEventListener('pointermove',event=>{
   if(!dragTarget)return;
@@ -917,13 +932,18 @@ document.querySelector('#preview-version').onchange=()=>switchScheme(document.qu
 originalColorInput.oninput=()=>{const selectedRow=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);if(!selectedRow)return;selectedRow.dataset.logoColor=originalColorInput.value;selectedRow.dataset.keepOriginal='false';originalColorValue.textContent=originalColorInput.value.toUpperCase();drawPreview();};
 document.querySelector('#keep-original-colors').onchange=event=>{const row=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);if(!row)return;row.dataset.keepOriginal=String(event.target.checked);refreshTargetSelection();drawPreview();};
 autoContrastInput.onchange=()=>{const selectedRow=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);if(!selectedRow)return;selectedRow.dataset.autoContrast=String(autoContrastInput.checked);drawPreview();};
-document.querySelector('#logo-image').onchange=async event=>{
+async function importLogoFiles(files){
   if(generationBusy||multiPackageBusy||logoSelectionBusy)return;
-  const files=[...event.target.files];logoImportBusy=true;logoSelectionBusy=true;updateGenerateButton();
-  try{for(const file of files){const loaded=await fileData(file);await addTaskLogo({id:crypto.randomUUID(),name:file.name.slice(0,120),logoImage:loaded.data,sourceData:loaded.data});}}
+  if(!files.length)return;
+  logoImportBusy=true;logoSelectionBusy=true;updateGenerateButton();
+  try{for(const file of files){const loaded=await fileData(file);await addTaskLogo({id:crypto.randomUUID(),name:(file.name||'粘贴的 Logo.png').slice(0,120),logoImage:loaded.data,sourceData:loaded.data});}}
   catch(error){setStatus(error.message,'error');}
-  finally{event.target.value='';logoImportBusy=false;logoSelectionBusy=logoDecoding;updateGenerateButton();renderLogoLibrary();renderProductLibrary();}
+  finally{logoImportBusy=false;logoSelectionBusy=logoDecoding;updateGenerateButton();renderLogoLibrary();renderProductLibrary();}
+}
+document.querySelector('#logo-image').onchange=async event=>{
+  try{await importLogoFiles([...event.target.files]);}finally{event.target.value='';}
 };
+bindLogoImageTransfer({dropzone:document.querySelector('#logo-dropzone'),onFiles:importLogoFiles});
 
 useSavedLogoButton.onclick=async()=>{try{await useSavedLogo();setStatus('已使用保存的透明 Logo，无需重新生成。','success');}catch(error){setStatus(error.message,'error');}};
 clearSavedLogoButton.onclick=()=>{clearSavedLogo(logoStorage);useSavedLogoButton.hidden=true;clearSavedLogoButton.hidden=true;setStatus('已清除保存的透明 Logo；当前页面中的 Logo 仍可继续使用。','success');};
@@ -953,17 +973,9 @@ async function loadAiProviderStatus(){
 }
 
 async function loadMockupModels(){
-  try{
-    const response=await fetch('/api/ai-models'),payload=await response.json();
-    if(!response.ok||!payload.configured||!Array.isArray(payload.models)||!payload.models.length)throw Error('尚未配置可用的 AI 成图模型');
-    mockupModel.replaceChildren(...payload.models.map(model=>{const option=document.createElement('option');option.value=model;option.textContent=model;return option;}));
-    mockupModel.value=payload.models.includes('flux-3-image')?'flux-3-image':payload.defaultModel&&payload.models.includes(payload.defaultModel)?payload.defaultModel:payload.models[0];
-    mockupModel.disabled=false;
-    renderMultiProductResults();
-  }catch(error){
-    mockupModel.replaceChildren(new Option('暂无可用模型',''));
-    mockupModel.disabled=true;
-  }
+  mockupModel.replaceChildren(new Option('本地合成','local'));
+  mockupModel.value='local';mockupModel.disabled=true;
+  renderMultiProductResults();
 }
 
 function setPreviewScale(value){
@@ -1185,7 +1197,7 @@ if(currentTaskId&&s7User){
  taskDraft=createTaskDraft({id:currentTaskId,
   request:async(url,data,method='GET')=>{const response=await fetch(url,{method,headers:{'Content-Type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});const value=await response.json();if(!response.ok)throw Error(value.error||'任务保存失败');return value;},
   capture:()=>{const multiLogoLayouts=captureMultiLogoLayouts(),multiProductLayouts=captureMultiProductLayouts(),baseAssetUrl=multiProductViews.get(loadedMultiProductId)?.baseAssetUrl||'';return {mode:'ordinary',taskLogos,multiLogoLayouts,selectedTaskLogoId,schemeState,activeScheme,placementScope,savedSignatures,dismissedGenerationId,downloadSelection,selectedVersions:selectedGenerationVersions(),baseData:baseAssetUrl?'':baseData,baseProductId:loadedMultiProductId,logoData:taskLogos.length?'':logoData,logoSourceData:taskLogos.length?'':logoSourceData,baseDataUrl:baseAssetUrl||(baseData?'':baseImage?.src||''),logoDataUrl:taskLogos.length||logoData?'':logoImage?.src||'',targets:collectTargets(),selectedTargetId,model:mockupModel.value,logoOutputColor:document.querySelector('input[name="logo-output-color"]:checked').value,baseName:document.querySelector('#base-name').textContent,logoName:document.querySelector('#logo-name').textContent,result:multiPackageProducts.length>1||taskLogos.length>1?null:lastResultPayload,multiPackageProducts,multiProductLayouts,selectedMultiProductId};},
-  onSaved:record=>{const busy=status.classList.contains('busy');notifyTask(busy?'生成中…':'已保存',busy,record.updatedAt);},onError:error=>{status.textContent=error.message;status.className='status error';notifyTask('保存失败');}});
+  onSaved:record=>{const busy=status.classList.contains('busy');notifyTask(busy?'生成中…':'已保存',busy,record.updatedAt,record.title);},onError:error=>{status.textContent=error.message;status.className='status error';notifyTask('保存失败');}});
  try{
   const state=await taskDraft.load();
   taskLogos=Array.isArray(state.taskLogos)?state.taskLogos:Array.isArray(state.logos)?state.logos:[];

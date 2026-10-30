@@ -25,7 +25,7 @@
           <input id="logo-library-search" class="product-library-search" type="search" placeholder="搜索 Logo 名称">
           <div id="logo-library-list" class="product-library-list" aria-live="polite">正在读取 Logo 库…</div>
         </div>
-        <div class="file-field"><label for="logo-image" class="text-button">上传 Logo（可多选）</label><input id="logo-image" type="file" accept="image/*" multiple hidden><span id="selected-logo-preview" class="selected-logo-preview" hidden><img id="selected-logo-thumbnail" alt="当前选中的 Logo"><small id="logo-name">尚未选择</small></span></div>
+        <div class="file-field"><label for="logo-image" class="text-button">选择 Logo 文件（可多选）</label><input id="logo-image" type="file" accept="image/*" multiple hidden><div id="logo-dropzone" class="logo-dropzone" role="group" aria-label="Logo 素材，可粘贴或拖入图片" tabindex="0"><strong>点击此处后按 Ctrl+V 粘贴图片</strong><small>也可将图片拖到这里</small><span id="selected-logo-preview" class="selected-logo-preview" hidden><img id="selected-logo-thumbnail" alt="当前选中的 Logo"><small id="logo-name">尚未选择</small></span></div></div>
         <button id="process-logo" type="button" class="button secondary process-button" disabled>AI 加工 Logo（透明底）</button>
         <button id="use-saved-logo" type="button" class="text-button" hidden>使用已保存 Logo</button>
         <button id="clear-saved-logo" type="button" class="text-button" hidden>清除已保存 Logo</button>
@@ -68,22 +68,22 @@
       <button id="target-toolbar-drag" class="target-toolbar-drag" type="button" aria-label="拖动工具栏，也可使用方向键移动" title="拖动工具栏 · 方向键也可移动"><svg width="16" height="20" viewBox="0 0 16 20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="4" r="1.5"/><circle cx="11" cy="4" r="1.5"/><circle cx="5" cy="10" r="1.5"/><circle cx="11" cy="10" r="1.5"/><circle cx="5" cy="16" r="1.5"/><circle cx="11" cy="16" r="1.5"/></svg></button>
       <div class="target-toolbar-title"><strong>上样目标</strong><span id="target-toolbar-summary">拖动 Logo 调整位置</span></div>
       <button id="toggle-target-toolbar" class="target-toolbar-toggle" type="button" aria-expanded="false" aria-controls="target-toolbar-body">展开 <span aria-hidden="true">⌄</span></button>
-      <button id="generate" type="button" class="button primary">AI 生成 4 个版本</button>
+      <button id="generate" type="button" class="button primary">生成 4 个版本</button>
     </div>
     <div id="target-toolbar-body" class="target-toolbar-body" hidden>
       <div class="target-toolbar-editor-head"><p>点击“移动位置”后拖动 Logo；在下方调整载体与工艺。</p><div class="target-toolbar-editor-actions"><span id="product-preset-options" class="product-preset-options" role="group" aria-label="同步内容" hidden><label><input id="copy-preset-size" type="checkbox" checked>大小</label><label title="包含颜色及原色/自动配色设置"><input id="copy-preset-color" type="checkbox" checked>颜色</label><label><input id="copy-preset-print-finish" type="checkbox" checked>印刷工艺</label><label><input id="copy-preset-rotation" type="checkbox" checked>角度</label></span><button id="apply-product-preset" type="button" class="button secondary" title="将勾选的设置应用到当前任务的其他已选产品" hidden>应用到其他产品</button><button id="add-target" type="button" class="button secondary">+ 添加目标</button></div></div>
       <div id="targets" class="targets"></div>
       <div class="target-toolbar-footer">
-        <details class="target-toolbar-settings"><summary>生成设置</summary><label class="model-field">成图模型<select id="mockup-model" required><option value="">正在读取模型配置…</option></select></label></details>
+        <details class="target-toolbar-settings"><summary>生成设置</summary><label class="model-field">生成方式<select id="mockup-model" required disabled><option value="local">本地合成</option></select></label></details>
         <button id="reset-target-toolbar" type="button" class="text-button">回到画布上方</button>
       </div>
       <fieldset id="generation-versions" class="generation-versions" hidden>
         <legend>选择生成版本</legend>
         <label><input type="checkbox" value="ORIGINAL" checked> 原色</label>
         <label><input type="checkbox" value="BLACK" checked> 黑色</label>
-        <label><input type="checkbox" value="GOLD FOIL" checked> 烫金</label>
-        <label><input type="checkbox" value="SILVER FOIL" checked> 烫银</label>
-        <small class="hint">默认全选，取消任意一项即可生成三张；至少选择一项。</small>
+        <label><input type="checkbox" value="GOLD FOIL"> 烫金</label>
+        <label><input type="checkbox" value="SILVER FOIL"> 烫银</label>
+        <small class="hint">默认勾选原色和黑白；烫金、烫银可按需勾选，至少选择一项。</small>
       </fieldset>
       <button id="generate-modified" type="button" class="button secondary regenerate-modified" hidden>重新生成已修改方案</button>
       <p id="status" class="status" role="status">等待上传素材。</p>

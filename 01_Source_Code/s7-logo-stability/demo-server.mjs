@@ -32,6 +32,7 @@ PUBLIC_FILES.add('image-preview.mjs');
 PUBLIC_FILES.add('product-categories.js');
 PUBLIC_FILES.add('target-toolbar.mjs');
 PUBLIC_FILES.add('product-preset.mjs');
+PUBLIC_FILES.add('logo-image-transfer.mjs');
 const PRODUCT_LIBRARY_URL=process.env.S7_PRODUCT_LIBRARY_URL||'http://127.0.0.1:3210/api/products?includeInactive=0';
 for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css'])PUBLIC_FILES.add(file);
 

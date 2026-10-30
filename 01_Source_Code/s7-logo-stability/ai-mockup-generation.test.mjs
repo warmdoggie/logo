@@ -27,7 +27,7 @@ test('四个AI上样版本使用锁定原图和对应定位参考图',()=>{
   assert.deepEqual(plan.map(item=>item.version),['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL']);
   assert.deepEqual(plan[0].request.image_urls,['data:image/png;base64,LOGO','data:image/png;base64,BASE','data:image/png;base64,GUIDE_ORIGINAL']);
   assert.equal(plan[0].request.size,'1:1');
-  assert.equal(plan[0].request.resolution,'2K');
+  assert.equal(plan[0].request.resolution,'1K');
   assert.match(plan[0].request.prompt,/Image 1 is the only logo source/i);
   assert.match(plan[0].request.prompt,/Image 2 is the pixel-locked product/i);
   assert.match(plan[0].request.prompt,/Image 3 is the exact placement/i);
@@ -194,7 +194,7 @@ test('Flux uses its own reference order, aspect ratio and bbox JSON request form
   const silverRequest=plan[3].request;
   assert.equal(request.model,'flux-3-image');
   assert.equal(request.aspect_ratio,'4:3');
-  assert.equal(request.resolution,'2k');
+  assert.equal(request.resolution,'1k');
   assert.equal(request.safety_tolerance,2);
   assert.equal(request.grounding,false);
   assert.equal(request.n,1);
@@ -235,7 +235,7 @@ test('GPT keeps the existing image order and does not receive Flux-only fields',
     'data:image/png;base64,LOGO','data:image/png;base64,BASE','data:image/png;base64,GUIDE_ORIGINAL'
   ]);
   assert.equal(request.size,'4:3');
-  assert.equal(request.resolution,'2K');
+  assert.equal(request.resolution,'1K');
   assert.equal('aspect_ratio' in request,false);
   assert.equal('safety_tolerance' in request,false);
   assert.equal('grounding' in request,false);

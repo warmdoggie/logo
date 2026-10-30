@@ -29,8 +29,12 @@ export async function businessApi(req,res,{store,user,directory,enabled,send}){
   if(!batch)fail(404,'batch_not_found');
   if(action==='jobs'&&req.method==='PUT'&&uuid.test(requestId||'')){
    if(!await hasDiskSpace(directory,2))fail(507,'disk_reserve_required');
-   const {key,plan,resumeJobId,resumeTask}=await body(req,32*1024*1024);
-   if(!batch.descriptor.items.some(item=>item.key===key)||!plan||plan.request?.n!==1||!['gpt-image-2','gpt-image-2.5-flare','flux-3-image'].includes(plan.request.model)||typeof plan.request.prompt!=='string'||!plan.request.prompt.trim())fail(400,'invalid_image_plan');
+   const {key,plan,imageRefs,resumeJobId,resumeTask}=await body(req,64*1024*1024);
+   if(!batch.descriptor.items.some(item=>item.key===key)||!plan||plan.request?.n!==1||(!['gpt-image-2','gpt-image-2.5-flare','flux-3-image'].includes(plan.request.model)&&!(plan.local===true&&plan.request.model==='local'))||typeof plan.request.prompt!=='string'||!plan.request.prompt.trim())fail(400,'invalid_image_plan');
+   for(const [field,index] of Object.entries(imageRefs||{})){
+    if(!['baseImage','placementGuide','maskImage','foilMaskImage','goldMaskImage'].includes(field)||plan[field]!==null||!Number.isInteger(index)||index<0||typeof plan.request.image_urls?.[index]!=='string')fail(400,'invalid_image_reference');
+    plan[field]=plan.request.image_urls[index];
+   }
    const serialized=JSON.stringify(plan),hash=createHash('sha256').update(serialized).digest('hex');
    const folder=join(directory,'plans');await mkdir(folder,{recursive:true,mode:0o700});
    const path=join(folder,hash+'.json'),temporary=path+'.'+randomUUID();

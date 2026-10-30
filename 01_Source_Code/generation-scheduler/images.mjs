@@ -11,8 +11,8 @@ export async function processScheduledImage(job,{directory,storage}){
   if(!ready){
   if(business){
    const plan=await readPlan(directory,job.params.planHash);
-   const {preservePrintSurface,isLocalSilver}=await import(appModule('s7-logo-stability/ai-mockup-provider.mjs'));
-   if(job.params.local&&!await isLocalSilver(plan))throw Error('Invalid local print plan');
+   const {preservePrintSurface,isLocalMockup}=await import(appModule('s7-logo-stability/ai-mockup-provider.mjs'));
+   if(job.params.local&&!isLocalMockup(plan))throw Error('Invalid local print plan');
    const source=job.params.local?Buffer.from(plan.baseImage.split(',')[1],'base64'):await readFile(job.file_path);
    const pixels=await sharp(source,{limitInputPixels:40000000}).metadata();if(!pixels.width||!pixels.height)throw Error('Invalid image');
    const bytes=await preservePrintSurface(plan,source);

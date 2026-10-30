@@ -7,10 +7,10 @@
   <section class="panel controls"><fieldset id="materials" disabled>
    <legend>1. 选择一个产品</legend><label for="product">产品库</label><select id="product"><option value="">请选择产品</option></select>
    <img id="product-preview" alt="所选产品标准图" hidden><p id="master-status" class="hint">使用产品已发布母版中的 Logo 位置。修改位置请前往产品母版。</p>
-   <h2>2. 添加多个 Logo</h2><label class="upload">上传 Logo 图片<input id="uploads" type="file" accept="image/png,image/jpeg,image/webp" multiple></label>
+   <h2>2. 添加多个 Logo</h2><label class="upload">选择 Logo 文件<input id="uploads" type="file" accept="image/png,image/jpeg,image/webp" multiple></label><div id="logo-dropzone" class="logo-dropzone" role="group" aria-label="Logo 素材，可粘贴或拖入图片" tabindex="0"><strong>点击此处后按 Ctrl+V 粘贴图片</strong><span>也可将图片拖到这里</span></div>
    <details><summary>从 Logo 库添加</summary><input id="logo-search" type="search" placeholder="搜索 Logo 名称" aria-label="搜索 Logo 名称"><div id="logo-library" class="library"></div></details>
    <div id="logos" class="logos"></div><p class="hint">支持 2–20 个 Logo。有背景的图片请先点击对应的“AI 加工透明底”，可保留原色或转换为黑色。</p>
-   <label for="model">成图模型</label><select id="model"><option value="">正在读取模型…</option></select>
+   <label for="model">生成方式</label><select id="model" disabled><option value="local">本地合成</option></select>
   </fieldset><div class="actions"><button id="generate" class="primary" disabled>每个 Logo 生成 4 张</button><button id="retry" hidden disabled>仅重试未完成图片</button></div><p class="hint">生成期间可以切换任务或刷新页面，结果逐张保存。彩盒沿用现有普通印刷规则。</p></section>
   <section class="panel"><div class="result-heading"><h2>3. 印刷效果图</h2><span id="progress">尚未生成</span></div><div id="results" aria-live="polite"><p class="hint">添加 Logo 后，生成结果将在这里按 Logo 分组展示。</p></div><details id="history-panel"><summary>历史成图</summary><div id="history"></div></details></section>
  </div>

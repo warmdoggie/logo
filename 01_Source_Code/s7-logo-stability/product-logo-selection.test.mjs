@@ -97,8 +97,8 @@ for(const inputType of ['library','upload'])for(const decodeFails of [false,true
   c.renderLogoLibrary();const input=list.inputs[0];libraryInput=input;select=()=>{input.checked=true;return input.change();};
  }else{
   const input={files:[{name:'Logo.png'}],value:'Logo.png'},query=c.document.querySelector;
-  c.crypto=crypto;c.document.querySelector=id=>id==='#logo-image'?input:query(id);
-  const start=source.indexOf("document.querySelector('#logo-image').onchange=");
+  c.crypto=crypto;c.bindLogoImageTransfer=()=>{};c.document.querySelector=id=>id==='#logo-image'?input:query(id);
+  const start=source.indexOf('async function importLogoFiles(');
   vm.runInContext(source.slice(start,source.indexOf('useSavedLogoButton.onclick=',start)),c);
   select=()=>input.onchange({target:input});
  }
@@ -119,9 +119,9 @@ test('批量上传仍在读取后续文件时，首个 Logo 自动应用不能�
  Object.assign(c,{productLibraryList:productList,productLibrarySearch:{value:'A'},productLibraryProducts:[{id:'a',sku:'A',name:'测试产品',imageUrl:'/api/product-library/image/a',hasMaster:true}],readProductCategory:()=>({category:'',subcategory:''}),esc:value=>value,s7Path:value=>value});
  vm.runInContext(source.slice(source.indexOf('function renderProductLibrary(){'),source.indexOf('async function removeTaskProduct(')),c);c.renderProductLibrary();
  const input={files:[{name:'1.png'},{name:'2.png'}],value:'files'},query=c.document.querySelector,fileData=c.fileData;
- c.crypto=crypto;c.document.querySelector=id=>id==='#logo-image'?input:query(id);
+ c.crypto=crypto;c.bindLogoImageTransfer=()=>{};c.document.querySelector=id=>id==='#logo-image'?input:query(id);
  c.fileData=async blob=>{if(blob.id)return fileData(blob);if(blob.name==='2.png'){readingSecond.resolve();await secondFile.promise;}return {data:blob.name==='1.png'?'red-image':'blue-image'};};
- const start=source.indexOf("document.querySelector('#logo-image').onchange=");
+ const start=source.indexOf('async function importLogoFiles(');
  vm.runInContext(source.slice(start,source.indexOf('useSavedLogoButton.onclick=',start)),c);
  const product=c.showMultiProduct('a'),upload=input.onchange({target:input});await readingSecond.promise;
  complete('a');await product;
