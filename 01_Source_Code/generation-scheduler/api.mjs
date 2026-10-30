@@ -11,7 +11,7 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const server=createServer(async(req,res)=>{
  try{
   if(req.url==='/healthz'&&req.method==='GET'){
-   await pool.query('SELECT 1');await redis.ping();return send(res,200,{ok:true,providerEnabled:enabled,mode:'business-scheduler',limits:{remoteRunning:number('PROVIDER_MAX_RUNNING',15),submitConcurrency:number('PROVIDER_SUBMIT_CONCURRENCY',2),submitIntervalMs:number('PROVIDER_SUBMIT_INTERVAL_MS',500),images:1}});
+   await pool.query('SELECT 1');await redis.ping();return send(res,200,{ok:true,providerEnabled:enabled,mode:'business-scheduler',limits:{remoteRunning:number('PROVIDER_MAX_RUNNING',0,0,100)||null,submitConcurrency:number('PROVIDER_SUBMIT_CONCURRENCY',2),submitIntervalMs:number('PROVIDER_SUBMIT_INTERVAL_MS',500),images:1}});
   }
   const supplied=Buffer.from(String(req.headers.authorization||'')),expected=Buffer.from('Bearer '+token);
   if(supplied.length!==expected.length||!timingSafeEqual(supplied,expected))return send(res,401,{error:'unauthorized'});

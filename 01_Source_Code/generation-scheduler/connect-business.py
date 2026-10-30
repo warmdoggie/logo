@@ -29,7 +29,7 @@ def atomic(path, data, mode=0o600, group=0):
     finally:
         Path(temporary).unlink(missing_ok=True)
 
-environment.update(PROVIDER_MAX_RUNNING='15', USER_MAX_RUNNING='2', USER_MAX_PENDING='200',
+environment.update(PROVIDER_MAX_RUNNING='0', USER_MAX_RUNNING='2', USER_MAX_PENDING='200',
                    PROVIDER_SUBMIT_CONCURRENCY='2', PROVIDER_SUBMIT_INTERVAL_MS='500',
                    PROVIDER_POLL_RPM='300', APP_CODE_DIRECTORY='/srv/ai-logo/01_Source_Code')
 environment.pop('PROVIDER_SUBMIT_RPM', None)

@@ -25,7 +25,7 @@ import secrets,pathlib
 password=secrets.token_hex(32);redis=secrets.token_hex(32);token=secrets.token_hex(32)
 root=pathlib.Path('/etc/logo-scheduler')
 (root/'database.env').write_text(f'POSTGRES_USER=scheduler\nPOSTGRES_DB=scheduler\nPOSTGRES_PASSWORD={password}\nREDIS_PASSWORD={redis}\n')
-(root/'app.env').write_text(f'DATABASE_URL=postgres://scheduler:{password}@127.0.0.1:55432/scheduler\nREDIS_URL=redis://:{redis}@127.0.0.1:56379\nSCHEDULER_TOKEN={token}\nPROVIDER_ENABLED=false\nPROVIDER_MAX_RUNNING=15\nUSER_MAX_RUNNING=2\nUSER_MAX_PENDING=200\nPROVIDER_SUBMIT_CONCURRENCY=2\nPROVIDER_SUBMIT_INTERVAL_MS=500\nPROVIDER_POLL_RPM=300\nPOLL_INTERVAL_MS=5000\nPORT=3320\nRESULT_DIRECTORY=/var/lib/logo-scheduler/results\nAPP_CODE_DIRECTORY=/srv/ai-logo/01_Source_Code\nNODE_ENV=production\n')
+(root/'app.env').write_text(f'DATABASE_URL=postgres://scheduler:{password}@127.0.0.1:55432/scheduler\nREDIS_URL=redis://:{redis}@127.0.0.1:56379\nSCHEDULER_TOKEN={token}\nPROVIDER_ENABLED=false\nPROVIDER_MAX_RUNNING=0\nUSER_MAX_RUNNING=2\nUSER_MAX_PENDING=200\nPROVIDER_SUBMIT_CONCURRENCY=2\nPROVIDER_SUBMIT_INTERVAL_MS=500\nPROVIDER_POLL_RPM=300\nPOLL_INTERVAL_MS=5000\nPORT=3320\nRESULT_DIRECTORY=/var/lib/logo-scheduler/results\nAPP_CODE_DIRECTORY=/srv/ai-logo/01_Source_Code\nNODE_ENV=production\n')
 for file in root.iterdir():file.chmod(0o600)
 PY
 cd /srv/logo-scheduler

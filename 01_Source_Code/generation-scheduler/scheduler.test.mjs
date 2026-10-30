@@ -29,11 +29,19 @@ test('a durable business batch cannot dispatch until every image is committed',a
  assert.equal((await store.reserve()).user_id,'alice');
 });
 
-test('the default active generation budget accommodates fifteen users without waiting for completion',async()=>{
+test('ongoing remote generations do not block later submissions by default',async()=>{
  await reset();const expanded=createStore(pool);
- for(let n=0;n<15;n++)await expanded.create('user-'+n,randomUUID(),{prompt:'test'});
- const jobs=(await Promise.all(Array.from({length:20},()=>expanded.reserve()))).filter(Boolean);
- assert.equal(jobs.length,15);assert.equal(new Set(jobs.map(job=>job.user_id)).size,15);
+ for(let n=0;n<40;n++)await expanded.create('alice',randomUUID(),{prompt:'test'});
+ for(let n=0;n<20;n++){
+  const job=await expanded.reserve({submitConcurrency:2});assert.ok(job,'submission must not wait for image completion');
+  await expanded.transition(job,'GENERATING',{provider_task_id:'ongoing-'+n});
+ }
+ await expanded.create('bob',randomUUID(),{prompt:'arrived later'});
+ const bob=await expanded.reserve({submitConcurrency:2});assert.equal(bob.user_id,'bob');
+ await expanded.transition(bob,'GENERATING',{provider_task_id:'bob-ongoing'});
+ await expanded.create('carol',randomUUID(),{prompt:'arrived next'});
+ assert.equal((await expanded.reserve({submitConcurrency:2})).user_id,'carol');
+ assert.equal((await pool.query("SELECT count(*)::int n FROM jobs WHERE status='GENERATING'")).rows[0].n,21);
 });
 
 test('retrying a failed download reuses its result and never reserves another generation slot',async()=>{

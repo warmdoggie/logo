@@ -4,7 +4,7 @@ const terminal=['SUCCEEDED','FAILED','CANCELLED','DOWNLOAD_FAILED','PROCESS_FAIL
 const stages={poll:['GENERATING','GENERATING','poll_attempts'],download:['REMOTE_SUCCEEDED','DOWNLOADING','download_attempts'],process:['DOWNLOADED','PROCESSING','process_attempts']};
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
 
-export function createStore(pool,{maxRunning=15,userRunning=2,maxPending=200,leaseMs=120000}={}){
+export function createStore(pool,{maxRunning=0,userRunning=2,maxPending=200,leaseMs=120000}={}){
  async function tx(run){
   const db=await pool.connect();
   try{await db.query('BEGIN');const result=await run(db);await db.query('COMMIT');return result;}
@@ -43,8 +43,10 @@ export function createStore(pool,{maxRunning=15,userRunning=2,maxPending=200,lea
  async function reserve({allowRemote=true,submitConcurrency=1000000}={}){
   return tx(async db=>{
    await db.query('SELECT id FROM scheduler_account WHERE id=1 FOR UPDATE');
-   const running=(await db.query('SELECT count(*)::int n FROM jobs WHERE slot_reserved')).rows[0].n;
-   if(running>=maxRunning)return null;
+   if(maxRunning>0){
+    const running=(await db.query('SELECT count(*)::int n FROM jobs WHERE slot_reserved')).rows[0].n;
+    if(running>=maxRunning)return null;
+   }
    const submitting=(await db.query("SELECT count(*)::int n FROM jobs WHERE status='SUBMITTING' AND lease_until>now()")).rows[0].n;
    if(submitting>=submitConcurrency)return null;
    const job=(await db.query(`SELECT j.* FROM jobs j JOIN scheduler_users u ON u.id=j.user_id

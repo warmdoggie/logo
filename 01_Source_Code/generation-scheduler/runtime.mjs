@@ -11,7 +11,7 @@ if(!process.env.DATABASE_URL||!process.env.REDIS_URL)throw Error('Dedicated DATA
 export const enabled=process.env.PROVIDER_ENABLED==='true';
 export const pool=new pg.Pool({connectionString:process.env.DATABASE_URL,max:5,connectionTimeoutMillis:3000,statement_timeout:5000});
 pool.on('error',()=>console.error('postgres_connection_error'));
-export const store=createStore(pool,{maxRunning:number('PROVIDER_MAX_RUNNING',15,1,100),userRunning:number('USER_MAX_RUNNING',2,1,30),maxPending:number('USER_MAX_PENDING',200,1,500),leaseMs:120000});
+export const store=createStore(pool,{maxRunning:number('PROVIDER_MAX_RUNNING',0,0,100),userRunning:number('USER_MAX_RUNNING',2,1,30),maxPending:number('USER_MAX_PENDING',200,1,500),leaseMs:120000});
 export const redis=new IORedis(process.env.REDIS_URL,{maxRetriesPerRequest:null,enableReadyCheck:true});
 redis.on('error',()=>console.error('redis_connection_error'));
 export const queues=Object.fromEntries(['submit','poll','download','process'].map(stage=>[stage,new Queue('logo-'+stage,{connection:redis,defaultJobOptions:{removeOnComplete:true,removeOnFail:100}})]));
