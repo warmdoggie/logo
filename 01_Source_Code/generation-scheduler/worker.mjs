@@ -12,8 +12,10 @@ if(!directory)throw Error('RESULT_DIRECTORY required');
 const provider=createProvider({directory});
 let processImage;
 if(images){
- const {default:sharp}=await import('sharp');sharp.concurrency(2);sharp.cache({memory:64,files:0,items:16});
  const storage=process.env.LOGO_OSS_STORAGE_ROLE_ARN?(await import(appModule('logo-generation-storage.mjs'))).createGenerationStorage():null;
+ // Loading the application's Sharp copy can reset the shared libvips thread setting.
+ await import(appModule('s7-logo-stability/ai-mockup-provider.mjs'));
+ const {default:sharp}=await import('sharp');sharp.concurrency(2);sharp.cache({memory:64,files:0,items:16});
  processImage=job=>processScheduledImage(job,{directory,storage});
 }
 const stages=images?['process']:['submit','poll','download'];
