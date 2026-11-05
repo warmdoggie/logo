@@ -74,15 +74,25 @@ test('all selector is disabled while generating or switching SKU',async()=>{
  c.selectedMultiProductId='product';c.updateAllSchemeSelection();assert.equal(c.selectAllSchemes.disabled,false);
 });
 
-test('after generation the same selector controls downloads without changing generation preferences',async()=>{
+test('after generation the same selector updates both next generation and download choices',async()=>{
  const {context:c,outputs}=await workspace(),output={productId:'product',version:'BLACK',dataUrl:'/black.png'},control=checkbox();
  outputs.set('BLACK',output);c.downloadSelection=syncDownloadSelection({},[output]);
  c.updateSchemeSelection(control,'BLACK',output,false);assert.equal(control.checked,true);assert.equal(control.disabled,false);
  c.changeSchemeSelection('BLACK',false);c.updateSchemeSelection(control,'BLACK',output,false);
  assert.equal(control.checked,false);assert.deepEqual(selectedDownloadOutputs(c.downloadSelection,[output]),[]);
- assert.equal(c.versionInputs.find(input=>input.value==='BLACK').checked,true);
+ assert.equal(c.versionInputs.find(input=>input.value==='BLACK').checked,false);
  c.changeSchemeSelection('BLACK',true);assert.deepEqual(selectedDownloadOutputs(c.downloadSelection,[output]),[output]);
  c.updateSchemeSelection(control,'BLACK',output,true);assert.equal(control.disabled,true);
+});
+
+test('取消已完成的烫金后只选玫瑰金，下一次生成不再包含烫金',async()=>{
+ const {context:c,outputs}=await workspace();
+ for(const input of c.versionInputs)input.checked=input.value==='GOLD FOIL';
+ const gold={productId:'product',version:'GOLD FOIL',dataUrl:'/gold.png'};outputs.set('GOLD FOIL',gold);c.downloadSelection=syncDownloadSelection({},[gold]);
+ let refreshes=0;c.updateGenerateButton=()=>refreshes++;
+ c.changeSchemeSelection('GOLD FOIL',false);c.changeSchemeSelection('ROSE GOLD FOIL',true);
+ assert.deepEqual(c.versionInputs.filter(input=>input.checked).map(input=>input.value),['ROSE GOLD FOIL']);assert.equal(refreshes,2);
+ assert.deepEqual(selectedDownloadOutputs(c.downloadSelection,[gold]),[]);
 });
 
 test('母版禁止的历史失败烫印卡片不能再次勾选生成，但已有成图仍可下载',async()=>{

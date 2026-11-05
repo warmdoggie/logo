@@ -32,3 +32,17 @@ test('未生成槽位不能选中或下载，移除产品不留在下载列表',
  assert.deepEqual(selection.selectedDownloadOutputs(state,[pending,done]),[done]);
  assert.deepEqual(selection.syncDownloadSelection(state,[]),{});
 });
+
+test('已取消的成图不参加下一次生成，跨 SKU 独立且旧成图选择不影响替换图',()=>{
+ const gold={productId:'a',version:'GOLD FOIL',dataUrl:'/gold.png'},state={[selection.downloadKey(gold)]:{dataUrl:gold.dataUrl,selected:false}},versions=['GOLD FOIL','ROSE GOLD FOIL'];
+ assert.deepEqual(selection.generationVersionsForProduct(versions,'a',[gold],state),['ROSE GOLD FOIL']);
+ assert.deepEqual(selection.generationVersionsForProduct(versions,'b',[gold],state),versions);
+ assert.deepEqual(selection.generationVersionsForProduct(versions,'a',[{...gold,dataUrl:'/new-gold.png'}],state),versions);
+});
+
+test('另一 Logo 取消的搭配不覆盖当前 Logo 的明确选择',()=>{
+ const a={productId:'p',logoId:'a',version:'GOLD FOIL',dataUrl:'/a.png'},b={...a,logoId:'b',dataUrl:'/b.png'},state=selection.syncDownloadSelection({},[a,b]);
+ state[selection.downloadKey(a)].selected=false;
+ assert.deepEqual(selection.generationVersionsForProduct(['GOLD FOIL'],'p',[a,b],state,'b'),['GOLD FOIL']);
+ assert.deepEqual(selection.generationVersionsForProduct(['GOLD FOIL'],'p',[a,b],state,'a'),[]);
+});

@@ -15,7 +15,7 @@ import {triggerTransparentLogoDownload} from './transparent-logo-download.mjs';
 import {rotationGestureMode,rotationHandleLocalPosition} from './rotation-handle.mjs';
 import {createTaskDraft,normalizeTaskResult,restoredBaseProduct} from './task-draft.mjs';
 import {createGenerationWatcher,previewStatus,productGeneration} from './generation-client.mjs';
-import {downloadKey,syncDownloadSelection,selectedDownloadOutputs} from './download-selection.mjs';
+import {downloadKey,syncDownloadSelection,selectedDownloadOutputs,generationVersionsForProduct} from './download-selection.mjs';
 import {saveDownloadFolder} from './download-folder.mjs';
 import {createPreviewImages,previewImageUrl} from './preview-images.mjs';
 import {createImagePreview} from './image-preview.mjs';
@@ -710,13 +710,15 @@ function updateSchemeSelection(selection,version,output,switching){
  const download=output&&{...output,productId:output.productId||loadedMultiProductId||''};
  selection.disabled=switching||(!output&&(generationBusy||multiPackageBusy||logoSelectionBusy||!!versionInputs.find(input=>input.value===version)?.disabled));
  selection.checked=download?!!downloadSelection[downloadKey(download)]?.selected:versionInputs.find(input=>input.value===version).checked;
- const name=schemeNames[version],label=output?`选择下载${name}`:`选择生成${name}`;
+ const name=schemeNames[version],label=output?`选择生成及下载${name}`:`选择生成${name}`;
  selection.title=label;selection.setAttribute('aria-label',label);
 }
 function changeSchemeSelection(version,checked){
- const output=schemeOutput(version);
+ const output=schemeOutput(version),input=versionInputs.find(input=>input.value===version);
+ if(checked&&input.disabled&&!output)return;
+ input.checked=checked&&!input.disabled;
  if(output){const key=downloadKey({...output,productId:output.productId||loadedMultiProductId||''});downloadSelection={...downloadSelection,[key]:{dataUrl:output.dataUrl,selected:checked}};updateDownloadSelection();}
- else{const input=versionInputs.find(input=>input.value===version);if(checked&&input.disabled)return;input.checked=checked;updateGenerateButton();}
+ updateGenerateButton();
  updateAllSchemeSelection();
  queueSchemeCards();
  taskDraft?.schedule();
@@ -1275,7 +1277,7 @@ async function regenerateResult(version,card){
   await runGeneration([version],version);
 }
 const versionInputs=[...document.querySelectorAll('#generation-versions input')];
-const selectedGenerationVersions=()=>versionInputs.filter(input=>input.checked).map(input=>input.value);
+const selectedGenerationVersions=()=>generationVersionsForProduct(versionInputs.filter(input=>input.checked).map(input=>input.value),loadedMultiProductId,taskDownloadOutputs(),downloadSelection,loadedTaskLogoId);
 let addingPrintCombination=false;
 function registerMixedVersions(versions){
  for(const version of versions.filter(isMixedVersion)){
@@ -1292,7 +1294,8 @@ function restoreProductSelection(view){
  for(const input of versionInputs)input.checked=selected.includes(input.value);
 }
 function selectedProductPlans(){
- return multiPackageProducts.map(product=>({productId:product.id,selectedVersions:product.id===loadedMultiProductId?selectedGenerationVersions():multiProductViews.get(product.id)?.selectedVersions||['ORIGINAL','BLACK']}));
+ const outputs=taskDownloadOutputs();
+ return multiPackageProducts.map(product=>({productId:product.id,selectedVersions:generationVersionsForProduct(product.id===loadedMultiProductId?selectedGenerationVersions():multiProductViews.get(product.id)?.selectedVersions||['ORIGINAL','BLACK'],product.id,outputs,downloadSelection,loadedTaskLogoId)}));
 }
 function restoreMixedVersions(state){
  const layouts=[...(state.multiProductLayouts||[]),...(state.multiLogoLayouts||[])];
@@ -1316,7 +1319,7 @@ async function addPrintCombination(){
    schemeState=ensureMixedSchemes(schemeState,[version]);
   }
   reviveSchemeCard(version);saveSchemeRemoval();
-  versionInputs.find(input=>input.value===version).checked=true;createSchemeCards();switchScheme(version);taskDraft?.schedule();
+  createSchemeCards();switchScheme(version);changeSchemeSelection(version,true);
   setStatus(`已为 ${product.sku} 选择${schemeNames[version]}，可调整位置后开始作图。`,'success');
  }catch(error){setStatus(error.message||'增加搭配失败，请重试','error');}
  finally{addingPrintCombination=false;updateGenerateButton();queueSchemeCards();}

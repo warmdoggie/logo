@@ -3,6 +3,7 @@ import {test} from 'node:test';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {createSchemes,editScheme,schemeSignature} from './schemes.mjs';
+import {generationVersionsForProduct} from './download-selection.mjs';
 
 test('batch submission includes cached product edits and the active product latest unswitched edits',async()=>{
   const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
@@ -14,7 +15,7 @@ test('batch submission includes cached product edits and the active product late
   aState.schemes[2].targets[0].rotation=-30;
   aState.schemes[2].independentGeometry=true;
   let requestBody;
-  const context=vm.createContext({copyingProductPreset:false,generationSubmitting:false,generationBusy:false,logoSelectionBusy:false,setTimeout,requestAnimationFrame:callback=>callback(),generationWatcher:null,resultMeta:{},queueSchemeCards(){},
+  const context=vm.createContext({generationVersionsForProduct,loadedTaskLogoId:null,taskDownloadOutputs:()=>[],downloadSelection:{},copyingProductPreset:false,generationSubmitting:false,generationBusy:false,logoSelectionBusy:false,setTimeout,requestAnimationFrame:callback=>callback(),generationWatcher:null,resultMeta:{},queueSchemeCards(){},
     structuredClone,schemeSignature,schemeNames:{ORIGINAL:'原色',BLACK:'黑白','GOLD FOIL':'金','SILVER FOIL':'银'},multiProductJob:null,currentTaskId:null,multiPackageBusy:false,multiPackageProducts:[{id:'a',sku:'a'},{id:'b',sku:'b'}],logoData:'test-logo',mockupModel:{value:'flux-3-image'},
     selectedMultiProductId:'b',loadedMultiProductId:'b',baseData:'base-b',baseImage:{},
     schemeState:createSchemes([target(.4,.2)]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'master-zone',lastResultPayload:null,savedSignatures:{},schemePhases:{},
