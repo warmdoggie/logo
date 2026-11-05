@@ -13,7 +13,7 @@ test('鉴权后才跳转 OSS；原图、本地回退与未同步图片继续本�
  const dir=await mkdtemp(join(tmpdir(),'oss-route-'));
  const preload=join(dir,'sdk-fixture.mjs');
  await writeFile(preload,`import {registerHooks} from 'node:module';
- const sdk='data:text/javascript,'+encodeURIComponent("export function createLogoOssClients(){return async()=>({signatureUrl:key=>'https://heci-002.oss-cn-heyuan.aliyuncs.com/'+key+'?fixture-signature'});}");
+ const sdk='data:text/javascript,'+encodeURIComponent("export {createLogoStorageClients} from '${new URL('./logo-oss-client.mjs',import.meta.url).href}';export function createLogoOssClients(){return async()=>({signatureUrl:key=>'https://heci-002.oss-cn-heyuan.aliyuncs.com/'+key+'?fixture-signature'});}");
  registerHooks({resolve(name,context,next){return name==='./logo-oss-client.mjs'?{url:sdk,shortCircuit:true}:next(name,context);}});`);
  const child=spawn(process.execPath,['--import',pathToFileURL(preload).href,'server.mjs'],{cwd:new URL('.',import.meta.url),env:{...process.env,APP_DATA_DIR:dir,APP_NO_SEED:'1',APP_MULTI_USER:'1',LOGO_OSS_PREVIEWS:'1',PORT:'0',HOST:'127.0.0.1'},stdio:['ignore','pipe','pipe']});
  try{

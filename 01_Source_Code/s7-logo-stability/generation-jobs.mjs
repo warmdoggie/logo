@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import {generationVersions as versions,selectGenerationVersions} from './generation-versions.mjs';
+import {allGenerationVersions as versions,selectGenerationVersions} from './generation-versions.mjs';
 
 export function createGenerationJobs(spaces){
  const active=new Map(),key=(user,taskId)=>`${user.id}:${taskId}`;

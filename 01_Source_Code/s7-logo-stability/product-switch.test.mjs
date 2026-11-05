@@ -8,7 +8,7 @@ test('a newly added product with no requested stages stays in preview after anot
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8'),summary={},product={id:'c',sku:'C'};
  const button={dataset:{multiProductId:'c'},classList:{toggle(){}},setAttribute(){},querySelector:()=>summary};
  const tabs={dataset:{products:JSON.stringify([['c','C',null]])},querySelectorAll:selector=>selector==='[data-multi-product-id]'?[button]:[]};
- const context=vm.createContext({taskLogos:[],multiPackageProducts:[product],selectedMultiProductId:'c',multiProductTabs:tabs,multiProductOutput:{replaceChildren(){}},results:{},previewSection:{},resultMeta:{},multiProductResults:new Map(),multiProductJob:{kind:'multi-product',outputs:[],stages:{'a:BLACK':{stage:'complete'}}},multiPackageBusy:false,productGeneration});
+ const context=vm.createContext({restoreProductSelection(){},selectedGenerationVersions:()=>['ORIGINAL','BLACK'],taskLogos:[],multiPackageProducts:[product],selectedMultiProductId:'c',multiProductTabs:tabs,multiProductOutput:{replaceChildren(){}},results:{},previewSection:{},resultMeta:{},multiProductResults:new Map(),multiProductJob:{kind:'multi-product',outputs:[],stages:{'a:BLACK':{stage:'complete'}}},multiPackageBusy:false,productGeneration});
  vm.runInContext(source.slice(source.indexOf('function renderMultiProductResults(){'),source.indexOf('async function openProductLibrary()')),context);
  context.renderMultiProductResults();assert.equal(summary.textContent,'方案预览');
 });
@@ -16,7 +16,7 @@ test('a newly added product with no requested stages stays in preview after anot
 test('切到尚在加载的产品后立即返回，必须重新呈现原产品并丢弃迟到的加载',async()=>{
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8'),rendered=[];
  let release;const pending=new Promise(r=>release=r);
- const context=vm.createContext({currentTaskId:null,s7User:null,taskLogos:[],selectedMultiProductId:'a',loadedMultiProductId:'a',multiProductLoadRevision:0,multiPackageProducts:[{id:'a',sku:'A'},{id:'b',sku:'B'}],multiProductViews:new Map(),multiProductLoads:new Map(),renderMultiProductResults:()=>{},saveMultiProductView:()=>{},setStatus:()=>{},fetch:()=>pending,queueSchemeCards:()=>rendered.push(context.selectedMultiProductId)});
+ const context=vm.createContext({restoreProductSelection(){},selectedGenerationVersions:()=>['ORIGINAL','BLACK'],currentTaskId:null,s7User:null,taskLogos:[],selectedMultiProductId:'a',loadedMultiProductId:'a',multiProductLoadRevision:0,multiPackageProducts:[{id:'a',sku:'A'},{id:'b',sku:'B'}],multiProductViews:new Map([['a',{foilTemplate:{zones:[]}}]]),multiProductLoads:new Map(),renderMultiProductResults:()=>{},saveMultiProductView:()=>{},setStatus:()=>{},fetch:()=>pending,queueSchemeCards:()=>rendered.push(context.selectedMultiProductId)});
  vm.runInContext(source.slice(source.indexOf('async function showMultiProduct('),source.indexOf('function renderMultiProductResults()')),context);
  const loading=vm.runInContext("showMultiProduct('b')",context);await vm.runInContext("showMultiProduct('a')",context);
  assert.deepEqual(rendered,['b','a']);release({ok:false});await loading;assert.equal(context.loadedMultiProductId,'a');
@@ -24,7 +24,7 @@ test('切到尚在加载的产品后立即返回，必须重新呈现原产品�
 
 test('尚未有批量生成记录时，切换到新产品不能沿用上个产品的成图',async()=>{
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
- const context=vm.createContext({taskLogos:[],selectedMultiProductId:'b',loadedMultiProductId:'a',multiProductJob:null,multiProductViews:new Map(),lastResultPayload:{outputs:[{version:'ORIGINAL',dataUrl:'/a.png'}]},s7Path:value=>value});
+ const context=vm.createContext({restoreProductSelection(){},selectedGenerationVersions:()=>['ORIGINAL','BLACK'],taskLogos:[],selectedMultiProductId:'b',loadedMultiProductId:'a',multiProductJob:null,multiProductViews:new Map(),lastResultPayload:{outputs:[{version:'ORIGINAL',dataUrl:'/a.png'}]},s7Path:value=>value});
  vm.runInContext(source.slice(source.indexOf('function schemeOutput('),source.indexOf('function modifiedSchemes()')),context);
  assert.equal(vm.runInContext("schemeOutput('ORIGINAL')",context),undefined);
  context.multiProductViews.set('b',{lastResultPayload:{outputs:[{version:'ORIGINAL',dataUrl:'/b.png'}]}});
@@ -34,7 +34,7 @@ test('尚未有批量生成记录时，切换到新产品不能沿用上个产�
 test('刷新产品状态保留标签节点，清空再选回同一产品仍能重建标签',async()=>{
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
  const tabs={dataset:{},buttons:[],replaceChildren(){this.buttons=[];},querySelectorAll(selector){return selector==='[data-multi-product-id]'?this.buttons:[];},set innerHTML(text){this.buttons=[...text.matchAll(/data-multi-product-id="([^"]+)"/g)].map(match=>({dataset:{multiProductId:match[1]},classList:{toggle(){}},setAttribute(){},querySelector(){return {};},addEventListener(){}}));}};
- const product={id:'a',sku:'A'},context=vm.createContext({taskLogos:[],multiPackageProducts:[product],selectedMultiProductId:'a',multiProductTabs:tabs,multiProductOutput:{replaceChildren(){}},results:{},previewSection:{},resultMeta:{},multiProductResults:new Map(),multiProductJob:null,multiPackageBusy:false,s7Path:value=>value,esc:value=>value});
+ const product={id:'a',sku:'A'},context=vm.createContext({restoreProductSelection(){},selectedGenerationVersions:()=>['ORIGINAL','BLACK'],taskLogos:[],multiPackageProducts:[product],selectedMultiProductId:'a',multiProductTabs:tabs,multiProductOutput:{replaceChildren(){}},results:{},previewSection:{},resultMeta:{},multiProductResults:new Map(),multiProductJob:null,multiPackageBusy:false,s7Path:value=>value,esc:value=>value});
  vm.runInContext(source.slice(source.indexOf('function renderMultiProductResults(){'),source.indexOf('async function openProductLibrary()')),context);
  vm.runInContext('renderMultiProductResults()',context);const button=tabs.buttons[0];vm.runInContext('renderMultiProductResults()',context);assert.equal(tabs.buttons[0],button);
  context.multiPackageProducts=[];vm.runInContext('renderMultiProductResults()',context);context.multiPackageProducts=[product];

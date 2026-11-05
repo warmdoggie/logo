@@ -18,7 +18,7 @@ test('S7 多任务独立保存草稿、素材和结果，跨任务及跨用户�
   assert.deepEqual((await(await call('/api/my-space/tasks/'+a.id)).json()).state,state);
   assert.deepEqual((await(await call('/api/my-space/tasks/'+b.id)).json()).state,{});
   assert.equal((await call('/api/my-space/tasks/'+a.id,{revision:0,state:{logoData:'stale'}},'PUT')).status,409);
-  const input={taskId:a.id,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',x:.5,y:.5,widthRatio:.2,rotation:0}]};
+  const input={selectedVersions:['ORIGINAL'],taskId:a.id,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',x:.5,y:.5,widthRatio:.2,rotation:0}]};
   assert.equal((await call('/api/ai-render',input)).status,200);
   const history=await(await call('/api/my-space/history?taskId='+a.id)).json();assert.equal(history.length,1);
   assert.deepEqual(await(await call('/api/my-space/history?taskId='+b.id)).json(),[]);

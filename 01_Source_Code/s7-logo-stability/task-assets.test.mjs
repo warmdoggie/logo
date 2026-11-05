@@ -47,9 +47,9 @@ for(const mode of ['background','streaming','multi-logo'])test(`${mode} 生成�
  replace(await sharp({create:{width:400,height:200,channels:4,background:'#23c'}}).png().toBuffer());
  const pixels=Buffer.alloc(16*16*4);for(let y=4;y<12;y++)for(let x=2;x<14;x++)pixels[(y*16+x)*4+3]=255;
  const logo=await sharp(pixels,{raw:{width:16,height:16,channels:4}}).png().toBuffer();
- const payload=mode==='multi-logo'?{taskId:task.id,productId:'p',baseAssetUrl:url,model:'test',selectedVersions:['ORIGINAL'],logos:['one','two'].map(id=>({id,name:id,logoImage:logo.toString('base64')})),logoLayouts:['one','two'].map(logoId=>({logoId,targets,schemes}))}:{taskId:task.id,background:mode==='background',productIds:['p','q'],model:'test',selectedVersions:['ORIGINAL'],logoImage:logo.toString('base64'),productLayouts:['p','q'].map(productId=>({productId,baseAssetUrl:url,targets,schemes}))};
+ const payload=mode==='multi-logo'?{taskId:task.id,productId:'p',baseAssetUrl:url,targets,model:'test',selectedVersions:['ORIGINAL'],logos:['one','two'].map(id=>({id,name:id,logoImage:logo.toString('base64')})),logoLayouts:['one','two'].map(logoId=>({logoId,targets,schemes}))}:{taskId:task.id,background:mode==='background',productIds:['p','q'],model:'test',selectedVersions:['ORIGINAL'],logoImage:logo.toString('base64'),productLayouts:['p','q'].map(productId=>({productId,baseAssetUrl:url,targets,schemes}))};
  const rendered=await call(mode==='multi-logo'?'/api/ai-render-logos':'/api/ai-render-multi',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
- assert.equal(rendered.status,mode==='streaming'?200:202);await rendered.text();
+ assert.equal(rendered.status,mode==='streaming'?200:202,rendered.ok?'':await rendered.text());await rendered.text();
  if(mode!=='streaming')for(let n=0;n<100;n++){const job=await(await call(`/api/my-space/tasks/${task.id}/generation`)).json();if(job.status!=='running')break;await new Promise(resolve=>setTimeout(resolve,10));}
  assert.equal(calls.length,2);
  const expected=await sharp(original).raw().toBuffer();for(const input of calls)assert.ok((await sharp(Buffer.from(input.baseImage.split(',')[1],'base64')).raw().toBuffer()).equals(expected),'生成应使用任务快照的原始像素');

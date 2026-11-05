@@ -15,18 +15,21 @@ export function createApimartTransport({proxyUrl='',transport=fetch,maxResponseB
   const dispatcher=proxyAgent(proxyUrl);
   return async(url,options={})=>{
     const method=String(options.method||'GET').toUpperCase();
-    const target=new URL(url);
+    const target=new URL(url),started=Date.now();
     const imageDownload=method==='GET'&&(target.hostname==='getapib.org'||target.hostname.endsWith('.getapib.org'));
     const routes=imageDownload&&dispatcher&&transport===fetch
       ?[{dispatcher:undefined,attempts:2},{dispatcher,attempts:3}]
       :[{dispatcher,attempts:method==='GET'?(imageDownload?5:3):1}];
-    let lastError,lastResponse,lastRoute,attempt=0;
+    let lastError,lastResponse,lastRoute,lastPhase,lastStatus,attempt=0;
     for(let routeIndex=0;routeIndex<routes.length;routeIndex++){
       const route=routes[routeIndex];
       for(let routeAttempt=0;routeAttempt<route.attempts;routeAttempt++,attempt++){
+        let phase='request',responseStatus=null;
         try{
           const requestOptions=route.dispatcher?{...options,dispatcher:route.dispatcher}:options;
           const response=await transport(url,requestOptions);
+          phase='response-body';
+          responseStatus=response.status;
           if(!response.body){
             if(!response.ok&&routeIndex+1<routes.length){lastResponse=response;break;}
             return response;
@@ -49,6 +52,8 @@ export function createApimartTransport({proxyUrl='',transport=fetch,maxResponseB
           if(!networkError||options.signal?.aborted)throw error;
           lastError=error;
           lastRoute=route.dispatcher?'proxy':'direct';
+          lastPhase=phase;
+          lastStatus=responseStatus;
           if(routeAttempt+1<route.attempts)await new Promise(resolve=>setTimeout(resolve,imageDownload?250*2**attempt:250*(attempt+1)));
         }
       }
@@ -59,7 +64,7 @@ export function createApimartTransport({proxyUrl='',transport=fetch,maxResponseB
     const detail=code?`（${code}）`:'';
     const failure=new Error(`APIMart ${action}网络连接失败${detail}，请检查网络或代理后重试`,{cause:lastError});
     failure.code='APIMART_NETWORK_ERROR';
-    failure.diagnostic={action,host:target.hostname,route:lastRoute,code,message:String(lastError?.cause?.message||lastError?.message||'').replace(/https?:\/\/\S+/g,'[url]').slice(0,500)};
+    failure.diagnostic={action,host:target.hostname,route:lastRoute,code,method,phase:lastPhase,responseStatus:lastStatus,elapsedMs:Date.now()-started,requestBytes:typeof options.body==='string'?Buffer.byteLength(options.body):null,tlsHandshakeFailure:/before secure TLS connection/.test(lastError?.cause?.message||lastError?.message||''),message:String(lastError?.cause?.message||lastError?.message||'').replace(/https?:\/\/\S+/g,'[url]').slice(0,500)};
     throw failure;
   };
 }

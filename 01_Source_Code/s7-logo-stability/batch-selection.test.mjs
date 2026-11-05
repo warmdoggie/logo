@@ -9,7 +9,7 @@ import {createDemoServer} from './demo-server.mjs';
 for(const background of [true,false])test(`multi-product ${background?'background':'streaming'} generation sends only selected versions to the model`,async()=>{
  const dir=await mkdtemp(join(tmpdir(),'s7-selection-')),requests=[];
  const image=await sharp({create:{width:32,height:32,channels:4,background:'#777'}}).png().toBuffer();
- const products=['a','b'].map(id=>({id,sku:id,name:id,imageBytes:image,template:{zones:[{id:'body',zoneType:'logo',x:.3,y:.3,width:.2,height:.1}]}}));
+ const products=['a','b'].map(id=>({id,sku:id,name:id,imageBytes:image,template:{id:'master-'+id,version:1,zones:[{id:'body',zoneType:'logo',x:.3,y:.3,width:.2,height:.1}],automation:{carriers:[{id:'body',type:'BODY'}],areas:[{id:'area',zoneId:'body',carrierId:'body',foilProcesses:['GOLD FOIL','SILVER FOIL']}]}}}));
  const server=createDemoServer({spaceDir:dir,authenticate:async()=>({id:'alice'}),productCatalog:async()=>products,mockupRenderer:async input=>{requests.push(input.selectedVersions);return input.selectedVersions.map(version=>({version,bytes:image}));}});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  const call=(path,data)=>fetch(`http://127.0.0.1:${server.address().port}${path}`,{method:data?'POST':'GET',headers:{'content-type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});

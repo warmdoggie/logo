@@ -7,12 +7,14 @@ import sharp from 'sharp';
 import {createDemoServer} from './demo-server.mjs';
 import {userSpace} from './user-space.mjs';
 
+const masterFixture={productCatalog:async()=>[{id:'product',sku:'P01',status:'ACTIVE'}],productTemplate:async()=>({template:{id:'master',version:1,zones:[{id:'body',zoneType:'logo',x:.1,y:.1,width:.8,height:.8}],automation:{carriers:[{id:'body',type:'BODY'}],areas:[{id:'area',zoneId:'body',carrierId:'body',foilProcesses:['GOLD FOIL','SILVER FOIL']}]}}})};
+
 test('regenerating multiple edited schemes retains untouched and previous images until replacements finish',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'s7-edited-'));
  const image=await sharp({create:{width:30,height:20,channels:4,background:'#777'}}).png().toBuffer();
  let release,entered,hold=false;
  const gate=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
- const server=createDemoServer({spaceDir:dir,authenticate:async()=>({id:'alice'}),mockupRenderer:async input=>{
+ const server=createDemoServer({...masterFixture,spaceDir:dir,authenticate:async()=>({id:'alice'}),mockupRenderer:async input=>{
   if(hold){entered();await gate;}
   const outputs=input.selectedVersions.map(version=>({version,bytes:image}));
   for(const output of outputs)await input.onOutput(output);return outputs;
@@ -21,7 +23,7 @@ test('regenerating multiple edited schemes retains untouched and previous images
  const call=async(path,data)=>{const r=await fetch(`http://127.0.0.1:${server.address().port}${path}`,{method:data?'POST':'GET',headers:{'content-type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});assert.ok(r.ok);return r.json();};
  try{
   const task=await call('/api/my-space/tasks',{title:'Edited schemes'}),path=`/api/my-space/tasks/${task.id}/generation`;
-  const input={taskId:task.id,background:true,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',x:.5,y:.5,widthRatio:.2}]};
+  const input={productId:'product',taskId:task.id,background:true,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',masterZoneId:'body',x:.5,y:.5,widthRatio:.2}]};
   const wait=async()=>{for(let i=0;i<150;i++){const record=await call(path);if(record.status!=='running')return record;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('not completed');};
   await call('/api/ai-render',{...input,schemeSignatures:{ORIGINAL:'original-v1',BLACK:'black-v1'}});const before=await wait();
   hold=true;
@@ -38,7 +40,7 @@ test('三版本任务只记录所选阶段，恢复和单张重试保留三张�
  const dir=await mkdtemp(join(tmpdir(),'s7-selection-'));
  const image=await sharp({create:{width:20,height:20,channels:4,background:'#777'}}).png().toBuffer();
  const calls=[],selectedVersions=['BLACK','GOLD FOIL','SILVER FOIL'];
- const server=createDemoServer({spaceDir:dir,authenticate:async()=>({id:'alice'}),mockupRenderer:async input=>{
+ const server=createDemoServer({...masterFixture,spaceDir:dir,authenticate:async()=>({id:'alice'}),mockupRenderer:async input=>{
   calls.push(input.selectedVersions);
   const outputs=input.selectedVersions.map(version=>({version,bytes:image}));
   for(const output of outputs)await input.onOutput(output);
@@ -49,7 +51,7 @@ test('三版本任务只记录所选阶段，恢复和单张重试保留三张�
  try{
   const task=await(await call('/api/my-space/tasks',{title:'三个版本'})).json();
   const path=`/api/my-space/tasks/${task.id}/generation`;
-  const input={background:true,taskId:task.id,selectedVersions,preserveResults:true,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',x:.5,y:.5,widthRatio:.2,rotation:0}]};
+  const input={productId:'product',background:true,taskId:task.id,selectedVersions,preserveResults:true,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',masterZoneId:'body',x:.5,y:.5,widthRatio:.2,rotation:0}]};
   const wait=async()=>{let record;for(let n=0;n<100;n++){record=await(await call(path)).json();if(record.status!=='running')return record;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('generation did not finish');};
   assert.equal((await call('/api/ai-render',{...input,selectedVersions:[]})).status,400);
   assert.equal(calls.length,0);
@@ -70,11 +72,11 @@ test('生成脱离页面和登录会话运行，逐张持久化，重进及重�
  let release,releaseFinish,entered,outputSaved,session=true,server,base;
  const enteredPromise=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve),finishGate=new Promise(resolve=>releaseFinish=resolve),savedPromise=new Promise(resolve=>outputSaved=resolve);
  const renderer=async input=>{await input.onStage(input.onlyVersion||'ORIGINAL','generating');entered();await gate;const output={version:input.onlyVersion||'ORIGINAL',bytes:image};await input.onOutput(output);outputSaved();await finishGate;return [output];};
- async function start(){server=createDemoServer({spaceDir:dir,authenticate:async req=>{if(!session)throw Object.assign(Error('请登录'),{status:401});return {id:req.headers.cookie||'alice'};},mockupRenderer:renderer});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));base=`http://127.0.0.1:${server.address().port}`;}
+ async function start(){server=createDemoServer({...masterFixture,spaceDir:dir,authenticate:async req=>{if(!session)throw Object.assign(Error('请登录'),{status:401});return {id:req.headers.cookie||'alice'};},mockupRenderer:renderer});await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));base=`http://127.0.0.1:${server.address().port}`;}
  const call=(path,data,method=data?'POST':'GET',user='alice')=>fetch(base+path,{method,headers:{cookie:user,'content-type':'application/json'},...(data?{body:JSON.stringify(data)}:{})});
  try{
   await start();assert.equal((await call('/generation-client.mjs')).status,200);const task=await(await call('/api/my-space/tasks',{title:'任务 A'})).json(),other=await(await call('/api/my-space/tasks',{title:'任务 B'})).json();
-  const path=`/api/my-space/tasks/${task.id}/generation`,input={background:true,taskId:task.id,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',x:.5,y:.5,widthRatio:.2,rotation:0}]};
+  const path=`/api/my-space/tasks/${task.id}/generation`,input={productId:'product',background:true,taskId:task.id,baseImage:image.toString('base64'),logoImage:image.toString('base64'),targets:[{id:'p',masterZoneId:'body',x:.5,y:.5,widthRatio:.2,rotation:0}]};
   assert.equal((await call('/api/ai-render',input)).status,202);
   await enteredPromise;
   const running=await(await call(path)).json();assert.equal(running.status,'running');assert.equal(running.stages.ORIGINAL.stage,'generating');assert.equal(Object.keys(running.stages).length,4);

@@ -6,7 +6,7 @@ import {bindLogoImageTransfer} from './logo-image-transfer.mjs';
 
 const base=location.pathname.startsWith('/s7/')?'/s7':'',path=value=>value.startsWith('/api/')?base+value:value;
 const $=id=>document.getElementById(id),taskId=new URLSearchParams(location.search).get('task');
-const names={ORIGINAL:'原色印刷',BLACK:'黑白印刷','GOLD FOIL':'烫金搭配','SILVER FOIL':'烫银搭配'};
+const names={ORIGINAL:'原色印刷',BLACK:'黑白印刷','GOLD FOIL':'烫金搭配','SILVER FOIL':'烫银搭配',CUSTOM:'自定义配色'};
 const stageNames={queued:'等待中',submitting:'提交中',generating:'生成中',saving:'保存中',complete:'已保存',failed:'失败'};
 let logos=[],library=[],draft,watcher,job=null,enabled=false,ready=false,processing=false,masterReady=false,masterRequest=0;
 async function api(url,data,method=data?'POST':'GET'){

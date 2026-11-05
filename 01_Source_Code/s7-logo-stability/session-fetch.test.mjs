@@ -6,10 +6,19 @@ import vm from 'node:vm';
 const source=(await readFile(new URL('./demo.js',import.meta.url),'utf8')).replace(/\r\n/g,'\n');
 function client(nativeFetch,selection={}){
  let expired=0;
- const c=vm.createContext({nativeFetch,s7User:{id:'alice'},currentTaskId:'task',s7Path:value=>'/s7'+value,requireLogin:()=>expired++,refreshHistory:async()=>{},taskLogos:[],loadedTaskLogoId:null,multiProductViews:new Map(),loadedMultiProductId:null,...selection});
+ const c=vm.createContext({nativeFetch,s7User:{id:'alice'},currentTaskId:'task',s7Path:value=>'/s7'+value,requireLogin:()=>expired++,refreshHistory:async()=>{},readFoilRegions:()=>['product'],taskLogos:[],loadedTaskLogoId:null,multiProductViews:new Map(),loadedMultiProductId:null,...selection});
  vm.runInContext(source.slice(source.indexOf('const fetch=async('),source.indexOf('\n{\n',source.indexOf('const fetch=async(')))+'\nglobalThis.request=fetch;',c);
  return {request:c.request,expired:()=>expired,context:c};
 }
+const responseFor=url=>new Response(url.endsWith('/api/foil-preflight')?JSON.stringify({blocked:[],warnings:[]}):'{}',{headers:{'X-Workspace-User':'alice'}});
+
+test('all ordinary generation buttons enable automatic local Logo processing',async()=>{
+ const requests=[],c=client(async(url,init)=>{requests.push({url,body:JSON.parse(init.body)});return responseFor(url);});
+ for(const url of ['/api/ai-render','/api/ai-render-multi','/api/ai-render-logos','/api/render'])await c.request(url,{method:'POST',body:JSON.stringify({logoImage:'original'})});
+ const generationRequests=requests.filter(request=>!request.url.endsWith('/api/foil-preflight'));
+ assert.equal(generationRequests.length,4);
+ for(const request of generationRequests)assert.equal(request.body.processLogo,true,request.url);
+});
 
 test('已携带账号标识的业务响应直接使用，不再串行查询登录状态',async()=>{
  const calls=[],c=client(async url=>{calls.push(url);return new Response('{}',{headers:{'X-Workspace-User':'alice'}});});
@@ -30,13 +39,13 @@ test('兼容缺少账号标识的旧接口，仍核实账号后才使用结果',
 
 
 test('生成和加工请求只传 Logo 原图引用，不上传选择预览',async()=>{
- const bodies=[],c=client(async(_url,init)=>{bodies.push(JSON.parse(init.body));return new Response('{}',{headers:{'X-Workspace-User':'alice'}});},{loadedTaskLogoId:'one',taskLogos:[{id:'one',logoImage:'small-preview',logoAssetUrl:'/api/my-space/tasks/task/assets/original.png'}]});
+ const bodies=[],c=client(async(url,init)=>{bodies.push(JSON.parse(init.body));return responseFor(url);},{loadedTaskLogoId:'one',taskLogos:[{id:'one',logoImage:'small-preview',logoAssetUrl:'/api/my-space/tasks/task/assets/original.png'}]});
  for(const url of ['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo'])await c.request(url,{method:'POST',body:JSON.stringify({logoImage:'small-preview'})});
  for(const body of bodies){assert.equal(body.logoAssetUrl,'/api/my-space/tasks/task/assets/original.png');assert.equal(body.taskId,'task');assert.equal(body.logoImage,undefined);}
 });
 
 test('单产品生成捕获原图引用，保存期间切换产品不能换成其他产品的原图',async()=>{
- const bodies=[],c=client(async(_url,init)=>{bodies.push(JSON.parse(init.body));return new Response('{}',{headers:{'X-Workspace-User':'alice'}});},{loadedMultiProductId:'p',multiProductViews:new Map([['p',{baseAssetUrl:'/api/my-space/tasks/task/assets/product.png'}],['other',{baseAssetUrl:'/api/my-space/tasks/task/assets/other.png'}]]),structuredClone,syncSchemeState(){},currentSignatures:()=>({}),mockupModel:{value:'test'},baseData:'small-preview',logoData:'logo',collectTargets:()=>[],schemeState:{schemes:[]},submittedSignatures:{}});
+ const bodies=[],c=client(async(url,init)=>{bodies.push(JSON.parse(init.body));return responseFor(url);},{loadedMultiProductId:'p',multiProductViews:new Map([['p',{baseAssetUrl:'/api/my-space/tasks/task/assets/product.png'}],['other',{baseAssetUrl:'/api/my-space/tasks/task/assets/other.png'}]]),structuredClone,syncSchemeState(){},currentSignatures:()=>({}),mockupModel:{value:'test'},baseData:'small-preview',logoData:'logo',collectTargets:()=>[],schemeState:{schemes:[]},submittedSignatures:{}});
  vm.runInContext(source.slice(source.indexOf('function generationRequest('),source.indexOf('async function submitBackgroundGeneration(')),c.context);
  const request=c.context.generationRequest(['ORIGINAL']);c.context.loadedMultiProductId='other';
  for(const url of ['/api/ai-render','/api/render'])await c.request(url,{method:'POST',body:JSON.stringify(request)});

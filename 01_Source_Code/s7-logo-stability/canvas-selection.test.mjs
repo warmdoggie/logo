@@ -6,16 +6,17 @@ import {pointerToNormalized} from './demo-geometry.mjs';
 
 const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
 function workspace(){
- const events={},outlines=[],captures=[],target={id:'logo',x:.5,y:.5,widthRatio:.2,rotation:0,curve:0};
+ const events={},outlines=[],arrows=[],captures=[],target={id:'logo',x:.5,y:.5,widthRatio:.2,rotation:0,curve:0};
  const context={clearRect(){},drawImage(){},getImageData:()=>({data:new Uint8ClampedArray(400*200*4)}),save(){},restore(){},translate(){},rotate(){},setLineDash(){},strokeRect:(...args)=>outlines.push(args),beginPath(){},moveTo(){},lineTo(){},stroke:()=>outlines.push('stroke'),fillRect(){}};
  const c=vm.createContext({canvas:{width:400,height:200,getContext:()=>context,getBoundingClientRect:()=>({left:0,top:0,width:400,height:200}),addEventListener:(name,callback)=>events[name]=callback,setPointerCapture:id=>captures.push(id),classList:{add(){}}},
-  baseImage:{naturalWidth:400,naturalHeight:200},logoImage:{naturalWidth:40,naturalHeight:20},baseData:'base',previewEmpty:{},previewBaseImage:null,previewBasePixels:null,rebuildingTargets:false,selectedTargetId:'logo',dragTarget:null,dragMode:null,
+  baseImage:{naturalWidth:400,naturalHeight:200},logoImage:{naturalWidth:40,naturalHeight:20},baseData:'base',previewEmpty:{},previewBaseImage:null,previewBasePixels:null,rebuildingTargets:false,selectedTargetId:'logo',selectedTargetIds:new Set(['logo']),dragTarget:null,dragMode:null,
   syncSchemeState(){},queueSchemeCards(){},taskDraft:{schedule(){}},collectTargets:()=>[target],targetRect:()=>({left:160,top:80,width:80,height:40}),handlePoints:()=>({center:{x:200,y:100},scale:{x:240,y:120},rotation:{x:200,y:40}}),
   pointerToNormalized,distance:(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),targetAt:point=>point.x>=.4&&point.x<=.6&&point.y>=.4&&point.y<=.6?target:null,canMoveTarget:()=>true,
-  refreshTargetSelection(){},chooseContrastColor:()=>null,resolveTargetPrint:()=>({color:'#000000',finish:'flat'}),renderTintedLogoLayer:()=>({}),curvePreviewLogo:layer=>layer,drawRotationArrow(){},document:{querySelector:()=>({value:'BLACK'})}
+  refreshTargetSelection(){},chooseContrastColor:()=>null,resolveTargetPrint:()=>({color:'#000000',finish:'flat'}),renderTintedLogoLayer:()=>({}),curvePreviewLogo:layer=>layer,drawRotationArrow:(...args)=>arrows.push(args),document:{querySelector:()=>({value:'BLACK'})}
  });
+ vm.runInContext(source.slice(source.indexOf('function isTargetSelected('),source.indexOf('function drawPreview(){')),c);
  vm.runInContext(source.slice(source.indexOf('function drawPreview(){'),source.indexOf("canvas.addEventListener('pointermove'")),c);
- return {c,events,outlines,captures};
+ return {c,events,outlines,arrows,captures};
 }
 
 test('clicking empty canvas hides all outlines and clicking the logo selects it again',()=>{
@@ -29,6 +30,21 @@ test('clicking empty canvas hides all outlines and clicking the logo selects it 
 
 test('unselected logos draw without a dashed bounding box',()=>{
  const {c,outlines}=workspace();c.selectedTargetId=null;c.drawPreview();assert.equal(outlines.length,0);
+});
+
+test('Ctrl 点选可追加或取消 Logo，全部已选 Logo 显示外框，空白单击清空',()=>{
+ const {c,events,outlines,arrows,captures}=workspace();
+ const first={id:'logo',x:.25,y:.5,widthRatio:.1,rotation:0},second={id:'box',x:.75,y:.5,widthRatio:.1,rotation:0};
+ c.collectTargets=()=>[first,second];c.targetAt=point=>point.x<.4?first:point.x>.6?second:null;
+ c.selectedTargetIds=new Set(['logo']);
+ events.pointerdown({clientX:300,clientY:100,pointerId:1,ctrlKey:true,preventDefault(){}});
+ assert.deepEqual([...c.selectedTargetIds],['logo','box']);
+ assert.equal(c.dragTarget,null);assert.equal(captures.length,0);
+ outlines.length=0;arrows.length=0;c.drawPreview();assert.equal(outlines.filter(Array.isArray).length,2);assert.equal(arrows.length,2);
+ events.pointerdown({clientX:100,clientY:100,pointerId:2,ctrlKey:true,preventDefault(){}});
+ assert.deepEqual([...c.selectedTargetIds],['box']);
+ events.pointerdown({clientX:200,clientY:190,pointerId:3,preventDefault(){}});
+ assert.equal(c.selectedTargetId,null);assert.equal(c.selectedTargetIds.size,0);
 });
 
 test('local generation can be selected without contacting the AI model status endpoint',async()=>{

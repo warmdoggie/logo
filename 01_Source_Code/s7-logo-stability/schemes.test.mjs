@@ -8,9 +8,9 @@ import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
 const targets=[{id:'body',x:.25,y:.5,widthRatio:.15,carrierType:'BODY',printFinish:'VERSION',color:'#C54B78'},
   {id:'box',x:.75,y:.5,widthRatio:.15,carrierType:'CARTON_FRONT',printFinish:'INK',color:'#235689',autoContrast:true}];
 
-test('four schemes share placement but default carton black-white only in the black-white scheme',()=>{
+test('seven schemes share placement but default carton black-white only in the black-white scheme',()=>{
   const state=createSchemes(targets);
-  assert.equal(state.schemes.length,4);
+  assert.equal(state.schemes.length,7);
   assert.equal(schemeTargets(state,'BLACK')[1].printFinish,'BLACK');
   assert.equal(schemeTargets(state,'GOLD FOIL')[1].printFinish,'INK');
   assert.equal(schemeTargets(state,'SILVER FOIL')[0].printFinish,'VERSION');

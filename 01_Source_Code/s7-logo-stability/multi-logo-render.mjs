@@ -1,8 +1,8 @@
 import {createHash,randomUUID} from 'node:crypto';
 import sharp from 'sharp';
-import {generationVersions as versions,selectGenerationVersions} from './generation-versions.mjs';
+import {allGenerationVersions as versions,selectGenerationVersions,isMixedVersion} from './generation-versions.mjs';
 import {validateAiLogoOutput} from './ai-logo-processing.mjs';
-import {createSchemes} from './schemes.mjs';
+import {createSchemes,ensureMixedSchemes} from './schemes.mjs';
 import {renderLogoSet} from './index.mjs';
 import {pickAspectRatio} from './ai-mockup-generation.mjs';
 import {runBatches} from './batch-queue.mjs';
@@ -30,14 +30,14 @@ export function createMultiLogoJobs(spaces,mockupRenderer,scheduled){
   if(previous?.status==='running')fail('当前任务正在生成，请等待完成',409);
   if(!Array.isArray(input.logos)||input.logos.length<2||input.logos.length>20)fail('请选择 2–20 个 Logo');
   if(input.logos.some(logo=>!logo||typeof logo.id!=='string'||!/^[a-zA-Z0-9_-]{1,80}$/.test(logo.id)||typeof logo.name!=='string'||!logo.name.trim()||logo.name.length>120||typeof logo.logoImage!=='string')||new Set(input.logos.map(logo=>logo.id)).size!==input.logos.length)fail('Logo 名称或标识无效，且标识不能重复');
-  const layouts=input.logoLayouts??[];
-  if(!Array.isArray(layouts)||new Set(layouts.map(layout=>layout?.logoId)).size!==layouts.length||layouts.some(layout=>!layout||!input.logos.some(logo=>logo.id===layout.logoId)||!Array.isArray(layout.targets)||!layout.targets.length||!Array.isArray(layout.schemes)||layout.schemes.length!==versions.length||versions.some(version=>layout.schemes.filter(scheme=>scheme?.version===version&&Array.isArray(scheme.targets)&&scheme.targets.length).length!==1)))fail('Logo 方案与所选素材不匹配');
-  if(input.onlyLogoId&&(!input.logos.some(logo=>logo.id===input.onlyLogoId)||previous?.kind!=='multi-logo'||previous.product.id!==input.product.id))fail('请先生成所选 Logo 的效果图');
   const requested=selectGenerationVersions(input);
+  const layouts=input.logoLayouts??[];
+  if(!Array.isArray(layouts)||new Set(layouts.map(layout=>layout?.logoId)).size!==layouts.length||layouts.some(layout=>!layout||!input.logos.some(logo=>logo.id===layout.logoId)||!Array.isArray(layout.targets)||!layout.targets.length||!Array.isArray(layout.schemes)||layout.schemes.length>versions.length||layout.schemes.some(scheme=>!versions.includes(scheme?.version)||!Array.isArray(scheme.targets)||!scheme.targets.length)||new Set(layout.schemes.map(scheme=>scheme.version)).size!==layout.schemes.length||requested.some(version=>!layout.schemes.some(scheme=>scheme.version===version))))fail('Logo 方案与所选素材不匹配');
+  if(input.onlyLogoId&&(!input.logos.some(logo=>logo.id===input.onlyLogoId)||previous?.kind!=='multi-logo'||previous.product.id!==input.product.id))fail('请先生成所选 Logo 的效果图');
   if(typeof input.model!=='string'||!input.model.trim())fail('请选择成图模型');
   if(!Array.isArray(input.targets)||!input.targets.length)fail('产品尚无有效的 Logo 区域，请先发布产品母版');
   const targets=input.targets.map(target=>({...target,preserveOriginalColor:target.preserveOriginalColor??!target.color,autoContrast:target.autoContrast!==false}));
-  const basePng=await sharp(input.baseImage).png().toBuffer(),schemes=createSchemes(targets).schemes;
+  const basePng=await sharp(input.baseImage).png().toBuffer(),schemes=ensureMixedSchemes(createSchemes(targets),requested.filter(isMixedVersion)).schemes;
   const logos=[];
   // Validate all assets before any paid model request is submitted.
   for(const logo of input.logos){
@@ -56,16 +56,16 @@ export function createMultiLogoJobs(spaces,mockupRenderer,scheduled){
   if(scheduled){
    const inputs=[];
    for(const logo of logos.filter(logo=>selected.get(logo.id).length)){
-    const prepared=await prepareGenerationImage({baseImage:basePng,logoImage:logo.bytes,targets:logo.targets,schemes:logo.schemes,model:input.model,selectedVersions:selected.get(logo.id)});
+    const prepared=await prepareGenerationImage({baseImage:basePng,logoImage:logo.bytes,targets:logo.targets,schemes:logo.schemes,model:input.model,selectedVersions:selected.get(logo.id),foilAudit:input.foilAudit});
     inputs.push({input:prepared.input,output:{logoId:logo.id,logoName:logo.name},schemeSignatures:logo.schemeSignatures,label:`${input.product.sku} · ${logo.name}`});
    }
    const preserve=retry||input.onlyLogoId;
-   return scheduled.start(user,taskId,{kind:'multi-logo',product:input.product,model:input.model,logos:logos.map(({id,name,fingerprint})=>({id,name,fingerprint})),outputs:preserve?previous.outputs.filter(output=>logos.some(logo=>logo.id===output.logoId)):[],stages:preserve?Object.fromEntries(Object.entries(previous.stages).filter(([id])=>logos.some(logo=>id.startsWith(logo.id+':')))):{}},inputs);
+   return scheduled.start(user,taskId,{kind:'multi-logo',foilAudit:input.foilAudit,product:input.product,model:input.model,logos:logos.map(({id,name,fingerprint})=>({id,name,fingerprint})),outputs:preserve?previous.outputs.filter(output=>logos.some(logo=>logo.id===output.logoId)):[],stages:preserve?Object.fromEntries(Object.entries(previous.stages).filter(([id])=>logos.some(logo=>id.startsWith(logo.id+':')))):{}},inputs);
   }
   const job=await spaces.updateGeneration(user,taskId,current=>{
    if(current?.status==='running')fail('当前任务正在生成，请等待完成',409);
    const stamp=new Date().toISOString();
-   return {id:randomUUID(),kind:'multi-logo',status:'running',createdAt:stamp,updatedAt:stamp,product:input.product,model:input.model,
+   return {id:randomUUID(),kind:'multi-logo',foilAudit:input.foilAudit,status:'running',createdAt:stamp,updatedAt:stamp,product:input.product,model:input.model,
     logos:logos.map(({id,name,fingerprint})=>({id,name,fingerprint})),outputs:retry||input.onlyLogoId?current.outputs.filter(output=>logos.some(logo=>logo.id===output.logoId)):[],remoteTasks:retry||input.onlyLogoId?current.remoteTasks||{}:{},
     stages:{...((retry||input.onlyLogoId)?Object.fromEntries(Object.entries(current.stages).filter(([id])=>logos.some(logo=>id.startsWith(logo.id+':')))):{}),...Object.fromEntries(logos.flatMap(logo=>selected.get(logo.id).map(version=>[key(logo.id,version),{stage:'queued'}])))}};
   });
@@ -85,11 +85,11 @@ export function createMultiLogoJobs(spaces,mockupRenderer,scheduled){
        stages:{...current.stages,[key(logo.id,output.version)]:{stage:'complete'}}};});
      };
      try{
-      const guides=await renderLogoSet({baseImage:basePng,logoImage:logo.bytes,targets,schemes,originalColor:'#000000'});
+      const guides=await renderLogoSet({baseImage:basePng,logoImage:logo.bytes,targets,schemes,originalColor:'#000000',selectedVersions:selected.get(logo.id)});
       const current=await spaces.generation(user,taskId);
       const outputs=await mockupRenderer({baseImage:dataUrl(basePng),logoImage:dataUrl(logo.bytes),model:input.model,targets,schemes,originalColor:'#000000',selectedVersions,
        size:pickAspectRatio(guides.width,guides.height),logoAspectRatio:logo.height/logo.width,maskImage:dataUrl(guides.mask),
-       guides:guides.outputs.map(output=>({version:output.version,dataUrl:dataUrl(output.bytes),maskDataUrl:dataUrl(output.mask),foilMaskDataUrl:dataUrl(output.foilMask),goldMaskDataUrl:dataUrl(output.goldMask)})),
+       guides:guides.outputs.map(output=>({version:output.version,dataUrl:dataUrl(output.bytes),maskDataUrl:dataUrl(output.mask),foilMaskDataUrl:dataUrl(output.foilMask),goldMaskDataUrl:dataUrl(output.goldMask),roseMaskDataUrl:dataUrl(output.roseMask),laserMaskDataUrl:dataUrl(output.laserMask)})),
        onStage,onOutput,
        resumeTasks:Object.fromEntries(selectedVersions.map(version=>[version,current.remoteTasks[key(logo.id,version)]])),
        onCheckpoint:(version,checkpoint)=>update(record=>{const remoteTasks={...record.remoteTasks};if(checkpoint)remoteTasks[key(logo.id,version)]=checkpoint;else delete remoteTasks[key(logo.id,version)];return {...record,remoteTasks};})

@@ -1,78 +1,122 @@
 import {transformPlacement} from './placement-transform.js';
-import {zonePoints,containsPolygon,polygonOverlap,polygonError} from './zone-geometry.js';
-const uid=()=>crypto.randomUUID(),esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+import {placementRotation} from './auto-placement.js';
+import {zonePoints,containsPolygon,polygonOverlap,pointInside} from './zone-geometry.js';
+const uid=()=>crypto.randomUUID();
+const foilProcesses=[['GOLD FOIL','烫金'],['SILVER FOIL','烫银'],['ROSE GOLD FOIL','烫玫瑰金'],['LASER FOIL','烫镭射']];
 export function mountTemplateAutomation(ctx,initial){
- const {main,canvas,readonly}=ctx;let config=structuredClone(initial||{version:1,carriers:[],areas:[],schemes:[]}),editing=false,drag=null,presetId=null;
- config.areas.forEach(a=>a.zoneRef=a.zoneRef||ctx.zones()[a.zoneIndex]?.id);
+ const {main,canvas,readonly}=ctx;let config=structuredClone(initial||{version:1,carriers:[],areas:[],schemes:[]}),drawing=false,drawingBackup=null,drawingOrientation=null,presetId=null,frameSelected=false,drag=null;
+ config.areas.forEach(a=>{a.zoneRef=a.zoneRef||ctx.zones()[a.zoneIndex]?.id;a.foilProcesses=a.foilProcesses||[];});
  const panel=document.createElement('section');panel.className='panel';main.querySelector('.template-properties').append(panel);
  const layer=document.createElementNS('http://www.w3.org/2000/svg','g');canvas.append(layer);
  function area(){return config.areas.find(a=>a.zoneRef===ctx.selected());}
+ function carrierType(zoneId){const a=config.areas.find(a=>a.zoneRef===zoneId);return config.carriers.find(c=>c.id===a?.carrierId)?.type;}
+ function classifyZone(z,type){
+  let a=config.areas.find(a=>a.zoneRef===z.id),box;
+  if(!a){
+   const image=ctx.image(),poly=zonePoints(z,image),centers=[{x:z.defaultAnchorX,y:z.defaultAnchorY},{x:z.x+z.width/2,y:z.y+z.height/2}];
+   for(let y=1;y<10;y++)for(let x=1;x<10;x++)centers.push({x:z.x+z.width*x/10,y:z.y+z.height*y/10});
+   for(let scale=.4;scale*z.width>=.001&&scale*z.height>=.001&&!box;scale/=2){
+    const edgeCenters=[],inset=Math.hypot(z.width*scale,z.height*scale)/2;
+    for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],length=Math.hypot(b.x-a.x,b.y-a.y);if(!length)continue;for(const sign of [-1,1])edgeCenters.push({x:(a.x+b.x)/2-sign*(b.y-a.y)*inset/length,y:(a.y+b.y)/2+sign*(b.x-a.x)*inset/length});}
+    for(const center of [...centers,...edgeCenters]){const candidate={centerX:center.x,centerY:center.y,width:z.width*scale,height:z.height*scale,rotation:z.rotation||0},points=zonePoints({shapeType:'ROTATED_RECT',x:center.x-candidate.width/2,y:center.y-candidate.height/2,width:candidate.width,height:candidate.height,rotation:candidate.rotation},image);
+     if(containsPolygon(poly,points)&&!ctx.zones().some(n=>n.zoneType==='no-logo'&&polygonOverlap(points,zonePoints(n,image)))){box=candidate;break;}
+    }
+   }
+   if(!box)throw Error('当前区域过窄或被禁止区域覆盖，无法建立默认摆放框，请调整区域后重试');
+  }
+  let carrier=config.carriers.find(c=>c.type===type);
+  if(!carrier){carrier={id:uid(),type,name:{BODY:'产品本体',CAP:'盖子',CARTON:'彩盒',OTHER:'其他载体'}[type]};config.carriers.push(carrier);}
+  if(a)a.carrierId=carrier.id;
+  else config.areas.push({id:uid(),zoneRef:z.id,carrierId:carrier.id,name:z.name,autoEligible:false,foilProcesses:[],presets:[{id:uid(),name:'默认摆放',orientation:box.rotation?'custom':'horizontal',isDefault:true,box}]});
+ }
  function preset(){const a=area();return a?.presets.find(p=>p.id===presetId)||a?.presets.find(p=>p.isDefault);}
- function serialize(){surfaceEditor.assertReady();for(const s of config.schemes)for(const t of s.targets)if(!config.areas.some(a=>a.id===t.areaId&&ctx.zones().some(z=>z.id===a.zoneRef)&&a.presets.some(p=>p.id===t.presetId)))throw Error('方案 '+s.name+' 存在已删除的区域或预设，请先修正引用');const areas=config.areas.filter(a=>ctx.zones().some(z=>z.id===a.zoneRef)).map(a=>({...a,zoneIndex:ctx.zones().findIndex(z=>z.id===a.zoneRef)}));return {...config,areas};}
- const surfaceEditor=mountSurfaceEditor(ctx,config);
- const change=()=>{ctx.dirty();draw();};
+ function selectPreset(id){presetId=id;const a=area();if(!readonly&&a.presets.some(p=>p.isDefault&&p.id!==id)){a.presets.forEach(p=>p.isDefault=p.id===id);ctx.dirty();}}
+ function serialize(){const saved=drawingBackup||config;for(const s of saved.schemes)for(const t of s.targets)if(!saved.areas.some(a=>a.id===t.areaId&&ctx.zones().some(z=>z.id===a.zoneRef)&&a.presets.some(p=>p.id===t.presetId)))throw Error('方案 '+s.name+' 存在已删除的区域或预设，请先修正引用');const areas=saved.areas.filter(a=>ctx.zones().some(z=>z.id===a.zoneRef)).map(a=>({...a,zoneIndex:ctx.zones().findIndex(z=>z.id===a.zoneRef)}));return {...saved,areas};}
+ const change=()=>{if(!drawingBackup)ctx.dirty();draw();};
+ function cancelDrawing(){if(drawingBackup){config=drawingBackup;drawingBackup=null;}drawing=false;drawingOrientation=null;drag=null;ctx.refresh();}
  function valid(b){const image=ctx.image(),z=ctx.zones().find(z=>z.id===ctx.selected());if(!z||b.width<.001||b.height<.001)return false;const poly=zonePoints({shapeType:'ROTATED_RECT',x:b.centerX-b.width/2,y:b.centerY-b.height/2,width:b.width,height:b.height,rotation:b.rotation},image);return containsPolygon(zonePoints(z,image),poly)&&!ctx.zones().some(n=>n.zoneType==='no-logo'&&polygonOverlap(poly,zonePoints(n,image)));}
+ function placementFrame(p,index,b=p.box,preview=false){
+  const {width:W,height:H}=ctx.image(),pts=zonePoints({shapeType:'ROTATED_RECT',x:b.centerX-b.width/2,y:b.centerY-b.height/2,width:b.width,height:b.height,rotation:b.rotation},{width:W,height:H}),scale=W/(canvas.getBoundingClientRect().width||W),r=b.rotation*Math.PI/180,active=!preview&&frameSelected&&p.id===preset()?.id;
+  const direction=placementRotation(ctx.zones().find(z=>z.id===ctx.selected()),{...p,box:b},{width:W,height:H})*Math.PI/180,relative=direction-r,length=.3/Math.max(Math.abs(Math.cos(relative))/(b.width*W),Math.abs(Math.sin(relative))/(b.height*H)),cx=b.centerX*W,cy=b.centerY*H,dx=Math.cos(direction)*length,dy=Math.sin(direction)*length,tipX=cx+dx,tipY=cy+dy,head=5*scale;
+  const arrow=`<path data-placement-direction="${p.orientation}" pointer-events="none" d="M${cx-dx},${cy-dy} L${tipX},${tipY} M${tipX-head*Math.cos(direction-.6)},${tipY-head*Math.sin(direction-.6)} L${tipX},${tipY} L${tipX-head*Math.cos(direction+.6)},${tipY-head*Math.sin(direction+.6)}" fill="none" stroke="#08785c" stroke-width="${1.5*scale}"/>`;
+  return `<g ${preview?'data-placement-preview':`data-placement-frame="${p.id}"`} class="${active?'placement-selected':''}"><polygon data-placement="move" data-placement-id="${p.id}" points="${pts.map(q=>q.x*W+','+q.y*H).join(' ')}" fill="${active?'#10b98122':'#10b9810d'}" stroke="${valid(b)?active?'#08916b':'#6eac94':'#e04545'}" stroke-width="${(active?2.5:1.5)*scale}" pointer-events="${!drawing?'all':'none'}"/><text x="${b.centerX*W+6*scale}" y="${b.centerY*H-6*scale}" font-size="${12*scale}" fill="#08785c" pointer-events="none">${preview?'新位置':'位置 '+(index+1)}${p.orientation==='vertical'?' · 竖排':p.orientation==='horizontal'?' · 横排':''}</text>${arrow}${active&&!readonly&&!drawing?pts.map((q,i)=>`<rect data-placement="${i}" data-placement-id="${p.id}" x="${q.x*W-5*scale}" y="${q.y*H-5*scale}" width="${10*scale}" height="${10*scale}" fill="white" stroke="#08916b" stroke-width="${2*scale}"/>`).join(''):''}</g>`;
+ }
  function draw(){
-  layer.replaceChildren();const p=preset();if(!p)return;for(const el of panel.querySelectorAll("[data-box]")){if(el!==document.activeElement)el.value=Number(p.box[el.dataset.box].toFixed(6));}const orientation=panel.querySelector("#auto-orientation");if(orientation)orientation.value=p.orientation;const b=p.box,{width:W,height:H}=ctx.image(),pts=zonePoints({shapeType:'ROTATED_RECT',x:b.centerX-b.width/2,y:b.centerY-b.height/2,width:b.width,height:b.height,rotation:b.rotation},{width:W,height:H}),scale=W/(canvas.getBoundingClientRect().width||W),mid={x:(pts[0].x+pts[1].x)/2,y:(pts[0].y+pts[1].y)/2},r=b.rotation*Math.PI/180;
-  layer.innerHTML=`<polygon data-placement="move" points="${pts.map(p=>p.x*W+','+p.y*H).join(' ')}" fill="#10b98122" stroke="${valid(b)?'#08916b':'#e04545'}" stroke-width="${2*scale}" style="pointer-events:${editing?'all':'none'}"/><text x="${b.centerX*W}" y="${b.centerY*H}" font-size="${12*scale}" fill="#08785c" style="pointer-events:none">默认摆放框</text>${editing&&!readonly?pts.map((q,i)=>`<circle data-placement="${i}" cx="${q.x*W}" cy="${q.y*H}" r="${6*scale}" fill="#08916b"/>`).join('')+`<circle data-placement="rotate" cx="${mid.x*W+Math.sin(r)*24*scale}" cy="${mid.y*H-Math.cos(r)*24*scale}" r="${7*scale}" fill="#08916b"/>`:''}`;
+  layer.replaceChildren();const a=area(),p=preset();if(!a)return;
+  const positions=a.presets.map((p,index)=>({p,index})).sort((a,b)=>Number(a.p.id===p?.id)-Number(b.p.id===p?.id));
+  layer.innerHTML=positions.map(({p,index})=>placementFrame(p,index)).join('')+(drag?.kind==='create'?placementFrame({id:'preview',orientation:drawingOrientation},-1,drag.preview,true):'');
  }
  function render(){
-  surfaceEditor.render();
-  const z=ctx.zones().find(z=>z.id===ctx.selected()),a=area(),p=preset();
-  panel.innerHTML=`<div class="panel-head"><h2>一键出图预设</h2></div><div class="panel-body"><p class="hint">蓝框是最大允许范围；绿框是首稿默认摆放范围。旧区域需设计师分类并确认，才参与自动生成。</p><fieldset ${readonly?'disabled':''}>${z?'<button type="button" class="btn" id="clone-area">复制当前区域</button>':''}${z?.zoneType==='logo'?(a?`<label>载体<select id="auto-carrier">${config.carriers.map(c=>`<option value="${c.id}" ${a.carrierId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label><label>载体名称<input id="carrier-name" value="${esc(config.carriers.find(c=>c.id===a.carrierId)?.name)}" maxlength="120"></label><button type="button" class="btn small" id="split-carrier">拆为独立载体</button><label>物理区域名称<input id="auto-area-name" value="${esc(a.name)}" maxlength="120"></label><label><input id="auto-eligible" type="checkbox" ${a.autoEligible?'checked':''}>可用于业务员自动生成</label><label>摆放预设<select id="auto-preset">${a.presets.map(v=>`<option value="${v.id}" ${v.id===p?.id?'selected':''}>${esc(v.name)}${v.isDefault?'（默认）':''}</option>`).join('')}</select></label><button type="button" class="btn small" id="add-preset">新增摆放方式</button><button type="button" class="btn small" id="default-preset">设为默认摆放</button><button type="button" class="btn small" id="delete-preset">删除当前摆放方式</button>${p?`<label>摆放名称<input id="auto-preset-name" value="${esc(p.name)}" maxlength="120"></label><label>方向策略<select id="auto-orientation">${Object.entries({horizontal:'横排',vertical:'竖排','long-axis':'沿默认框长轴','follow-body':'跟随本体区域方向',custom:'指定角度'}).map(([k,v])=>`<option value="${k}" ${p.orientation===k?'selected':''}>${v}</option>`).join('')}</select></label><button type="button" class="btn" id="edit-placement">${editing?'结束摆放框编辑':'在画布拖拽默认摆放框'}</button><div class="property-grid">${Object.entries({centerX:'中心 X',centerY:'中心 Y',width:'默认宽度',height:'默认高度',rotation:'角度'}).map(([k,v])=>`<label>${v}<input data-box="${k}" type="number" step="0.001" value="${p.box[k]}"></label>`).join('')}</div>`:''}`:`<p>当前区域：待分类</p><label>选择载体<select id="new-carrier-kind"><option value="BODY">产品本体</option><option value="CAP">盖子</option><option value="CARTON">彩盒</option><option value="OTHER">其他载体</option></select></label><p class="hint">选择后立即保存此区域的载体分类；发布母版后会固定保留。</p>`):'<p>请选择 Logo 区域配置自动摆放；禁止区域也可复制。</p>'}<hr><h3>方案（最多 3 个）</h3><p class="hint">每个方案输出一张图，可以包含多个载体。目标只来自已分类区域。</p>${config.schemes.map(s=>`<details open><summary>${esc(s.name)} · ${s.role==='DEFAULT'?'默认':'备选'}</summary><label>方案名<input data-scheme-name="${s.id}" value="${esc(s.name)}"></label>${config.areas.filter(a=>a.autoEligible&&ctx.zones().some(z=>z.id===a.zoneRef)).map(a=>`<label>${esc(config.carriers.find(c=>c.id===a.carrierId)?.name)} · ${esc(a.name)}<select data-scheme="${s.id}" data-area="${a.id}"><option value="">不参与</option>${a.presets.map(p=>`<option value="${p.id}" ${s.targets.some(t=>t.areaId===a.id&&t.presetId===p.id)?'selected':''}>${esc(p.name)}</option>`).join('')}</select></label>`).join('')}<button type="button" class="btn small" data-default-scheme="${s.id}">设为默认方案</button><button type="button" class="btn small" data-delete-scheme="${s.id}">删除方案</button></details>`).join('')}<button type="button" class="btn" id="add-scheme" ${config.schemes.length>=3?'disabled':''}>新增方案</button></fieldset></div>`;
-  const bind=(id,fn,event='click')=>panel.querySelector('#'+id)?.addEventListener(event,fn);
-  bind('clone-area',()=>{ctx.clone();});
-  bind('carrier-name',e=>{config.carriers.find(c=>c.id===a.carrierId).name=e.target.value;change();},'input');
-  bind('split-carrier',()=>{const old=config.carriers.find(c=>c.id===a.carrierId),copy={...structuredClone(old),id:uid(),name:old.name+'（独立）'};delete copy.surfaceMask;config.carriers.push(copy);a.carrierId=copy.id;change();render();});
-  bind('delete-preset',()=>{const refs=config.schemes.filter(s=>s.targets.some(t=>t.presetId===p.id));if(refs.length)return ctx.reject('该摆放方式被 '+refs.map(s=>s.name).join('、')+' 使用，请先修改方案');if(a.presets.length===1)return ctx.reject('至少保留一个摆放方式');a.presets=a.presets.filter(v=>v.id!==p.id);if(!a.presets.some(v=>v.isDefault))a.presets[0].isDefault=true;presetId=a.presets[0].id;change();render();});
-  bind('new-carrier-kind',e=>{const type=e.target.value;let carrier=config.carriers.find(c=>c.type===type);if(!carrier){carrier={id:uid(),type,name:{BODY:'产品本体',CAP:'盖子',CARTON:'彩盒',OTHER:'其他载体'}[type]};config.carriers.push(carrier);}const b={centerX:z.defaultAnchorX,centerY:z.defaultAnchorY,width:z.width*.4,height:z.height*.4,rotation:0};config.areas.push({id:uid(),zoneRef:z.id,carrierId:carrier.id,name:z.name,autoEligible:false,presets:[{id:uid(),name:'默认摆放',orientation:'horizontal',isDefault:true,box:b}]});editing=true;change();render();},'change');
-  bind('auto-carrier',e=>{a.carrierId=e.target.value;change();render();},'change');bind('auto-area-name',e=>{a.name=e.target.value;change();},'input');bind('auto-eligible',e=>{a.autoEligible=e.target.checked;if(!a.autoEligible)config.schemes.forEach(s=>s.targets=s.targets.filter(t=>t.areaId!==a.id));change();render();},'change');
-  bind('auto-preset',e=>{presetId=e.target.value;render();draw();},'change');bind('auto-preset-name',e=>{p.name=e.target.value;change();},'input');
-  bind('add-preset',()=>{if(a.presets.length>=10)return;const n=structuredClone(p);n.id=uid();n.name='备选摆放';n.isDefault=false;a.presets.push(n);presetId=n.id;change();render();});bind('default-preset',()=>{a.presets.forEach(v=>v.isDefault=v.id===p.id);change();render();});
-  bind('auto-orientation',e=>{p.orientation=e.target.value;if(p.orientation==='horizontal')p.box.rotation=0;else if(p.orientation==='vertical')p.box.rotation=90;change();render();},'change');bind('edit-placement',()=>{editing=!editing;render();draw();});
-  panel.querySelectorAll('[data-box]').forEach(el=>el.oninput=()=>{const n=Number(el.value);if(!Number.isFinite(n)||el.value==='')return;p.box[el.dataset.box]=n;if(el.dataset.box==='rotation')p.orientation='custom';change();});
-  bind('add-scheme',()=>{if(config.schemes.length>=3)return;config.schemes.push({id:uid(),name:'方案 '+String.fromCharCode(65+config.schemes.length),role:config.schemes.length?'ALTERNATIVE':'DEFAULT',targets:[]});change();render();});
-  panel.querySelectorAll('[data-scheme-name]').forEach(el=>el.oninput=()=>{config.schemes.find(s=>s.id===el.dataset.schemeName).name=el.value;change();});
-  panel.querySelectorAll('[data-scheme]').forEach(el=>el.onchange=()=>{const s=config.schemes.find(s=>s.id===el.dataset.scheme);s.targets=s.targets.filter(t=>t.areaId!==el.dataset.area);if(el.value)s.targets.push({areaId:el.dataset.area,presetId:el.value});change();});
-  panel.querySelectorAll('[data-delete-scheme]').forEach(el=>el.onclick=()=>{config.schemes=config.schemes.filter(s=>s.id!==el.dataset.deleteScheme);if(config.schemes.length&&!config.schemes.some(s=>s.role==='DEFAULT'))config.schemes[0].role='DEFAULT';change();render();});
-  panel.querySelectorAll('[data-default-scheme]').forEach(el=>el.onclick=()=>{config.schemes.forEach(s=>s.role=s.id===el.dataset.defaultScheme?'DEFAULT':'ALTERNATIVE');change();render();});draw();
+  const z=ctx.zones().find(z=>z.id===ctx.selected()),a=area(),p=preset(),orientation=drawing?drawingOrientation:p?.orientation;
+  const type=carrierType(z?.id)||(/彩盒|纸盒|carton/i.test(z?.name||'')?'CARTON':'BODY');
+  const processes=z?.zoneType==='logo'?`<fieldset ${readonly||drawing?'disabled':''}><h3>区域工艺</h3><label for="area-carrier-type">区域类型</label><select id="area-carrier-type">${['CAP','OTHER'].includes(type)?`<option value="${type}" selected>产品（${type==='CAP'?'盖子':'其他载体'}）</option>`:''}<option value="BODY" ${type==='BODY'?'selected':''}>产品</option><option value="CARTON" ${type==='CARTON'?'selected':''}>彩盒</option></select>${type==='CARTON'?'<p class="hint">彩盒不建议烫印，业务员知晓后可继续</p>':`<p class="hint">允许的烫印工艺（未勾选则不可使用）</p>${foilProcesses.map(([value,label],i)=>`<label class="checkbox-label"><input type="checkbox" id="area-foil-${i}" ${a?.foilProcesses.includes(value)?'checked':''}>${label}</label>`).join('')}`}</fieldset>`:'';
+  panel.innerHTML=`<div class="panel-head"><h2>摆放设置 <span class="count">${a?.presets.length||0} 个位置</span></h2></div><div class="panel-body">${processes}<fieldset ${readonly?'disabled':''}><button type="button" class="btn" id="add-placement" ${z?.zoneType==='logo'&&(!a||a.presets.length<10)?'':'disabled'}>＋ 新增摆放位置</button><label for="auto-orientation">摆放方向</label><select id="auto-orientation" ${p||drawing?'':'disabled'}>${p&&!['horizontal','vertical'].includes(orientation)?`<option value="${orientation}" selected disabled>保持原有方向</option>`:''}<option value="horizontal" ${orientation==='horizontal'?'selected':''}>横排 →</option><option value="vertical" ${orientation==='vertical'?'selected':''}>竖排 ↓</option></select></fieldset><p class="hint">${drawing?'在图上拖出摆放位置；按 Esc 取消。':z?.zoneType==='logo'?'点击框选择位置，拖动或拖四角调整；按 Backspace 删除选中框；方向只改变 Logo 朝向。'+(a?.presets.length>1?'重叠时按 Shift 点击切换。':''):'先点击图中的产品或彩盒区域，再设置 Logo 摆放位置。'}</p></div>`;
+  panel.querySelector('#area-carrier-type')?.addEventListener('change',e=>{
+   if(readonly||drawing||z?.zoneType!=='logo'||!['BODY','CARTON'].includes(e.target.value))return;
+   try{classifyZone(z,e.target.value);change();render();}catch(e){ctx.reject(e);}
+  });
+  for(const [i,[value]] of foilProcesses.entries())panel.querySelector('#area-foil-'+i)?.addEventListener('change',e=>{
+   if(readonly||drawing||z?.zoneType!=='logo'||type==='CARTON')return;
+   try{if(!area())classifyZone(z,type);const a=area();a.foilProcesses=foilProcesses.map(([v])=>v).filter(v=>v===value?e.target.checked:a.foilProcesses.includes(v));change();render();}catch(e){ctx.reject(e);}
+  });
+  panel.querySelector('#add-placement')?.addEventListener('click',()=>{
+   if(!z||readonly||a?.presets.length>=10)return;
+   try{if(!area()){drawingBackup=structuredClone(config);classifyZone(z,/彩盒|纸盒|carton/i.test(z.name||'')?'CARTON':'BODY');}ctx.selectMode();drawingOrientation=['horizontal','vertical'].includes(preset()?.orientation)?preset().orientation:'horizontal';drawing=true;canvas.setAttribute('tabindex','0');canvas.focus();ctx.refresh();}catch(e){cancelDrawing();ctx.reject(e);}
+  });
+  panel.querySelector('#auto-orientation')?.addEventListener('change',e=>{if(readonly)return;if(drawing){drawingOrientation=e.target.value;draw();return;}if(!p)return;p.orientation=e.target.value;change();render();});
+  canvas.classList.toggle('placement-drawing',!!drawing);draw();
  }
  const point=e=>{const r=canvas.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height};};
- canvas.addEventListener('pointerdown',e=>{if(readonly||!editing||!e.target.dataset.placement)return;e.stopImmediatePropagation();e.preventDefault();drag={kind:e.target.dataset.placement,start:point(e),box:structuredClone(preset().box),preset:preset()};canvas.setPointerCapture(e.pointerId);},true);
- canvas.addEventListener('pointermove',e=>{if(!drag)return;e.stopImmediatePropagation();const q=point(e),o=drag.box,b={...o},{width:W,height:H}=ctx.image(),r=o.rotation*Math.PI/180,c=Math.cos(r),s=Math.sin(r);
-  if(drag.kind==='move'){b.centerX+=q.x-drag.start.x;b.centerY+=q.y-drag.start.y;}
-  else if(drag.kind==='rotate'){const angle=p=>Math.atan2((p.y-o.centerY)*H,(p.x-o.centerX)*W)*180/Math.PI;let a=o.rotation+angle(q)-angle(drag.start);a=((a+180)%360+360)%360-180;const snap=Math.round(a/45)*45;b.rotation=Math.abs(a-snap)<3?snap:a;}
-  else{const n=Number(drag.kind),sx=[-1,1,1,-1][n],sy=[-1,-1,1,1][n],fixed={x:o.centerX*W-(sx*o.width*W*c-sy*o.height*H*s)/2,y:o.centerY*H-(sx*o.width*W*s+sy*o.height*H*c)/2},dx=q.x*W-fixed.x,dy=q.y*H-fixed.y,w=Math.max(.001*W,sx*(dx*c+dy*s)),h=Math.max(.001*H,sy*(-dx*s+dy*c));b.width=w/W;b.height=h/H;b.centerX=(fixed.x+(sx*w*c-sy*h*s)/2)/W;b.centerY=(fixed.y+(sx*w*s+sy*h*c)/2)/H;}
-  if(valid(b)){drag.preset.box=b;if(drag.kind==='rotate')drag.preset.orientation='custom';panel.querySelectorAll('[data-box]').forEach(el=>el.value=Number(b[el.dataset.box].toFixed(6)));draw();}
+ canvas.addEventListener('pointerdown',e=>{
+  if(e.button!==0)return;
+  canvas.setAttribute('tabindex','0');canvas.focus();
+  if(e.altKey){frameSelected=false;if(drawing)cancelDrawing();return;}
+  if(!drawing&&!preset()){frameSelected=false;return;}
+  if(drawing){if(readonly)return;e.stopImmediatePropagation();e.preventDefault();const q=point(e);drag={kind:'create',start:q,preview:{centerX:q.x,centerY:q.y,width:.001,height:.001,rotation:0}};}
+  else{
+   const id=e.target.dataset.placementId,kind=e.target.dataset.placement;if(!area().presets.some(p=>p.id===id)||kind===undefined){frameSelected=false;return;}
+   frameSelected=true;
+   e.stopImmediatePropagation();e.preventDefault();
+   if(e.shiftKey){const image=ctx.image(),q=point(e),hits=area().presets.filter(p=>pointInside(q,zonePoints({shapeType:'ROTATED_RECT',x:p.box.centerX-p.box.width/2,y:p.box.centerY-p.box.height/2,width:p.box.width,height:p.box.height,rotation:p.box.rotation},image))).reverse(),index=hits.findIndex(p=>p.id===preset().id);if(hits.length)selectPreset(hits[(index+1)%hits.length].id);render();return;}
+   selectPreset(id);if(readonly){render();return;}
+   drag={kind,start:point(e),box:structuredClone(preset().box),preset:preset()};render();
+  }
+  canvas.setPointerCapture(e.pointerId);
  },true);
- const end=e=>{if(!drag)return;e.stopImmediatePropagation();if(e.type==='pointercancel')drag.preset.box=drag.box;drag=null;change();render();};canvas.addEventListener('pointerup',end,true);canvas.addEventListener('pointercancel',end,true);
- function cloned(oldId,newId){const a=config.areas.find(a=>a.zoneRef===oldId);if(!a)return;const copy=structuredClone(a);copy.id=uid();copy.zoneRef=newId;copy.name+=' 副本';copy.presets.forEach(p=>p.id=uid());config.areas.push(copy);}
+ canvas.addEventListener('pointermove',e=>{
+  if(!drag)return;e.stopImmediatePropagation();const q=point(e);
+  if(drag.kind==='create'){drag.preview={centerX:(q.x+drag.start.x)/2,centerY:(q.y+drag.start.y)/2,width:Math.max(.001,Math.abs(q.x-drag.start.x)),height:Math.max(.001,Math.abs(q.y-drag.start.y)),rotation:0};draw();return;}
+  const o=drag.box,b={...o},{width:W,height:H}=ctx.image(),r=o.rotation*Math.PI/180,c=Math.cos(r),s=Math.sin(r);
+  if(drag.kind==='move'){b.centerX+=q.x-drag.start.x;b.centerY+=q.y-drag.start.y;}
+  else{const n=Number(drag.kind),sx=[-1,1,1,-1][n],sy=[-1,-1,1,1][n],fixed={x:o.centerX*W-(sx*o.width*W*c-sy*o.height*H*s)/2,y:o.centerY*H-(sx*o.width*W*s+sy*o.height*H*c)/2},dx=q.x*W-fixed.x,dy=q.y*H-fixed.y,w=Math.max(.001*W,sx*(dx*c+dy*s)),h=Math.max(.001*H,sy*(-dx*s+dy*c));b.width=w/W;b.height=h/H;b.centerX=(fixed.x+(sx*w*c-sy*h*s)/2)/W;b.centerY=(fixed.y+(sx*w*s+sy*h*c)/2)/H;}
+  if(valid(b)){drag.preset.box=b;draw();}
+ },true);
+ const end=e=>{
+  if(!drag)return;e.stopImmediatePropagation();
+  if(drag.kind==='create'){
+   if(e.type==='pointercancel'){cancelDrawing();return;}
+   if(drag.preview.width<.003||drag.preview.height<.003||!valid(drag.preview)){drag=null;ctx.reject('摆放位置需要位于当前区域内，且不能覆盖禁止区域');render();return;}
+   const a=area();let p;
+   if(drawingBackup){p=preset();p.box=drag.preview;p.orientation=drawingOrientation;}
+   else{p={id:uid(),name:'摆放位置 '+(a.presets.length+1),box:drag.preview,orientation:drawingOrientation,isDefault:false};a.presets.push(p);}
+   a.presets.forEach(v=>v.isDefault=v.id===p.id);presetId=p.id;frameSelected=true;drawing=false;drawingBackup=null;drawingOrientation=null;
+  }else if(e.type==='pointercancel'){drag.preset.box=drag.box;drag=null;render();return;}
+  if(drag.kind!=='create'&&JSON.stringify(drag.preset.box)===JSON.stringify(drag.box)){drag=null;render();return;}
+  drag=null;change();render();
+ };
+ canvas.addEventListener('pointerup',end,true);canvas.addEventListener('pointercancel',end,true);
+ main.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&drawing){e.preventDefault();cancelDrawing();return;}
+  if(e.key!=='Backspace'||e.target!==canvas||readonly||e.ctrlKey||e.metaKey||e.altKey||e.isComposing)return;
+  e.preventDefault();if(e.repeat||drawing||drag)return;
+  if(!frameSelected){ctx.deleteZone();return;}
+  const a=area(),p=preset();if(!a||!p)return;
+  a.presets=a.presets.filter(v=>v!==p);presetId=(a.presets.find(v=>v.isDefault)||a.presets[0])?.id||null;
+  a.presets.forEach(v=>v.isDefault=v.id===presetId);removeTargets(t=>t.areaId===a.id&&t.presetId===p.id);change();render();
+ },{signal:ctx.signal});
  function moved(zoneId,dx,dy){const a=config.areas.find(a=>a.zoneRef===zoneId);if(a)for(const p of a.presets){p.box.centerX+=dx;p.box.centerY+=dy;}}
  function transformed(zoneId,before,after,force=false){const a=config.areas.find(a=>a.zoneRef===zoneId);if(!a)return true;const image=ctx.image();const proposals=a.presets.map(p=>({p,box:transformPlacement(p.box,before,after,image)}));if(!force&&proposals.some(({box})=>{const poly=zonePoints({shapeType:'ROTATED_RECT',x:box.centerX-box.width/2,y:box.centerY-box.height/2,width:box.width,height:box.height,rotation:box.rotation},image);return !containsPolygon(zonePoints(after,image),poly)||ctx.zones().some(n=>n.zoneType==='no-logo'&&polygonOverlap(poly,zonePoints(n,image)));})){ctx.reject('调整后默认框越界或碰到禁区，请先调整默认框');return false;}for(const {p,box} of proposals){p.box=box;if(Math.abs((after.rotation||0)-(before.rotation||0))>1e-8&&['horizontal','vertical'].includes(p.orientation))p.orientation='custom';}return true;}
- function removeZone(zoneId){const a=config.areas.find(a=>a.zoneRef===zoneId);if(!a)return true;config.schemes.forEach(s=>s.targets=s.targets.filter(t=>t.areaId!==a.id));config.schemes=config.schemes.filter(s=>s.targets.length);if(config.schemes.length&&!config.schemes.some(s=>s.role==='DEFAULT'))config.schemes[0].role='DEFAULT';config.areas=config.areas.filter(v=>v!==a);return true;}
- return {render,draw,serialize,cloned,moved,transformed,removeZone};
-}
-
-function mountSurfaceEditor(ctx,config){
- const {main,canvas,readonly}=ctx;let selected=null,drawing=null,points=[];
- const panel=document.createElement('section');panel.className='panel';main.querySelector('.template-properties').append(panel);
- const layer=document.createElementNS('http://www.w3.org/2000/svg','g');layer.setAttribute('pointer-events','none');canvas.append(layer);
- const carrier=()=>config.carriers.find(c=>c.id===selected)||config.carriers[0];
- const changed=()=>{if(carrier()?.surfaceMask)carrier().surfaceMask.reviewed=false;ctx.dirty();render();};
- function draw(){const {width:W,height:H}=ctx.image(),c=carrier();layer.innerHTML=[...(c?.surfaceMask?.regions||[]),...(points.length?[{mode:drawing,points}]:[])].map(r=>`<polygon points="${r.points.map(p=>`${p.x*W},${p.y*H}`).join(' ')}" fill="${r.mode==='EXCLUDE'?'#ef444444':'#a855f744'}" stroke="${r.mode==='EXCLUDE'?'#dc2626':'#9333ea'}" stroke-width="2"/>`).join('');}
- function render(){const c=carrier();selected=c?.id||null;const m=c?.surfaceMask;
- panel.innerHTML=`<div class="panel-body"><h2>产品底色蒙版</h2><p>独立圈选瓶身或彩盒轮廓；排除背景、已有文字、反光及不可改色部位。紫色表示改色范围，红色表示保留原图。发布新母版仅用于后续绑定，旧任务继续锁定原版。</p><fieldset ${readonly?'disabled':''}><label>载体<select id="surface-carrier">${config.carriers.map(c=>`<option value="${c.id}" ${selected===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>${c?`<button type="button" id="surface-include" class="btn">圈选改色轮廓</button><button type="button" id="surface-exclude" class="btn">圈选保留区域</button><p>${drawing?`在画布依次点击轮廓节点（已选 ${points.length} 点），完成后闭合。`:'先选择圈选类型，再到画布点击。'}</p><button type="button" id="surface-finish" class="btn" ${!drawing?'disabled':''}>闭合轮廓</button><button type="button" id="surface-cancel" class="btn">取消圈选</button><button type="button" id="surface-undo" class="btn">撤回最后节点</button>${(m?.regions||[]).map((r,i)=>`<p>${r.mode==='INCLUDE'?'改色':'保留'}轮廓 ${i+1} · ${r.points.length}节点 <button type="button" data-remove-surface="${i}">移除</button></p>`).join('')}<label>边界复核说明<input id="surface-note" maxlength="1000" value="${esc(m?.reviewNote||'')}" placeholder="确认背景与原有文字已排除"></label><label><input id="surface-reviewed" type="checkbox" ${m?.reviewed?'checked':''} ${!m?.regions?.length?'disabled':''}>已检查独立蒙版边界，可用于底色预览</label>`:'请先建立载体。'}</fieldset><p id="surface-error" role="alert"></p></div>`;
- const bind=(id,event,fn)=>panel.querySelector('#'+id)?.addEventListener(event,fn);
- bind('surface-carrier','change',e=>{selected=e.target.value;drawing=null;points=[];render();});
- for(const [id,mode] of [['surface-include','INCLUDE'],['surface-exclude','EXCLUDE']])bind(id,'click',()=>{drawing=mode;points=[];render();});
- bind('surface-undo','click',()=>{points.pop();render();});
- bind('surface-cancel','click',()=>{drawing=null;points=[];render();});
- bind('surface-finish','click',()=>{const error=polygonError(points);if(error){panel.querySelector('#surface-error').textContent=error;return;}if((c.surfaceMask?.regions.length||0)>=20){panel.querySelector('#surface-error').textContent='最多20个轮廓';return;}c.surfaceMask??={regions:[],reviewed:false,reviewNote:''};c.surfaceMask.regions.push({mode:drawing,points:points.map(p=>({...p}))});drawing=null;points=[];changed();});
- panel.querySelectorAll('[data-remove-surface]').forEach(b=>b.onclick=()=>{c.surfaceMask.regions.splice(Number(b.dataset.removeSurface),1);if(!c.surfaceMask.regions.length)delete c.surfaceMask;changed();});
- bind('surface-note','input',e=>{if(c.surfaceMask){c.surfaceMask.reviewNote=e.target.value;ctx.dirty();}});
- bind('surface-reviewed','change',e=>{c.surfaceMask.reviewed=e.target.checked;ctx.dirty();});draw();
- }
- canvas.addEventListener('pointerdown',e=>{if(readonly||!drawing)return;e.stopImmediatePropagation();e.preventDefault();const b=canvas.getBoundingClientRect();points.push({x:Math.max(0,Math.min(1,(e.clientX-b.left)/b.width)),y:Math.max(0,Math.min(1,(e.clientY-b.top)/b.height))});render();},true);
- canvas.addEventListener('pointerup',e=>{if(drawing){e.stopImmediatePropagation();e.preventDefault();}},true);
- return {render,draw,assertReady(){if(drawing)throw Error('请先闭合或取消底色蒙版圈选，再发布母版');}};
+ function removeTargets(matches){config.schemes.forEach(s=>s.targets=s.targets.filter(t=>!matches(t)));config.schemes=config.schemes.filter(s=>s.targets.length);if(config.schemes.length&&!config.schemes.some(s=>s.role==='DEFAULT'))config.schemes[0].role='DEFAULT';}
+ function removeZone(zoneId){if(drawing)cancelDrawing();const a=config.areas.find(a=>a.zoneRef===zoneId);if(!a)return true;removeTargets(t=>t.areaId===a.id);config.areas=config.areas.filter(v=>v!==a);return true;}
+ return {render,draw,serialize,assertReady(){if(drawing)throw Error('请先完成摆放位置框选，或按 Esc 取消后再保存');},moved,transformed,removeZone,classifyZone,carrierType};
 }

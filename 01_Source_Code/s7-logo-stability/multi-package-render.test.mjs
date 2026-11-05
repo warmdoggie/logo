@@ -9,8 +9,8 @@ import {renderLogoSet} from './index.mjs';
 async function runBatch(mockupRenderer,request={}){
   const baseImage=await sharp({create:{width:80,height:80,channels:4,background:'#eeeeee'}}).png().toBuffer();
   const logo=await sharp({create:{width:8,height:4,channels:4,background:'#222222'}}).png().toBuffer();
-  const products=['a','b'].map(id=>({id,sku:id,name:id,imageBytes:baseImage,template:{zones:[{id:'zone',zoneType:'logo',x:.3,y:.3,width:.2,height:.1}]}}));
-  const server=createDemoServer({authenticate:null,productCatalog:async()=>products,mockupRenderer});
+  const products=['a','b'].map(id=>({id,sku:id,name:id,imageBytes:baseImage,template:{id:'template-'+id,version:1,zones:[{id:'zone',zoneType:'logo',x:.3,y:.3,width:.2,height:.1}],automation:{carriers:[{id:'body',type:'BODY'}],areas:[{id:'area',zoneId:'zone',carrierId:'body',foilProcesses:['GOLD FOIL','SILVER FOIL']}],schemes:[]}}}));
+  const server=createDemoServer({authenticate:null,productCatalog:async()=>products,productTemplate:async product=>({template:product.template}),mockupRenderer});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   try{
     const response=await fetch(`http://127.0.0.1:${server.address().port}/api/ai-render-multi`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productIds:['a','b'],logoImage:logo.toString('base64'),model:'flux-3-image',...request})});
@@ -60,7 +60,7 @@ test('batch preserves successful images and the failed variant when only part of
 
 test('batch uses each product edited position, size, rotation and independent scheme in every guide and model request',async()=>{
   const productLayouts=['a','b'].map((productId,index)=>{
-    const targets=[{id:'master-zone',x:.45+index*.15,y:.55,widthRatio:.3,rotation:15,curve:0,surface:'free'}];
+    const targets=[{id:'master-zone',masterZoneId:'zone',x:.45+index*.15,y:.55,widthRatio:.3,rotation:15,curve:0,surface:'free'}];
     const schemes=createSchemes(targets).schemes;
     schemes[2].targets[0]={...schemes[2].targets[0],x:.35,widthRatio:.4,rotation:-25};
     schemes[2].independentGeometry=true;
@@ -69,8 +69,11 @@ test('batch uses each product edited position, size, rotation and independent sc
   let calls=0;
   const events=await runBatch(async input=>{
     const expected=productLayouts[calls++];
-    assert.deepEqual(input.targets,expected.targets);
-    assert.deepEqual(input.schemes,expected.schemes);
+    const geometry=targets=>targets.map(({carrierType,printFinish,preserveOriginalColor,...target})=>target);
+    assert.deepEqual(geometry(input.targets),expected.targets);
+    assert.deepEqual(input.schemes.map(scheme=>({...scheme,targets:geometry(scheme.targets)})),expected.schemes.map(scheme=>({...scheme,targets:geometry(scheme.targets)})));
+    assert.ok(input.targets.every(target=>target.carrierType==='BODY'));
+    assert.equal(input.schemes.find(scheme=>scheme.version==='GOLD FOIL').targets[0].printFinish,'GOLD FOIL');
     const guides=await renderLogoSet({baseImage:Buffer.from(input.baseImage.split(',')[1],'base64'),logoImage:Buffer.from(input.logoImage.split(',')[1],'base64'),targets:expected.targets,schemes:expected.schemes,originalColor:'#000000'});
     for(const guide of input.guides)assert.deepEqual(Buffer.from(guide.dataUrl.split(',')[1],'base64'),guides.outputs.find(item=>item.version===guide.version).bytes);
     assert.equal(buildAiMockupPlan(input).length,4);

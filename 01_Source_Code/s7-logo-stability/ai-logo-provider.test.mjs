@@ -122,6 +122,25 @@ test('APIMart uses a dedicated transparent logo model without changing the mocku
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 
+test('APIMart Logo processing remains available when the mockup default is Flux',async()=>{
+  const dir=await mkdtemp(join(tmpdir(),'s7-flux-default-logo-'));
+  try{
+    const configPath=join(dir,'ai-provider.json');
+    await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',model:'flux-3-image',logoModel:'gpt-image-2.5-flare',endpoint:'https://api.apimart.ai',apiKey:'test-key'}));
+    assert.deepEqual(getAiLogoProviderStatus(configPath),{configured:true,provider:'APIMART',model:'gpt-image-2.5-flare'});
+    const png=await sharp({create:{width:2,height:2,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite([{input:Buffer.from([0,0,0,255]),raw:{width:1,height:1,channels:4},left:0,top:0}]).png().toBuffer();
+    let submitted;
+    const processor=createAiLogoProcessor({configPath,pollIntervalMs:0,transport:async(url,options)=>{
+      if(String(url).endsWith('/v1/images/generations')){submitted=JSON.parse(options.body);return Response.json({data:[{url:'https://upload.apimart.ai/logo.png'}]});}
+      return new Response(png);
+    }});
+    const result=await processor(png);
+    assert.equal(submitted.model,'gpt-image-2.5-flare');
+    assert.equal(submitted.background,'transparent');
+    assert.equal(result.model,'gpt-image-2.5-flare');
+  }finally{await rm(dir,{recursive:true,force:true});}
+});
+
 test('APIMart Logo processing uses the configured proxy',async()=>{
   const dir=await mkdtemp(join(tmpdir(),'s7-apimart-logo-proxy-'));
   try{

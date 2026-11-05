@@ -7,6 +7,12 @@ export function zonePoints(z,image={width:1,height:1}){
  return [[-1,-1],[1,-1],[1,1],[-1,1]].map(([u,v])=>{const x=u*z.width*image.width/2,y=v*z.height*image.height/2;return {x:cx+(x*c-y*s)/image.width,y:cy+(x*s+y*c)/image.height};});
 }
 export const bounds=pts=>{const x=Math.min(...pts.map(p=>p.x)),y=Math.min(...pts.map(p=>p.y));return {x,y,width:Math.max(...pts.map(p=>p.x))-x,height:Math.max(...pts.map(p=>p.y))-y};};
+export function pickZone(zones,p,image,selected,cycle=false){
+ const hits=zones.filter(z=>pointInside(p,zonePoints(z,image))).reverse();
+ if(!hits.length)return null;
+ const index=cycle?hits.findIndex(z=>z.id===selected):-1;
+ return hits[(index+1)%hits.length].id;
+}
 const cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
 const onSegment=(p,a,b)=>Math.abs(cross(a,b,p))<EPS&&p.x>=Math.min(a.x,b.x)-EPS&&p.x<=Math.max(a.x,b.x)+EPS&&p.y>=Math.min(a.y,b.y)-EPS&&p.y<=Math.max(a.y,b.y)+EPS;
 export function pointInside(p,poly){let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[j],b=poly[i];if(onSegment(p,a,b))return true;if((a.y>p.y)!==(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)inside=!inside;}return inside;}

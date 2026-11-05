@@ -181,7 +181,7 @@ export const server=http.createServer((req,res)=>requestScope.run({},async()=>{
    const bytes=Buffer.from(await file.arrayBuffer());let meta;try{meta=await sharp(bytes).metadata();}catch{bad('Logo 图片格式无法读取');}
    if(!['png','jpeg','webp'].includes(meta.format))bad('请上传 PNG、JPG 或 WebP 图片');
    if(!meta.width||!meta.height||meta.width*meta.height>16000000)bad('Logo 图片尺寸不能超过 1600 万像素');
-   const saved=logoAssets.add({name:String(form.get('name')||file.name||'Logo.png'),bytes:await sharp(bytes).png().toBuffer()});return json(saved,201);
+   const saved=logoAssets.add({name:String(form.get('name')||file.name||'Logo.png'),bytes:await sharp(bytes).png().toBuffer(),aiRefined:form.get('aiRefined')==='true'});return json(saved,201);
   }
   const logoLibraryMatch=path.match(/^\/api\/logo-library\/([^/]+)(?:\/(image))?$/);
   if(logoLibraryMatch){

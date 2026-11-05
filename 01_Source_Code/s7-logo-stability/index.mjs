@@ -3,13 +3,8 @@ import sharp from 'sharp';
 import {schemeTargets} from './schemes.mjs';
 import {chooseContrastColor} from './contrast-color.mjs';
 import {normalizeTargetPrint,resolveTargetPrint} from './target-print.mjs';
-
-const VARIANTS=[
-  {version:'ORIGINAL'},
-  {version:'BLACK'},
-  {version:'GOLD FOIL'},
-  {version:'SILVER FOIL'}
-];
+import {laserFoilColor} from './foil-finishes.mjs';
+import {selectGenerationVersions} from './generation-versions.mjs';
 
 const fail=message=>{throw new Error(message);};
 const fingerprint=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -59,9 +54,10 @@ async function recolorLogo(logoImage,color,finish='flat'){
     if(data[k+3]===0)continue;
     visible++;
     const brightness=finish==='flat'?1:foilBrightness(x,y,info.width,info.height);
-    data[k]=Math.round(Math.min(255,color.r*brightness));
-    data[k+1]=Math.round(Math.min(255,color.g*brightness));
-    data[k+2]=Math.round(Math.min(255,color.b*brightness));
+    const tone=finish==='laser'?laserFoilColor(((x+.5)/info.width*.8+(y+.5)/info.height*.2)):color;
+    data[k]=Math.round(Math.min(255,tone.r*brightness));
+    data[k+1]=Math.round(Math.min(255,tone.g*brightness));
+    data[k+2]=Math.round(Math.min(255,tone.b*brightness));
   }
   if(!visible)fail('Logo没有可见像素');
   return sharp(data,{raw:{width:info.width,height:info.height,channels:4}}).png().toBuffer();
@@ -166,10 +162,13 @@ async function applySurfaceLighting(prepared,baseRaw,imageWidth,finish,target){
   return {...prepared,input:await sharp(data,{raw:{width:info.width,height:info.height,channels:4}}).png().toBuffer()};
 }
 
-export async function renderLogoSet({baseImage,logoImage,targets,originalColor,schemes}){
+export async function renderLogoSet({baseImage,logoImage,targets,originalColor,schemes,selectedVersions}){
+  const selected=selectGenerationVersions({selectedVersions});
   if(!baseImage||!logoImage)fail('必须提供产品/彩盒原图和透明Logo');
   const baseMeta=await sharp(baseImage).metadata();
   const logoMeta=await sharp(logoImage).metadata();
+  const contrastScale=Math.min(1,256/Math.max(logoMeta.width,logoMeta.height));
+  const contrastLogo=await sharp(logoImage).ensureAlpha().resize({width:Math.max(1,Math.round(logoMeta.width*contrastScale)),height:Math.max(1,Math.round(logoMeta.height*contrastScale)),fit:'fill'}).raw().toBuffer({resolveWithObject:true});
   const baseRaw=await sharp(baseImage).ensureAlpha().raw().toBuffer({resolveWithObject:true});
   if(!baseMeta.width||!baseMeta.height)fail('原图尺寸无效');
   const normalized=normalizeTargets(targets,baseMeta.width,baseMeta.height);
@@ -178,17 +177,19 @@ export async function renderLogoSet({baseImage,logoImage,targets,originalColor,s
   const layoutFingerprint=fingerprint(layout);
   const outputs=[];
   const maskLayers=[];
-  for(const variant of VARIANTS){
-    const layers=[],foilLayers=[],goldLayers=[];
+  for(const version of selected){
+    const variant={version};
+    const layers=[],foilLayers=[],goldLayers=[],roseLayers=[],laserLayers=[];
     const bounds=[];
     const variantTargets=normalizeTargets(schemeTargets({targets,schemes},variant.version),baseMeta.width,baseMeta.height);
     for(const target of variantTargets){
-      const autoColor=target.autoContrast?chooseContrastColor({
+      const autoColor=target.autoContrast&&resolveTargetPrint(target,variant.version).version==='BLACK'?chooseContrastColor({
         data:baseRaw.data,width:baseRaw.info.width,height:baseRaw.info.height,
         left:target.x*baseMeta.width-target.widthRatio*baseMeta.width/2,
         top:target.y*baseMeta.height-(target.widthRatio*baseMeta.width*logoMeta.height/logoMeta.width)/2,
         boxWidth:target.widthRatio*baseMeta.width,
-        boxHeight:target.widthRatio*baseMeta.width*logoMeta.height/logoMeta.width
+        boxHeight:target.widthRatio*baseMeta.width*logoMeta.height/logoMeta.width,
+        logo:{data:contrastLogo.data,width:contrastLogo.info.width,height:contrastLogo.info.height},rotation:target.rotation,quad:target.quad,curve:target.curve
       }):null;
       const print=resolveTargetPrint(target,variant.version,originalColor,autoColor);
       const targetColor=hexColor(print.color)||(print.version==='ORIGINAL'&&!target.preserveOriginalColor?selectedOriginalColor:null);
@@ -197,12 +198,14 @@ export async function renderLogoSet({baseImage,logoImage,targets,originalColor,s
       layers.push({input:prepared.input,left:prepared.bounds.left,top:prepared.bounds.top});
       if(print.finish!=='flat')foilLayers.push(layers.at(-1));
       if(print.finish==='gold')goldLayers.push(layers.at(-1));
+      if(print.finish==='rose')roseLayers.push(layers.at(-1));
+      if(print.finish==='laser')laserLayers.push(layers.at(-1));
       maskLayers.push(layers.at(-1));
       bounds.push(prepared.bounds);
     }
     const bytes=await sharp(baseImage).ensureAlpha().composite(layers).png().toBuffer();
     const makeMask=async entries=>sharp({create:{width:baseMeta.width,height:baseMeta.height,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite(entries).extractChannel(3).png().toBuffer();
-    outputs.push({version:variant.version,layoutFingerprint,bounds,bytes,mask:await makeMask(layers),foilMask:await makeMask(foilLayers),goldMask:await makeMask(goldLayers)});
+    outputs.push({version:variant.version,layoutFingerprint,bounds,bytes,mask:await makeMask(layers),foilMask:await makeMask(foilLayers),goldMask:await makeMask(goldLayers),roseMask:await makeMask(roseLayers),laserMask:await makeMask(laserLayers)});
   }
   const mask=await sharp({create:{width:baseMeta.width,height:baseMeta.height,channels:4,background:{r:0,g:0,b:0,alpha:0}}}).composite(maskLayers).extractChannel(3).png().toBuffer();
   return {width:baseMeta.width,height:baseMeta.height,targetIds:normalized.map(t=>t.id),layoutFingerprint,mask,outputs};

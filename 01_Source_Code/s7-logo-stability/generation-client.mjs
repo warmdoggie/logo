@@ -10,9 +10,10 @@ export function productGeneration(record,productId){
  return {...record,outputs:record.outputs.filter(output=>output.productId===productId),stages:forProduct(record.stages),remoteTasks:forProduct(record.remoteTasks)};
 }
 export function createGenerationWatcher({request,onChange,onError,interval=2000}){
- let timer,stopped=false,active=true;
+ let timer,stopped=false,active=true,revision=0;
  function schedule(){clearTimeout(timer);if(!stopped&&active)timer=setTimeout(()=>refresh().catch(()=>{}),interval);}
- function track(record){clearTimeout(timer);if(stopped||!record)return;onChange(record);if(record.status==='running')schedule();}
- async function refresh(){if(stopped)return;try{const record=await request();track(record);return record;}catch(error){if(!stopped){onError(error);if(error.status!==401&&error.status!==404)schedule();}throw error;}}
- return {refresh,track,setActive(value){active=value;clearTimeout(timer);if(active&&!stopped)refresh().catch(()=>{});},stop(){stopped=true;clearTimeout(timer);}};
+ function pause(){revision++;clearTimeout(timer);}
+ function track(record){pause();if(stopped||!record)return;onChange(record);if(record.status==='running')schedule();}
+ async function refresh(){if(stopped)return;const started=revision;try{const record=await request();if(started===revision)track(record);return record;}catch(error){if(!stopped&&started===revision){onError(error);if(error.status!==401&&error.status!==404)schedule();}throw error;}}
+ return {refresh,track,pause,setActive(value){active=value;pause();if(active&&!stopped)refresh().catch(()=>{});},stop(){stopped=true;pause();}};
 }

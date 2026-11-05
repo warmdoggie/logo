@@ -16,7 +16,11 @@ export async function processScheduledImage(job,{directory,storage}){
    const source=job.params.local?Buffer.from(plan.baseImage.split(',')[1],'base64'):await readFile(job.file_path);
    const pixels=await sharp(source,{limitInputPixels:40000000}).metadata();if(!pixels.width||!pixels.height)throw Error('Invalid image');
    const bytes=await preservePrintSurface(plan,source);
-   await sharp(bytes,{limitInputPixels:40000000}).png().toFile(temporary);
+   const image=sharp(bytes,{limitInputPixels:40000000});
+   if(job.params.local&&(await image.metadata()).format==='png'){
+    await image.resize(1,1).raw().toBuffer();
+    await writeFile(temporary,bytes);
+   }else await image.png().toFile(temporary);
   }else await sharp(job.file_path,{limitInputPixels:40000000}).rotate().resize({width:1600,height:1600,fit:'inside',withoutEnlargement:true}).webp({quality:85}).toFile(temporary);
   await rename(temporary,final);
   }

@@ -51,7 +51,7 @@ test('批量下载只打包当前任务选中的跨产品图片，并隔离其�
   assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'application/zip');assert.match(response.headers.get('content-disposition'),/attachment/);
   const files=unzipStored(Buffer.from(await response.arrayBuffer()));assert.equal(files.length,2);assert.deepEqual(files.map(f=>f.bytes.toString()),['first','second']);assert.match(files[0].name,/L0048/);assert.match(files[1].name,/L0049/);
   const manifest=await fetch(`${base}/api/my-space/tasks/${task.id}/download`,{method:'POST',headers:{cookie:'alice','content-type':'application/json'},body:JSON.stringify({manifest:true,urls:[a.images[0].url,b.images[0].url]})});
-  assert.match(manifest.headers.get('content-type'),/application\/json/);const plan=await manifest.json();assert.equal(plan.filename,'任务一.zip');assert.deepEqual(plan.files.map(file=>file.url),[a.images[0].url,b.images[0].url]);
+  assert.match(manifest.headers.get('content-type'),/application\/json/);const plan=await manifest.json();assert.equal(plan.filename,'任务一.zip');assert.equal(plan.folderName,'任务一');assert.deepEqual(plan.files.map(file=>file.url),[a.images[0].url,b.images[0].url]);
   const browserZip=await browserArchive.fetchArchive(plan.files.map(file=>({...file,url:base+file.url})));assert.deepEqual(unzipStored(Buffer.from(browserZip)),files);
   assert.equal((await call(task.id,[])).status,400);
   assert.equal((await call(task.id,[foreign.images[0].url])).status,400);

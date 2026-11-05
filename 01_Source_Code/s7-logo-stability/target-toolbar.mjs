@@ -70,8 +70,9 @@ targets.addEventListener('scroll',closeMenus,{passive:true});
 body.addEventListener('scroll',closeMenus,{passive:true});
 new MutationObserver(()=>{
   const count=targets.children.length;
-  summary.textContent=`${count} 个位置 · 拖动 Logo 调整`;
-}).observe(targets,{childList:true});
+  const selected=Number(targets.dataset.selectedCount||0);
+  summary.textContent=`${count} 个位置 · 已选 ${selected} 个 Logo`;
+}).observe(targets,{childList:true,attributes:true,attributeFilter:['data-selected-count']});
 window.addEventListener('resize',()=>{closeMenus();position();});
 window.addEventListener('scroll',()=>{closeMenus();if(!moved)position();},{passive:true});
 new ResizeObserver(position).observe(canvas);

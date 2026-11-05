@@ -4,7 +4,7 @@ import {selectGenerationVersions,generationVersions} from './generation-versions
 import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
 
 test('defaults to four, validates selection and lets a single retry override it',()=>{
- assert.deepEqual(selectGenerationVersions(),generationVersions);
+ assert.deepEqual(selectGenerationVersions(),['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL']);
  for(const selectedVersions of [[],null,['UNKNOWN']])assert.throws(()=>selectGenerationVersions({selectedVersions}));
  assert.deepEqual(selectGenerationVersions({selectedVersions:[],onlyVersion:'BLACK'}),['BLACK']);
 });

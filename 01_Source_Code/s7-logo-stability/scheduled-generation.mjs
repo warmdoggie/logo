@@ -98,7 +98,7 @@ export function createScheduledGenerations({spaces,url,token,configPath,autoStar
     await request(user,'/v1/batches',{method:'POST',body:{id,descriptor}});
     for(const item of plans){
      const plan={...item.plan},imageRefs={};
-     for(const field of ['baseImage','placementGuide','maskImage','foilMaskImage','goldMaskImage']){
+     for(const field of ['baseImage','placementGuide','maskImage','foilMaskImage','goldMaskImage','roseMaskImage','laserMaskImage']){
       const index=typeof plan[field]==='string'?plan.request.image_urls.indexOf(plan[field]):-1;
       if(index>=0){imageRefs[field]=index;plan[field]=null;}
      }

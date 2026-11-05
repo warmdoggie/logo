@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';
-import {createSchemes} from './schemes.mjs';
+import {createSchemes,ensureCustomScheme} from './schemes.mjs';
+import {rebindMasterZones} from './product-master.mjs';
 
 async function workspace(){
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
- const view=id=>({baseData:`base-${id}`,baseImage:{id},targets:[{id:'body',x:id==='a'?.3:.7,y:.5,widthRatio:.2}],schemeState:createSchemes([{id:'body',x:id==='a'?.3:.7,y:.5,widthRatio:.2}]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'body',lastResultPayload:{outputs:[{version:'ORIGINAL',dataUrl:`/${id}.png`}]},savedSignatures:{},schemePhases:{}});
+ const view=id=>({foilTemplate:{zones:[]},baseData:`base-${id}`,baseImage:{id},targets:[{id:'body',x:id==='a'?.3:.7,y:.5,widthRatio:.2}],schemeState:createSchemes([{id:'body',x:id==='a'?.3:.7,y:.5,widthRatio:.2}]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'body',lastResultPayload:{outputs:[{version:'ORIGINAL',dataUrl:`/${id}.png`}]},savedSignatures:{},schemePhases:{}});
  const first=view('a'),nodes={};
- const c=vm.createContext({currentTaskId:null,s7User:null,structuredClone,createSchemes,taskLogos:[{id:'logo'}],selectedTaskLogoId:'logo',loadedTaskLogoId:'logo',logoData:'logo',logoImage:{},logoSelectionBusy:false,generationBusy:false,multiPackageBusy:false,
+ const c=vm.createContext({selectedGenerationVersions:()=>['ORIGINAL','BLACK'],restoreProductSelection(){},currentTaskId:null,s7User:null,structuredClone,createSchemes,ensureCustomScheme,rebindMasterZones,taskLogos:[{id:'logo'}],selectedTaskLogoId:'logo',loadedTaskLogoId:'logo',logoData:'logo',logoImage:{},logoSelectionBusy:false,generationBusy:false,multiPackageBusy:false,
   multiPackageProducts:[{id:'a',sku:'A'},{id:'b',sku:'B'}],selectedMultiProductId:'a',loadedMultiProductId:'a',multiProductLoadRevision:0,
   multiProductViews:new Map([['a',first],['b',view('b')]]),multiProductLoads:new Map(),multiProductResults:new Map([['a',{}],['b',{}]]),multiProductJob:null,multiLogoJob:null,multiLogoViews:new Map(),
   ...first,submittedSignatures:{},showModifiedPreview:new Set(),generationId:'old-job',dismissedGenerationId:null,
@@ -61,7 +62,7 @@ test('removing a loading product ignores its late image response',async()=>{
 test('restoring a saved removal cannot replay the removed product generation but accepts a new job',async()=>{
  const c=await workspace();c.multiPackageProducts=c.multiPackageProducts.slice(0,1);await c.removeTaskProduct('a');
  const saved=JSON.parse(JSON.stringify({dismissedGenerationId:c.dismissedGenerationId,baseData:c.baseData,multiPackageProducts:c.multiPackageProducts,lastResultPayload:c.lastResultPayload}));
- const restored=await workspace();Object.assign(restored,saved,{baseImage:null,generationId:null,schemePhases:{},status:{},resultMeta:{},s7Path:value=>value,schemeOutput:()=>undefined});
+ const restored=await workspace();Object.assign(restored,saved,{generationSubmitting:false,baseImage:null,generationId:null,schemePhases:{},status:{},resultMeta:{},s7Path:value=>value,schemeOutput:()=>undefined});
  const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
  vm.runInContext(source.slice(source.indexOf('function restoreGeneration('),source.indexOf('function generationRequest('))+source.slice(source.indexOf('function beginResultProgress('),source.indexOf('async function readProgressStream(')),restored);
  const record={id:'old-job',status:'complete',selectedVersions:['ORIGINAL'],outputs:[{version:'ORIGINAL',dataUrl:'/removed-product.png'}],stages:{ORIGINAL:{stage:'complete'}}};

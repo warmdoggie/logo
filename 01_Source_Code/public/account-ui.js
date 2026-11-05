@@ -16,7 +16,7 @@ export async function initializeAccounts(){
  }
  document.querySelector('#current-user').textContent=`${currentUser.username} · ${currentUser.role==='ADMIN'?'管理员':'个人空间'}`;
  const logout=document.createElement('button');logout.className='btn';logout.textContent='退出登录';logout.onclick=async()=>{document.querySelector('#main').replaceChildren();await request('/api/auth/logout',{});location.reload();};document.querySelector('.sidebar-bottom').append(logout);
- if(currentUser.role==='ADMIN'){const link=document.createElement('a');link.href='#/settings/accounts';link.textContent='账号管理';document.querySelector('nav').append(link);}else{document.querySelector('[href="#/settings/storage"]')?.remove();}
+ if(currentUser.role==='ADMIN'){const link=document.createElement('a');link.href='#/settings/accounts';link.textContent='账号管理';document.querySelector('nav').append(link);}
  // A session replaced or revoked in another tab must not leave the previous user's page visible.
  setInterval(async()=>{try{const user=await request('/api/auth/session');if(user.id!==currentUser.id){document.querySelector('#main').replaceChildren();location.reload();}}catch{document.querySelector('#main').replaceChildren();location.reload();}},10000);
  return currentUser;

@@ -9,10 +9,28 @@ async function image(width,height,background){
 }
 
 async function openServer(options={}){
-  const server=createDemoServer(options);
+  const template={id:'master',version:1,zones:[{id:'body-zone',zoneType:'logo',name:'产品正面',x:.1,y:.1,width:.8,height:.8}],automation:{carriers:[{id:'body',type:'BODY'}],areas:[{id:'area',zoneId:'body-zone',carrierId:'body',foilProcesses:['GOLD FOIL','SILVER FOIL']}],schemes:[]}};
+  const server=createDemoServer({productCatalog:async()=>[{id:'product-1',sku:'P01',status:'ACTIVE'}],productTemplate:async()=>({template}),...options});
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});
   return {server,base:`http://127.0.0.1:${server.address().port}`};
 }
+
+test('AI Logo network failures log only connection metadata while retaining the client error',async t=>{
+ const entries=[];t.mock.method(console,'error',(...args)=>entries.push(args));
+ const message='APIMart 提交生成请求网络连接失败（ECONNRESET），请检查网络或代理后重试';
+ const diagnostic={action:'提交生成请求',host:'api.apimart.ai',route:'direct',code:'ECONNRESET',phase:'request',responseStatus:null,tlsHandshakeFailure:true,elapsedMs:4,requestBytes:1234,method:'POST',message:'private provider detail',authorization:'Bearer private-key',body:'private-logo'};
+ const {server,base}=await openServer({aiProcessor:async()=>{throw Object.assign(Error(message),{code:'APIMART_NETWORK_ERROR',diagnostic});}});
+ try{
+  const png=await image(2,2,{r:0,g:0,b:0,alpha:1});
+  const response=await fetch(base+'/api/ai-process-logo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({logoImage:png.toString('base64')})});
+  assert.equal(response.status,400);assert.equal((await response.json()).error,message);
+  assert.equal(entries.length,1);assert.equal(entries[0][0],'apimart_network_failure');
+  const logged=JSON.parse(entries[0][1]);
+  for(const key of ['action','host','route','code','phase','responseStatus','tlsHandshakeFailure','elapsedMs','requestBytes','method'])assert.equal(logged[key],diagnostic[key]);
+  assert.match(logged.at,/^\d{4}-\d{2}-\d{2}T/);
+  assert.doesNotMatch(JSON.stringify(entries),/private-key|private-logo|private provider detail/);
+ }finally{await new Promise(resolve=>server.close(resolve));}
+});
 
 test('展示界面提供静态页面并生成四个预览版本',async()=>{
   const {server,base}=await openServer();
@@ -24,7 +42,7 @@ test('展示界面提供静态页面并生成四个预览版本',async()=>{
     assert.match(pageText,/auto-contrast/);
     const baseImage=await image(80,40,{r:240,g:230,b:220,alpha:1});
     const logo=await image(8,4,{r:255,g:255,b:255,alpha:1});
-    const response=await fetch(base+'/api/render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({baseImage:baseImage.toString('base64'),logoImage:logo.toString('base64'),targets:[{id:'compact',x:.5,y:.5,widthRatio:.2,rotation:0}]})});
+    const response=await fetch(base+'/api/render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productId:'product-1',baseImage:baseImage.toString('base64'),logoImage:logo.toString('base64'),targets:[{id:'compact',masterZoneId:'body-zone',x:.5,y:.5,widthRatio:.2,rotation:0}]})});
     assert.equal(response.status,200);
     const payload=await response.json();
     assert.equal(payload.outputs.length,4);
@@ -58,8 +76,8 @@ test('素材区只从商品库选择产品，并提供 Logo 库选择入口',asy
     assert.match(html,/id="choose-logo-library"[^>]*>从 Logo 库选择/);
     assert.match(html,/id="logo-image"/);
     assert.match(html,/id="selected-logo-thumbnail"/);
-    assert.match(html,/name="logo-output-color" value="original" checked/);
-    assert.match(html,/name="logo-output-color" value="black"/);
+    assert.doesNotMatch(html,/id="process-logo"|id="processing-panel"/);
+    assert.match(html,/点击生成时会自动清理 Logo/);
     const script=await(await fetch(base+'/demo.js')).text();
     assert.match(script,/logoLibraryPath=value=>S7_BASE\?new URL\(value,location\.origin\)\.href:s7Path\(value\)/);
   }finally{await new Promise(resolve=>server.close(resolve));}
@@ -130,7 +148,7 @@ test('提供不调用外部服务的健康检查端点',async()=>{
 test('展示界面对非法输入返回可读的400错误',async()=>{
   const {server,base}=await openServer();
   try{
-    const response=await fetch(base+'/api/render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({baseImage:'not-image',logoImage:'not-image',targets:[]})});
+    const response=await fetch(base+'/api/render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({selectedVersions:['ORIGINAL'],baseImage:'not-image',logoImage:'not-image',targets:[]})});
     assert.equal(response.status,400);
     assert.match((await response.json()).error,/至少需要一个上样目标|图片/);
   }finally{await new Promise(resolve=>server.close(resolve));}
@@ -167,7 +185,7 @@ test('展示界面通过AI接口生成透明底黑字Logo',async()=>{
     assert.equal(payload.height,4);
     assert.match(payload.dataUrl,/^data:image\/png;base64,/);
     assert.equal(payload.logoLibrary.id,'library-logo-1');
-    assert.deepEqual(librarySave.bytes,processed);
+    assert.deepEqual(librarySave.bytes,Buffer.from(payload.dataUrl.split(',')[1],'base64'));
     assert.equal(librarySave.name,'AI 加工 Logo（黑色）.png');
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
@@ -192,7 +210,7 @@ test('展示界面由AI生成四张自然上样成图',async()=>{
     assert.equal(input.model,'flux-3-image');
     assert.equal(input.originalColor,'#C54B78');
     assert.equal(input.guides.length,4);
-    assert.deepEqual(input.targets,[{id:'product',x:.5,y:.5,widthRatio:.2,rotation:0}]);
+    assert.deepEqual(input.targets,[{id:'product',masterZoneId:'body-zone',carrierType:'BODY',x:.5,y:.5,widthRatio:.2,rotation:0}]);
     assert.equal(input.baseImage.startsWith('data:image/png;base64,'),true);
     assert.equal(input.logoImage.startsWith('data:image/png;base64,'),true);
     assert.equal(input.maskImage.startsWith('data:image/png;base64,'),true);
@@ -202,7 +220,7 @@ test('展示界面由AI生成四张自然上样成图',async()=>{
   try{
     const baseImage=await image(80,40,{r:240,g:230,b:220,alpha:1});
     const logo=await image(8,4,{r:0,g:0,b:0,alpha:1});
-    const response=await fetch(base+'/api/ai-render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({model:'flux-3-image',baseImage:baseImage.toString('base64'),logoImage:logo.toString('base64'),finishReferenceImage:'FINISH',targets:[{id:'product',x:.5,y:.5,widthRatio:.2,rotation:0}],originalColor:'#C54B78'})});
+    const response=await fetch(base+'/api/ai-render',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({productId:'product-1',model:'flux-3-image',baseImage:baseImage.toString('base64'),logoImage:logo.toString('base64'),finishReferenceImage:'FINISH',targets:[{id:'product',masterZoneId:'body-zone',x:.5,y:.5,widthRatio:.2,rotation:0}],originalColor:'#C54B78'})});
     assert.equal(response.status,200);
     const payload=await response.json();
     assert.deepEqual(payload.outputs.map(output=>output.version),['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL']);
@@ -224,7 +242,7 @@ test('流式 AI 接口在每张结果到达时立即发送并逐张保存',async
     return outputs;
   }});
   try{
-    const response=await fetch(base+'/api/ai-render',{method:'POST',headers:{'content-type':'application/json','accept':'text/event-stream'},body:JSON.stringify({model:'flux-3-image',baseImage:(await image(80,40,{r:240,g:230,b:220,alpha:1})).toString('base64'),logoImage:(await image(8,4,{r:0,g:0,b:0,alpha:1})).toString('base64'),targets:[{id:'product',x:.5,y:.5,widthRatio:.2,rotation:0}],originalColor:'#C54B78'})});
+    const response=await fetch(base+'/api/ai-render',{method:'POST',headers:{'content-type':'application/json','accept':'text/event-stream'},body:JSON.stringify({productId:'product-1',model:'flux-3-image',baseImage:(await image(80,40,{r:240,g:230,b:220,alpha:1})).toString('base64'),logoImage:(await image(8,4,{r:0,g:0,b:0,alpha:1})).toString('base64'),targets:[{id:'product',masterZoneId:'body-zone',x:.5,y:.5,widthRatio:.2,rotation:0}],originalColor:'#C54B78'})});
     assert.match(response.headers.get('content-type'),/text\/event-stream/);
     const stream=await response.text();
     assert.match(stream,/event: started/);assert.match(stream,/"stage":"submitting"/);assert.match(stream,/"stage":"saving"/);

@@ -15,8 +15,8 @@ async function fixture(t,renderer,options={}){
  const base=await sharp({create:{width:80,height:80,channels:4,background:'#eee'}}).png().toBuffer();
  const mark=await sharp({create:{width:6,height:3,channels:4,background:'#c03020'}}).png().toBuffer();
  const logo=await sharp({create:{width:8,height:5,channels:4,background:'#00000000'}}).composite([{input:mark,left:1,top:1}]).png().toBuffer();
- const product={id:'bottle',sku:'P01',name:'测试产品',imageBytes:base,template:{zones:[{id:'body',zoneType:'logo',x:.3,y:.3,width:.2,height:.2},{id:'box',zoneType:'logo',name:'彩盒正面',x:.6,y:.3,width:.2,height:.2}]}};
- const serverOptions={spaceDir:dir,authenticate:async req=>({id:req.headers.cookie||'alice'}),productCatalog:async()=>[product],mockupRenderer:renderer,...options};
+ const product={id:'bottle',sku:'P01',name:'测试产品',imageBytes:base,template:{id:'bottle-master',version:1,zones:[{id:'body',zoneType:'logo',x:.3,y:.3,width:.2,height:.2},{id:'box',zoneType:'logo',name:'彩盒正面',x:.6,y:.3,width:.2,height:.2}],automation:{carriers:[{id:'product',type:'BODY'},{id:'carton',type:'CARTON'}],areas:[{id:'body-area',zoneId:'body',carrierId:'product',foilProcesses:['GOLD FOIL','SILVER FOIL']},{id:'carton-area',zoneId:'box',carrierId:'carton',foilProcesses:[]}],schemes:[]}}};
+ const serverOptions={spaceDir:dir,authenticate:async req=>({id:req.headers.cookie||'alice'}),productCatalog:async()=>[product],productTemplate:async product=>({template:product.template}),mockupRenderer:renderer,...options};
  let server=createDemoServer(serverOptions);
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  t.after(async()=>{await new Promise(resolve=>server.close(resolve));await rm(dir,{recursive:true,force:true});});
@@ -72,13 +72,15 @@ test('ordinary tasks generate multiple logos with independent layouts and preser
  const inputs=[];
  const f=await fixture(t,async input=>{inputs.push(input);return input.selectedVersions.map(version=>({version,bytes:f.base}));});
  const task=await(await f.call('/api/my-space/tasks',{title:'普通任务'})).json();
- const targets=[{id:'body',x:.6,y:.5,widthRatio:.25,rotation:15}];
+ const targets=[{id:'body',masterZoneId:'body',x:.6,y:.5,widthRatio:.25,rotation:15}];
  const schemes=createSchemes(targets).schemes;schemes[2].targets[0].rotation=40;
  const input={...f.input,taskId:task.id,logoLayouts:[{logoId:'red',targets,schemes,schemeSignatures:{ORIGINAL:'red-original'}}]};
  assert.equal((await f.call('/api/ai-render-logos',input)).status,202);
  const wait=async()=>{for(let i=0;i<200;i++){const job=await(await f.call(`/api/my-space/tasks/${task.id}/generation`)).json();if(job.status!=='running')return job;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('任务未结束');};
  const before=await wait();assert.equal(before.outputs.length,8);
- assert.deepEqual(inputs[0].targets,targets);assert.deepEqual(inputs[0].schemes,schemes);
+ const geometry=targets=>targets.map(({carrierType,printFinish,preserveOriginalColor,...target})=>target);
+ assert.deepEqual(geometry(inputs[0].targets),targets);assert.deepEqual(inputs[0].schemes.map(scheme=>({...scheme,targets:geometry(scheme.targets)})),schemes.map(scheme=>({...scheme,targets:geometry(scheme.targets)})));
+ assert.equal(inputs[0].targets[0].carrierType,'BODY');assert.equal(inputs[0].schemes.find(scheme=>scheme.version==='GOLD FOIL').targets[0].printFinish,'GOLD FOIL');
  assert.equal(before.outputs.find(output=>output.logoId==='red'&&output.version==='ORIGINAL').schemeSignature,'red-original');
  assert.equal((await f.call('/api/ai-render-logos',{...input,onlyLogoId:'red',selectedVersions:['BLACK']})).status,202);
  const after=await wait();assert.equal(after.status,'complete');assert.equal(after.outputs.length,8);
@@ -115,7 +117,7 @@ test('multi-logo can be disabled while original rendering and saved tasks stay a
  const f=await fixture(t,async()=>[],{multiLogoEnabled:false});
  assert.equal((await f.call('/api/ai-render-logos',f.input)).status,404);
  assert.equal((await f.call('/multi-logo.html')).status,200);
- const response=await f.call('/api/render',{baseImage:f.base.toString('base64'),logoImage:f.input.logos[0].logoImage,targets:[{id:'one',x:.5,y:.5,widthRatio:.2}]});
+ const response=await f.call('/api/render',{productId:'bottle',baseImage:f.base.toString('base64'),logoImage:f.input.logos[0].logoImage,targets:[{id:'one',masterZoneId:'body',x:.5,y:.5,widthRatio:.2}]});
  assert.equal(response.status,200);assert.equal((await response.json()).outputs.length,4);
 });
 

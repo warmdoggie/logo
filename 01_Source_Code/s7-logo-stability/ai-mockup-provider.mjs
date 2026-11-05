@@ -3,6 +3,8 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import sharp from 'sharp';
+import {allGenerationVersions} from './generation-versions.mjs';
+import {foilVersions,foilFinishes} from './foil-finishes.mjs';
 import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
 import {createApimartTransport} from './apimart-transport.mjs';
 import {lockOutsideLogo} from './mockup-lock.mjs';
@@ -68,10 +70,10 @@ export async function preservePrintSurface(plan,generatedImage){
   if(!plan.maskImage||!plan.placementGuide)return generatedImage;
   const imageBytes=value=>Buffer.from(value.slice(value.indexOf(',')+1),'base64');
   if(plan.local&&(!plan.foilMaskImage||!(await sharp(imageBytes(plan.foilMaskImage)).greyscale().raw().toBuffer()).some(value=>value>0)))return imageBytes(plan.placementGuide);
-  return lockOutsideLogo({baseImage:imageBytes(plan.baseImage),generatedImage,guideImage:imageBytes(plan.placementGuide),maskImage:imageBytes(plan.maskImage),foilMaskImage:plan.foilMaskImage?imageBytes(plan.foilMaskImage):undefined,goldMaskImage:plan.goldMaskImage?imageBytes(plan.goldMaskImage):undefined,surfaceResponse:!!plan.foilMaskImage,feather:0,useGeneratedLighting:!!plan.foilMaskImage||plan.version==='GOLD FOIL'||plan.version==='SILVER FOIL',foilFinish:plan.goldMaskImage||plan.version==='GOLD FOIL'?'gold':undefined});
+  return lockOutsideLogo({baseImage:imageBytes(plan.baseImage),generatedImage,guideImage:imageBytes(plan.placementGuide),maskImage:imageBytes(plan.maskImage),foilMaskImage:plan.foilMaskImage?imageBytes(plan.foilMaskImage):undefined,goldMaskImage:plan.goldMaskImage?imageBytes(plan.goldMaskImage):undefined,roseMaskImage:plan.roseMaskImage?imageBytes(plan.roseMaskImage):undefined,laserMaskImage:plan.laserMaskImage?imageBytes(plan.laserMaskImage):undefined,surfaceResponse:!!plan.foilMaskImage,feather:0,useGeneratedLighting:!!plan.foilMaskImage||foilVersions.includes(plan.version),foilFinish:plan.goldMaskImage?'gold':foilFinishes[plan.version]?.finish});
 }
 
-export function isLocalMockup(plan){return ['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL'].includes(plan.version)&&!!plan.foilMaskImage&&!!plan.maskImage&&!!plan.placementGuide;}
+export function isLocalMockup(plan){return allGenerationVersions.includes(plan.version)&&!!plan.foilMaskImage&&!!plan.maskImage&&!!plan.placementGuide;}
 
 async function renderLocally(plan,{onStage}){
   if(!isLocalMockup(plan))return null;

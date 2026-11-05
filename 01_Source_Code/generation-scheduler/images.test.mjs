@@ -9,6 +9,30 @@ import {renderLogoSet} from '../s7-logo-stability/index.mjs';
 import {buildAiMockupPlan} from '../s7-logo-stability/ai-mockup-generation.mjs';
 import {processScheduledImage} from './images.mjs';
 
+test('local PNG results are saved without re-encoding while invalid and oversized guides are rejected',async()=>{
+ const folder=await mkdtemp(join(tmpdir(),'scheduler-local-png-'));
+ try{
+  await mkdir(join(folder,'plans'));
+  const base=await sharp({create:{width:80,height:80,channels:4,background:'#cccccc'}}).png().toBuffer();
+  const guide=await sharp({create:{width:80,height:80,channels:4,background:'#125678'}}).png({compressionLevel:0}).toBuffer();
+  const empty=await sharp({create:{width:80,height:80,channels:3,background:'#000'}}).greyscale().png().toBuffer();
+  const data=b=>'data:image/png;base64,'+b.toString('base64');
+  const run=async bytes=>{
+   const plan=JSON.stringify({local:true,version:'BLACK',baseImage:data(base),placementGuide:data(bytes),maskImage:data(empty),foilMaskImage:data(empty)});
+   const hash=createHash('sha256').update(plan).digest('hex');await writeFile(join(folder,'plans',hash+'.json'),plan);
+   return processScheduledImage({id:randomUUID(),lease_token:randomUUID(),params:{batchId:randomUUID(),planHash:hash,local:true}},{directory:folder});
+  };
+  assert.ok((await readFile(await run(guide))).equals(guide),'the completed PNG must be saved byte for byte');
+  await assert.rejects(run(guide.subarray(0,guide.length-30)));
+  const oversized=await sharp({create:{width:6400,height:6400,channels:3,background:'#000'}}).greyscale().png().toBuffer();
+  await assert.rejects(run(oversized),/pixel limit/i);
+  const jpeg=await sharp(guide).jpeg().toBuffer();
+  const normalized=await readFile(await run(jpeg));
+  assert.equal((await sharp(normalized).metadata()).format,'png');
+  assert.deepEqual(await sharp(normalized).raw().toBuffer(),await sharp(jpeg).raw().toBuffer());
+ }finally{await rm(folder,{recursive:true,force:true});}
+});
+
 test('the worker renders local gold from the product without a downloaded image',async()=>{
  const folder=await mkdtemp(join(tmpdir(),'scheduler-local-gold-'));
  try{

@@ -9,6 +9,29 @@ test('bounded background downloads reject oversized streamed responses',async()=
 
 const disconnected=()=>Object.assign(new TypeError('fetch failed'),{cause:{code:'UND_ERR_SOCKET'}});
 
+test('submission diagnostics distinguish a TLS reset from a response-body reset without resubmitting',async()=>{
+ for(const phase of ['request','response-body']){
+  let calls=0;
+  const transport=createApimartTransport({transport:async()=>{
+   calls++;
+   const cause={code:'ECONNRESET',message:'Client network socket disconnected before secure TLS connection was established'};
+   if(phase==='request')throw Object.assign(new TypeError('fetch failed'),{cause});
+   return new Response(new ReadableStream({start(controller){controller.error(Object.assign(new TypeError('terminated'),{cause:{code:'ECONNRESET'}}));}}));
+  }});
+  await assert.rejects(()=>transport('https://api.apimart.ai/v1/images/generations',{method:'POST',body:'private-logo-payload'}),error=>{
+   assert.equal(error.diagnostic.phase,phase);
+   assert.equal(error.diagnostic.responseStatus,phase==='request'?null:200);
+   assert.equal(error.diagnostic.tlsHandshakeFailure,phase==='request');
+   assert.equal(error.diagnostic.method,'POST');
+   assert.equal(error.diagnostic.requestBytes,20);
+   assert.ok(Number.isFinite(error.diagnostic.elapsedMs)&&error.diagnostic.elapsedMs>=0);
+   assert.doesNotMatch(JSON.stringify(error.diagnostic),/private-logo-payload/);
+   return true;
+  });
+  assert.equal(calls,1);
+ }
+});
+
 test('APIMart retries interrupted reads without resubmitting a generation',async()=>{
   let reads=0,submissions=0;
   const transport=createApimartTransport({transport:async(_url,options={})=>{

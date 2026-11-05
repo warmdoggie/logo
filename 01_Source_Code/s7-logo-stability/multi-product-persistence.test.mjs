@@ -10,7 +10,7 @@ import {userSpace} from './user-space.mjs';
 test('两产品八张图后台逐张保存，切换任务、重新读取和服务重建保留预览结果',async()=>{
  const dir=await mkdtemp(join(tmpdir(),'s7-batch-persist-')),user={id:'alice'};
  const image=await sharp({create:{width:32,height:32,channels:4,background:'#777'}}).png().toBuffer();
- const products=['a','b'].map(id=>({id,sku:id,name:id,imageBytes:image,template:{zones:[{id:'zone',zoneType:'logo',x:.3,y:.3,width:.2,height:.1}]}}));
+ const products=['a','b'].map(id=>({id,sku:id,name:id,imageBytes:image,template:{id:'master-'+id,version:1,zones:[{id:'zone',zoneType:'logo',x:.3,y:.3,width:.2,height:.1}],automation:{carriers:[{id:'body',type:'BODY'}],areas:[{id:'area',zoneId:'zone',carrierId:'body',foilProcesses:['GOLD FOIL','SILVER FOIL']}]}}}));
  let release,entered,startedCount=0;const gate=new Promise(r=>release=r),started=new Promise(r=>entered=r),calls=[];
  let server,base;
  async function listen(renderer){server=createDemoServer({spaceDir:dir,authenticate:async req=>({id:req.headers.cookie||'alice'}),productCatalog:async()=>products,mockupRenderer:renderer});await new Promise(r=>server.listen(0,'127.0.0.1',r));base=`http://127.0.0.1:${server.address().port}`;}

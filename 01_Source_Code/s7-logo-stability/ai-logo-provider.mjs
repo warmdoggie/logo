@@ -3,6 +3,7 @@ import {fileURLToPath} from 'node:url';
 import sharp from 'sharp';
 import {buildAiLogoRequest,buildApimartLogoRequest,validateAiLogoOutput} from './ai-logo-processing.mjs';
 import {createApimartTransport} from './apimart-transport.mjs';
+import {pickAspectRatio} from './ai-mockup-generation.mjs';
 
 const ROOT=new URL('.',import.meta.url);
 const DEFAULT_CONFIG=fileURLToPath(new URL('../data/ai-provider.local.json',ROOT));
@@ -13,7 +14,7 @@ function readConfig(configPath){
     const config=JSON.parse(readFileSync(configPath,'utf8').replace(/^\uFEFF/,''));
     if(config.enabled===false||!['APIMART','JSON_IMAGE_EDIT_V1'].includes(config.provider)||typeof config.model!=='string'||!config.model.trim()||typeof config.apiKey!=='string'||!config.apiKey.trim())return null;
     const endpoint=new URL(config.endpoint);
-    if(config.provider==='APIMART'&& (endpoint.origin!=='https://api.apimart.ai'||!['wan2.7-image-pro','wan2.7-image','gpt-image-2','gpt-image-2.5-flare'].includes(config.model)))return null;
+    if(config.provider==='APIMART'&& (endpoint.origin!=='https://api.apimart.ai'||!['wan2.7-image-pro','wan2.7-image','gpt-image-2','gpt-image-2.5-flare'].includes(config.logoModel||config.model)))return null;
     if(config.provider==='APIMART'&&config.logoModel!==undefined&&!['gpt-image-2','gpt-image-2.5-flare'].includes(config.logoModel))return null;
     if(endpoint.protocol!=='https:'&&!(['localhost','127.0.0.1'].includes(endpoint.hostname)&&endpoint.protocol==='http:'))return null;
     return {...config,endpoint:endpoint.toString(),timeoutMs:Math.max(1000,Math.min(300000,Number(config.timeoutMs)||120000))};
@@ -26,14 +27,14 @@ export function getAiLogoProviderStatus(configPath=process.env.S7_AI_CONFIG||DEF
 }
 
 export function createAiLogoProcessor({configPath=process.env.S7_AI_CONFIG||DEFAULT_CONFIG,transport=fetch,pollIntervalMs=3000}={}){
-  return async(source,{targetColor='#000000'}={})=>{
+  return async(source,{targetColor='#000000',preserveDetails=false}={})=>{
     const config=readConfig(configPath);
     if(!config)throw Error('S7 尚未配置可用的 AI 图片模型，请检查 data/ai-provider.local.json');
     if(config.provider==='APIMART'){
       const requestTransport=createApimartTransport({proxyUrl:config.proxyUrl||process.env.S7_APIMART_PROXY_URL||process.env.APIMART_PROXY_URL,transport});
-      return processWithApimart({...config,model:config.logoModel||config.model},source,{transport:requestTransport,pollIntervalMs,targetColor});
+      return processWithApimart({...config,model:config.logoModel||config.model},source,{transport:requestTransport,pollIntervalMs,targetColor,preserveDetails});
     }
-    const body=buildAiLogoRequest(Buffer.from(source).toString('base64'),{model:config.model,targetColor});
+    const body=buildAiLogoRequest(Buffer.from(source).toString('base64'),{model:config.model,targetColor,preserveDetails});
     let response;
     try{
       response=await transport(config.endpoint,{method:'POST',redirect:'error',signal:AbortSignal.timeout(config.timeoutMs),headers:{'Content-Type':'application/json',Authorization:`Bearer ${config.apiKey}`},body:JSON.stringify(body)});
@@ -50,8 +51,10 @@ export function createAiLogoProcessor({configPath=process.env.S7_AI_CONFIG||DEFA
   };
 }
 
-async function processWithApimart(config,source,{transport,pollIntervalMs,targetColor}){
-  const signal=AbortSignal.timeout(config.timeoutMs),base=config.endpoint.replace(/\/$/,''),logoPng=await sharp(source).png().toBuffer(),body=buildApimartLogoRequest(`data:image/png;base64,${logoPng.toString('base64')}`,{model:config.model,targetColor});
+async function processWithApimart(config,source,{transport,pollIntervalMs,targetColor,preserveDetails}){
+  const signal=AbortSignal.timeout(config.timeoutMs),base=config.endpoint.replace(/\/$/,''),logoPng=await sharp(source).rotate().png().toBuffer();
+  const metadata=preserveDetails?await sharp(logoPng).metadata():null;
+  const body=buildApimartLogoRequest(`data:image/png;base64,${logoPng.toString('base64')}`,{model:config.model,targetColor,preserveDetails,...(metadata?{size:pickAspectRatio(metadata.width,metadata.height)}:{})});
   const read=async(response)=>{if(!response.ok){let detail=`HTTP ${response.status}`;try{const payload=await response.json();detail=payload.error?.message||payload.message||detail;}catch{}throw Error(`APIMart ${detail}`);}try{return await response.json();}catch{throw Error('APIMart 返回了无法解析的 JSON 响应');}};
   const request=async(path,options)=>read(await transport(base+path,{...options,redirect:'error',signal,headers:{Authorization:`Bearer ${config.apiKey}`,'Content-Type':'application/json','Accept-Encoding':'identity',...(options?.headers||{})}}));
   try{

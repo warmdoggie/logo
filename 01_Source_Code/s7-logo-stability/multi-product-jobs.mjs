@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import sharp from 'sharp';
-import {generationVersions as versions,selectGenerationVersions} from './generation-versions.mjs';
-import {createSchemes} from './schemes.mjs';
+import {allGenerationVersions as versions,productGenerationVersions,isMixedVersion} from './generation-versions.mjs';
+import {createSchemes,ensureMixedSchemes} from './schemes.mjs';
 import {masterTargetsFromTemplate} from './product-master.mjs';
 import {renderLogoSet} from './index.mjs';
 import {pickAspectRatio} from './ai-mockup-generation.mjs';
@@ -37,43 +37,44 @@ export function createMultiProductJobs(spaces,{productTemplate,productImage,mock
   if((await spaces.task(user,taskId)).state?.mode==='multi-logo')fail('请使用多 Logo 上样的独立生成入口');
   const previous=await read(user,taskId),activeKey=taskKey(user,taskId);
   if(previous?.status==='running'||active.has(activeKey))fail('当前任务正在生成，请等待完成',409);
-  const selected=selectGenerationVersions(input);
+  const selectionInput={...input,productIds:input.productIds??products.map(product=>String(product.id))};
+  const selectedByProduct=new Map(products.map(product=>[String(product.id),productGenerationVersions(selectionInput,String(product.id))]));
   if(input.onlyProductId&&(!products.some(product=>String(product.id)===input.onlyProductId)||previous?.kind!=='multi-product'))fail('请先生成所选产品的效果图');
-  if(selected.some(version=>!versions.includes(version)))fail('生成版本无效');
   const logo=Buffer.from(input.logoImage,'base64'),logoMeta=await sharp(logo).metadata(),prepared=[];
   for(const product of products){
+   const selected=selectedByProduct.get(String(product.id));if(!selected.length)continue;
    const edited=input.productLayouts?.find(layout=>layout.productId===String(product.id));
    const master=edited?null:await productTemplate(product,req);
    if(master?.needsTemplateReview)fail('产品标准图已修改，请先重新确认并发布母版');
    const targets=edited?.targets||masterTargetsFromTemplate(master?.template);
    if(!Array.isArray(targets)||!targets.length)fail(`${product.sku} 尚无有效的产品 Logo 区域`);
-   const schemes=edited?.schemes||createSchemes(targets).schemes;
+   const schemes=ensureMixedSchemes({sharedTargets:targets,schemes:edited?.schemes||createSchemes(targets).schemes},selected.filter(isMixedVersion)).schemes;
    if(!Array.isArray(schemes))fail(`${product.sku} 的效果方案无效`);
    const source=edited?.baseAssetUrl?await spaces.taskAssetFromUrl(user,taskId,edited.baseAssetUrl):await productImage(product,req),base=await sharp(source.bytes).png().toBuffer();
-   prepared.push({product:{id:String(product.id),sku:String(product.sku||''),name:String(product.name||'')},base,targets,schemes,schemeSignatures:edited?.schemeSignatures||{}});
+   prepared.push({product:{id:String(product.id),sku:String(product.sku||''),name:String(product.name||'')},base,targets,schemes,selected,schemeSignatures:edited?.schemeSignatures||{}});
   }
   if(active.has(activeKey))fail('当前任务正在生成，请等待完成',409);
   if(scheduled){
    const inputs=[];
-   for(const {product,base,targets,schemes,schemeSignatures} of prepared.filter(({product})=>!input.onlyProductId||product.id===input.onlyProductId)){
+   for(const {product,base,targets,schemes,selected,schemeSignatures} of prepared){
     const image=await prepareGenerationImage({...input,baseImage:base,logoImage:logo,targets,schemes,selectedVersions:selected});
     inputs.push({input:image.input,output:{productId:product.id},schemeSignatures,label:product.sku});
    }
-   return scheduled.start(user,taskId,{kind:'multi-product',model:input.model,products:prepared.map(item=>item.product),outputs:previous?.kind==='multi-product'?(previous.outputs||[]).filter(output=>products.some(product=>String(product.id)===output.productId)):[],stages:input.onlyProductId?previous.stages:{}},inputs);
+   return scheduled.start(user,taskId,{kind:'multi-product',foilAudit:input.foilAudit,model:input.model,products:products.map(product=>({id:String(product.id),sku:String(product.sku||''),name:String(product.name||'')})),outputs:previous?.kind==='multi-product'?(previous.outputs||[]).filter(output=>products.some(product=>String(product.id)===output.productId)):[],stages:input.onlyProductId?previous.stages:{}},inputs);
   }
   const id=randomUUID();active.set(activeKey,id);
   let job;
   try{job=await spaces.updateGeneration(user,taskId,current=>{
    if(current?.status==='running')fail('当前任务正在生成，请等待完成',409);
-   const stamp=new Date().toISOString();return {id,kind:'multi-product',status:'running',createdAt:stamp,updatedAt:stamp,model:input.model,products:prepared.map(item=>item.product),
+   const stamp=new Date().toISOString();return {id,kind:'multi-product',foilAudit:input.foilAudit,status:'running',createdAt:stamp,updatedAt:stamp,model:input.model,products:products.map(product=>({id:String(product.id),sku:String(product.sku||''),name:String(product.name||'')})),
     outputs:current?.kind==='multi-product'?(current.outputs||[]).filter(output=>products.some(product=>String(product.id)===output.productId)):[],remoteTasks:current?.kind==='multi-product'?current.remoteTasks||{}:{},
-    stages:{...(input.onlyProductId?current.stages:{}),...Object.fromEntries(prepared.filter(({product})=>!input.onlyProductId||product.id===input.onlyProductId).flatMap(({product})=>selected.map(version=>[key(product.id,version),{stage:'queued'}])))}};
+    stages:{...(input.onlyProductId?current.stages:{}),...Object.fromEntries(prepared.flatMap(({product,selected})=>selected.map(version=>[key(product.id,version),{stage:'queued'}])))}};
   });}catch(error){if(active.get(activeKey)===id)active.delete(activeKey);throw error;}
   const update=change=>spaces.updateGeneration(user,taskId,current=>current.id!==id?current:{...change(current),updatedAt:new Date().toISOString()});
   void (async()=>{
    try{
-    await runBatches(prepared.filter(({product})=>!input.onlyProductId||product.id===input.onlyProductId),async({product,base,targets,schemes,schemeSignatures})=>{
-     const onStage=(version,stage,error)=>update(current=>({...current,stages:{...current.stages,[key(product.id,version)]:{stage,error:error?.message}}}));
+    await runBatches(prepared,async({product,base,targets,schemes,selected,schemeSignatures})=>{
+     const onStage=(version,stage,error)=>{if(!selected.includes(version))fail('成图版本与请求不一致');return update(current=>({...current,stages:{...current.stages,[key(product.id,version)]:{stage,error:error?.message}}}));};
      const onOutput=async output=>{
       if(!selected.includes(output.version))fail('成图版本与请求不一致');
       const saved=await spaces.save(user,{taskId,kind:'多包材印刷效果',model:input.model,images:[{label:`${product.sku} · ${output.version}`,bytes:output.bytes}]});
@@ -82,12 +83,12 @@ export function createMultiProductJobs(spaces,{productTemplate,productImage,mock
        stages:{...current.stages,[key(product.id,output.version)]:{stage:'complete'}}};});
      };
      try{
-      const guides=await renderLogoSet({baseImage:base,logoImage:logo,targets,schemes,originalColor:input.originalColor||'#000000'}),current=await spaces.generation(user,taskId);
+      const guides=await renderLogoSet({baseImage:base,logoImage:logo,targets,schemes,originalColor:input.originalColor||'#000000',selectedVersions:selected}),current=await spaces.generation(user,taskId);
       const outputs=await mockupRenderer({baseImage:dataUrl(base),logoImage:dataUrl(logo),model:input.model,targets,schemes,originalColor:input.originalColor||'#000000',selectedVersions:selected,
        finishReferenceImage:input.finishReferenceImage?`data:image/png;base64,${input.finishReferenceImage}`:undefined,size:pickAspectRatio(guides.width,guides.height),logoAspectRatio:logoMeta.height/logoMeta.width,
-       maskImage:dataUrl(guides.mask),guides:guides.outputs.map(output=>({version:output.version,dataUrl:dataUrl(output.bytes),maskDataUrl:dataUrl(output.mask),foilMaskDataUrl:dataUrl(output.foilMask),goldMaskDataUrl:dataUrl(output.goldMask)})),onStage,onOutput,
+       maskImage:dataUrl(guides.mask),guides:guides.outputs.map(output=>({version:output.version,dataUrl:dataUrl(output.bytes),maskDataUrl:dataUrl(output.mask),foilMaskDataUrl:dataUrl(output.foilMask),goldMaskDataUrl:dataUrl(output.goldMask),roseMaskDataUrl:dataUrl(output.roseMask),laserMaskDataUrl:dataUrl(output.laserMask)})),onStage,onOutput,
        resumeTasks:Object.fromEntries(selected.map(version=>[version,current.remoteTasks[key(product.id,version)]])),
-       onCheckpoint:(version,checkpoint)=>update(record=>{const remoteTasks={...record.remoteTasks};if(checkpoint)remoteTasks[key(product.id,version)]=checkpoint;else delete remoteTasks[key(product.id,version)];return {...record,remoteTasks};})});
+       onCheckpoint:(version,checkpoint)=>{if(!selected.includes(version))fail('成图版本与请求不一致');return update(record=>{const remoteTasks={...record.remoteTasks};if(checkpoint)remoteTasks[key(product.id,version)]=checkpoint;else delete remoteTasks[key(product.id,version)];return {...record,remoteTasks};});}});
       for(const output of outputs)if((await spaces.generation(user,taskId)).stages[key(product.id,output.version)]?.stage!=='complete')await onOutput(output);
       for(const version of selected)if(!['complete','failed'].includes((await spaces.generation(user,taskId)).stages[key(product.id,version)].stage))await onStage(version,'failed',Error('未返回图片，请重试'));
      }catch(error){for(const version of selected)if((await spaces.generation(user,taskId)).stages[key(product.id,version)]?.stage!=='complete')await onStage(version,'failed',error);}

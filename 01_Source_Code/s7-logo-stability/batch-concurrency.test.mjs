@@ -16,8 +16,8 @@ for(const kind of ['product','logo'])test(`${kind} 批次同时运行两组，�
  const base=await sharp({create:{width:48,height:48,channels:4,background:'#ccc'}}).png().toBuffer();
  const logo=await sharp({create:{width:8,height:4,channels:4,background:'#00000000'}}).composite([{input:await sharp({create:{width:4,height:2,channels:4,background:'#c32'}}).png().toBuffer(),left:2,top:1}]).png().toBuffer();
  const ids=['one','two','three','four'],gates=new Map(ids.map(id=>[id,Promise.withResolvers()])),entered=new Map(ids.map(id=>[id,Promise.withResolvers()])),calls=[],expected=new Map();let active=0,peak=0,retrying=false;
- const products=ids.map(id=>({id,sku:id,name:id,imageBytes:base,template:{zones:[{id,zoneType:'logo',x:.3,y:.3,width:.2,height:.1}]}}));
- const layouts=ids.map((id,index)=>{const targets=[{id,x:.2+index*.15,y:.5,widthRatio:.2,rotation:0}];return {targets,schemes:createSchemes(targets).schemes};});
+ const products=ids.map(id=>({id,sku:id,name:id,imageBytes:base,template:{id:'master-'+id,version:1,zones:[{id,zoneType:'logo',x:.3,y:.3,width:.2,height:.1}],automation:{carriers:[{id:'body',type:'BODY'}],areas:[{id:'area',zoneId:id,carrierId:'body',foilProcesses:['GOLD FOIL','SILVER FOIL']}]}}}));
+ const layouts=ids.map((id,index)=>{const targets=[{id,masterZoneId:kind==='logo'?'one':id,x:.2+index*.15,y:.5,widthRatio:.2,rotation:0}];return {targets,schemes:createSchemes(targets).schemes};});
  const server=createDemoServer({spaceDir:dir,authenticate:async()=>({id:'alice'}),productCatalog:async()=>products,mockupRenderer:async input=>{
   const id=input.targets[0].id;calls.push(id);active++;peak=Math.max(peak,active);entered.get(id).resolve();
   try{await gates.get(id).promise;if(id==='two'&&!retrying)throw Error('上游暂时限流');
@@ -60,8 +60,8 @@ for(const kind of ['product','logo'])for(const fixedGold of [false,true])test(`$
  const logo=await sharp(Buffer.from('<svg width="24" height="12"><path fill="black" fill-rule="evenodd" d="M0 0H24V12H0Z M7 3V9H17V3Z"/></svg>')).png().toBuffer();
  let requests=0;
  const renderer=createAiMockupRenderer({configPath,pollIntervalMs:0,transport:async()=>{requests++;throw Error('本地上样不能调用外部服务');}});
- const targets=[{id:'body',x:.5,y:.5,widthRatio:.25,rotation:0,...(fixedGold?{printFinish:'GOLD FOIL'}:{})}],schemes=createSchemes(targets).schemes;
- const server=createDemoServer({spaceDir:dir,authenticate:async()=>({id:'alice'}),productCatalog:async()=>['a','b'].map(id=>({id,sku:id,name:id,imageBytes:image,template:{zones:[{id:'body',zoneType:'logo',x:.4,y:.4,width:.25,height:.1}]}})),mockupRenderer:renderer});
+ const targets=[{id:'body',masterZoneId:'body',x:.5,y:.5,widthRatio:.25,rotation:0,...(fixedGold?{printFinish:'GOLD FOIL'}:{})}],schemes=createSchemes(targets).schemes;
+ const server=createDemoServer({spaceDir:dir,authenticate:async()=>({id:'alice'}),productCatalog:async()=>['a','b'].map(id=>({id,sku:id,name:id,imageBytes:image,template:{id:'master-'+id,version:1,zones:[{id:'body',zoneType:'logo',x:.4,y:.4,width:.25,height:.1}],automation:{carriers:[{id:'body',type:'BODY'}],areas:[{id:'area',zoneId:'body',carrierId:'body',foilProcesses:['GOLD FOIL','SILVER FOIL']}]}}})),mockupRenderer:renderer});
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const origin=`http://127.0.0.1:${server.address().port}`;
  const call=(path,input)=>fetch(origin+path,{method:input?'POST':'GET',headers:{'content-type':'application/json'},...(input?{body:JSON.stringify(input)}:{})});
  const task=await(await call('/api/my-space/tasks',{title:'Local batch'})).json();

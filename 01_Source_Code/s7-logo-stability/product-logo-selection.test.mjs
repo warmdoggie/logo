@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
-import {createSchemes} from './schemes.mjs';
-import {masterTargetsFromTemplate} from './product-master.mjs';
+import {createSchemes,ensureCustomScheme} from './schemes.mjs';
+import {masterTargetsFromTemplate,rebindMasterZones} from './product-master.mjs';
 
 const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
 const red={id:'red',name:'红标',logoImage:'red-image'},blue={id:'blue',name:'蓝标',logoImage:'blue-image'};
@@ -11,7 +11,7 @@ const red={id:'red',name:'红标',logoImage:'red-image'},blue={id:'blue',name:'�
 function workspace(ids=['a']){
  const responses=new Map(ids.map(id=>[id,Promise.withResolvers()])),requests=[],renders=[],statuses=[];
  const nodes={};
- const c=vm.createContext({structuredClone,createSchemes,masterTargetsFromTemplate,
+ const c=vm.createContext({restoreProductSelection(){},selectedGenerationVersions:()=>['ORIGINAL','BLACK'],structuredClone,createSchemes,ensureCustomScheme,masterTargetsFromTemplate,rebindMasterZones,
   multiPackageProducts:ids.map(id=>({id,sku:id.toUpperCase()})),multiProductViews:new Map(),multiProductLoads:new Map(),multiProductResults:new Map(),multiProductJob:null,
   selectedMultiProductId:null,loadedMultiProductId:null,multiProductLoadRevision:0,multiPackageBusy:false,generationBusy:false,
   taskLogos:[],selectedTaskLogoId:null,loadedTaskLogoId:null,logoLoadRevision:0,logoSelectionBusy:false,logoDecoding:false,logoImportBusy:false,multiLogoViews:new Map(),multiLogoJob:null,multiLogoEnabled:true,currentTaskId:'task',s7User:{id:'user'},
@@ -34,7 +34,7 @@ test('产品加载中选择 Logo，产品就绪后自动应用并使用其母版
  assert.equal(c.selectedTaskLogoId,'red');assert.equal(c.loadedTaskLogoId,null);
  complete('a');await loading;
  assert.equal(c.loadedMultiProductId,'a');assert.equal(c.loadedTaskLogoId,'red');assert.equal(c.logoData,'red-image');
- assert.equal(c.schemeState.schemes.length,4);assert.equal(c.schemeState.schemes[0].targets[0].id,'master-body-a');
+ assert.equal(c.schemeState.schemes.length,7);assert.equal(c.schemeState.schemes[0].targets[0].id,'master-body-a');
  assert.equal(c.logoSelectionBusy,false);assert.equal(requests.filter(url=>url==='/api/product-library/image/a?selection=1').length,1);
 });
 

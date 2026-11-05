@@ -11,7 +11,7 @@ function silverPatch(x,y){
   return (noise(left,top)*(1-fx)+noise(left+1,top)*fx)*(1-fy)+(noise(left,top+1)*(1-fx)+noise(left+1,top+1)*fx)*fy;
 }
 
-export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskImage,foilMaskImage,goldMaskImage,feather=1,useGeneratedLighting=true,foilFinish,surfaceResponse=false}={}){
+export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskImage,foilMaskImage,goldMaskImage,roseMaskImage,laserMaskImage,feather=1,useGeneratedLighting=true,foilFinish,surfaceResponse=false}={}){
   const baseMeta=await sharp(baseImage).metadata();
   if(!baseMeta.width||!baseMeta.height)throw Error('原图尺寸无效');
   const [base,generated,mask,guide]=await Promise.all([
@@ -22,7 +22,7 @@ export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskI
   ]);
   const gold=guide&&useGeneratedLighting&&foilFinish==='gold';
   const decodeMask=image=>sharp(image).grayscale().resize({width:baseMeta.width,height:baseMeta.height,fit:'fill'}).raw().toBuffer();
-  const [foilMask,goldMask]=await Promise.all([foilMaskImage?decodeMask(foilMaskImage):null,goldMaskImage?decodeMask(goldMaskImage):null]);
+  const [foilMask,goldMask,roseMask,laserMask]=await Promise.all([foilMaskImage?decodeMask(foilMaskImage):null,goldMaskImage?decodeMask(goldMaskImage):null,roseMaskImage?decodeMask(roseMaskImage):null,laserMaskImage?decodeMask(laserMaskImage):null]);
   const surfaceBase=surfaceResponse&&guide?await sharp(base,{raw:{width:baseMeta.width,height:baseMeta.height,channels:4}}).blur(Math.max(1,Math.min(16,baseMeta.width/160))).raw().toBuffer():null;
   const silverHeight=surfaceBase?await sharp(foilMask||mask,{raw:{width:baseMeta.width,height:baseMeta.height,channels:1}}).blur(.4).greyscale().raw().toBuffer():null;
   const [softMask,softGenerated]=gold?await Promise.all([
@@ -37,6 +37,7 @@ export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskI
       const generatedLuma=.2126*generated[offset]+.7152*generated[offset+1]+.0722*generated[offset+2];
       const metallic=foilMask?foilMask[i]>0:!!foilFinish;
       const goldPixel=goldMask?goldMask[i]>0:foilFinish==='gold';
+      const coloredFoil=(roseMask?roseMask[i]>0:foilFinish==='rose')||(laserMask?laserMask[i]>0:foilFinish==='laser');
       if(surfaceBase&&!goldPixel){
         const sceneLuma=.2126*surfaceBase[offset]+.7152*surfaceBase[offset+1]+.0722*surfaceBase[offset+2];
         const light=sceneLuma/255,texture=Math.max(-.035,Math.min(.035,(baseLuma-sceneLuma)/255));
@@ -46,7 +47,7 @@ export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskI
         // Recover the source ink at antialiased edges before compositing once.
         const core=[0,1,2].map(channel=>Math.max(0,Math.min(255,(guide[offset+channel]-base[offset+channel]*(1-alpha))/alpha)));
         if(metallic){
-          // The package supplies the silver reflection; AI glyph-edge lighting is discarded.
+          // The package supplies the foil reflection; AI glyph-edge lighting is discarded.
           const peak=Math.max(1,...core),reflection=peak*(.97+light*.05+texture*.35);
           const silver=190+72*Math.tanh((reflection-205)/42),patch=silverPatch(x,y);
           // Fine irregular foil detail varies in density, while retaining bright silver reflections.
@@ -63,7 +64,7 @@ export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskI
           const whiteSurface=Math.max(0,Math.min(1,(sceneLuma-210)/25));
           const highlightLimit=253+(sceneLuma-24-253)*whiteSurface;
           for(let channel=0;channel<3;channel++){
-            const silverChannel=Math.max(0,Math.min(253,highlight+layer+(core[channel]-peak)*.15));
+            const silverChannel=Math.max(0,Math.min(253,highlight+layer+(core[channel]-peak)*(coloredFoil?1:.15)));
             const visibleSilver=silverChannel-(253-highlightLimit)*Math.max(0,Math.min(1,(silverChannel-140)/80));
             output[offset+channel]=Math.round(visibleSilver*alpha+base[offset+channel]*(1-alpha));
           }

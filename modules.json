@@ -2,7 +2,7 @@
   "modules": [
     {
       "id": "s7-logo-stability",
-      "name": "S7 Logo Stability",
+      "name": "Logo 上样",
       "source": "01_Source_Code/s7-logo-stability",
       "startScript": "start-workspace.ps1",
       "localUrl": "http://127.0.0.1:3210/#/modules/s7-logo-stability",

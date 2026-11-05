@@ -14,19 +14,19 @@ test('batch submission includes cached product edits and the active product late
   aState.schemes[2].targets[0].rotation=-30;
   aState.schemes[2].independentGeometry=true;
   let requestBody;
-  const context=vm.createContext({copyingProductPreset:false,
+  const context=vm.createContext({copyingProductPreset:false,generationSubmitting:false,generationBusy:false,logoSelectionBusy:false,setTimeout,requestAnimationFrame:callback=>callback(),generationWatcher:null,resultMeta:{},queueSchemeCards(){},
     structuredClone,schemeSignature,schemeNames:{ORIGINAL:'原色',BLACK:'黑白','GOLD FOIL':'金','SILVER FOIL':'银'},multiProductJob:null,currentTaskId:null,multiPackageBusy:false,multiPackageProducts:[{id:'a',sku:'a'},{id:'b',sku:'b'}],logoData:'test-logo',mockupModel:{value:'flux-3-image'},
     selectedMultiProductId:'b',loadedMultiProductId:'b',baseData:'base-b',baseImage:{},
     schemeState:createSchemes([target(.4,.2)]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'master-zone',lastResultPayload:null,savedSignatures:{},schemePhases:{},
-    multiProductViews:new Map([['a',{targets:aTargets,schemeState:aState,activeScheme:'GOLD FOIL'}]]),multiProductResults:new Map(),
-    collectTargets:()=>bTargets,
+    multiProductViews:new Map([['a',{targets:aTargets,schemeState:aState,activeScheme:'GOLD FOIL',selectedVersions:['BLACK','SILVER FOIL']}]]),multiProductResults:new Map(),
+    loadMultiProductView:async product=>context.multiProductViews.get(product.id),collectTargets:()=>bTargets,
     selectedGenerationVersions:()=>['BLACK','SILVER FOIL'],
     syncSchemeState:()=>{context.schemeState=editScheme(context.schemeState,context.activeScheme,bTargets,true);},
     setStatus:()=>{},renderMultiProductResults:()=>{},restoreMultiProductGeneration:()=>{},updateGenerateButton:()=>{},s7User:null,
     fetch:async(url,options)=>{assert.equal(url,'/api/ai-render-multi');requestBody=JSON.parse(options.body);return {ok:true,headers:{get:()=> 'text/event-stream'}};},
     readProgressStream:async(response,onEvent)=>{for(const id of ['a','b'])await onEvent('product-done',{product:{id},complete:true,images:[],outputs:['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL']});}
   });
-  vm.runInContext(snapshots+submission,context);
+  vm.runInContext(source.slice(source.indexOf('function selectedProductPlans(){'),source.indexOf('function restoreMixedVersions'))+source.slice(source.indexOf('async function showGenerationSubmission('),source.indexOf('async function runGeneration('))+snapshots+submission,context);
   context.multiProductViews.get('a').baseAssetUrl='/api/my-space/tasks/task/assets/a.png';context.multiProductViews.get('a').baseData='base-a';
   context.multiProductViews.set('b',{baseAssetUrl:'/api/my-space/tasks/task/assets/b.png'});
   await vm.runInContext('runMultiPackageGeneration()',context);

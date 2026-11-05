@@ -16,7 +16,7 @@ const targets=[
 test('fixed body finishes override output versions and ordinary ink ignores automatic contrast',()=>{
   assert.deepEqual(resolveTargetPrint({carrierType:'BODY',printFinish:'SILVER FOIL'},'BLACK'),{carrierType:'BODY',printFinish:'SILVER FOIL',version:'SILVER FOIL',color:'#BFC3C9',finish:'silver'});
   assert.equal(resolveTargetPrint({printFinish:'INK',color:'#235689',autoContrast:true},'GOLD FOIL','#000000','#FFFFFF').color,'#235689');
-  for(const target of [{carrierType:'unknown'},{printFinish:'unknown'},{carrierType:'CARTON_BACK',printFinish:'GOLD FOIL'}])assert.throws(()=>resolveTargetPrint(target,'ORIGINAL'));
+  for(const target of [{carrierType:'unknown'},{printFinish:'unknown'}])assert.throws(()=>resolveTargetPrint(target,'ORIGINAL'));
 });
 
 test('preserving original logo colors leaves source pixels untinted until a custom color is selected',()=>{
@@ -36,10 +36,13 @@ test('carton front and back retain separate ink colors in every version while th
   }
 });
 
-test('cartons reject explicit foil even when the API is called directly',async()=>{
-  const image=await sharp({create:{width:100,height:40,channels:4,background:'#ffffff'}}).png().toBuffer();
-  for(const printFinish of ['GOLD FOIL','SILVER FOIL'])await assert.rejects(
-    renderLogoSet({baseImage:image,logoImage:image,targets:[{...targets[1],printFinish}]}),/彩盒.*普通/);
+test('cartons accept explicit foil after the caller has completed preflight',async()=>{
+  const baseImage=await sharp({create:{width:100,height:40,channels:4,background:'#ffffff'}}).png().toBuffer();
+  const logoImage=await sharp({create:{width:8,height:4,channels:4,background:'#000000'}}).png().toBuffer();
+  for(const printFinish of ['GOLD FOIL','SILVER FOIL','ROSE GOLD FOIL','LASER FOIL']){
+    const {outputs:[output]}=await renderLogoSet({baseImage,logoImage,targets:[{...targets[1],printFinish}],selectedVersions:['ORIGINAL']});
+    assert.ok((await sharp(output.foilMask).greyscale().raw().toBuffer()).some(value=>value>0));
+  }
 });
 
 for(const model of ['gpt-image-2','flux-3-image'])test(`${model} receives per-placement ink constraints instead of a global foil instruction`,()=>{
@@ -49,7 +52,7 @@ for(const model of ['gpt-image-2','flux-3-image'])test(`${model} receives per-pl
   assert.match(prompt,/front[^\n]*CARTON_FRONT[^\n]*#C54B78[^\n]*ordinary ink/i);
   assert.match(prompt,/back[^\n]*CARTON_BACK[^\n]*#235689[^\n]*ordinary ink/i);
   assert.match(prompt,/tube[^\n]*GOLD FOIL/);
-  assert.match(prompt,/No gold foil, silver foil or metallic reflection on carton/i);
+  assert.doesNotMatch(prompt,/No gold foil, silver foil or metallic reflection on carton/i);
 });
 
 for(const model of ['gpt-image-2','flux-3-image'])test(`${model} defers auto black-white contrast to the sampled placement guide`,()=>{
