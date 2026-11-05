@@ -6,9 +6,9 @@ import * as schemes from './schemes.mjs';
 import {resolveTargetPrint} from './target-print.mjs';
 import {renderLogoSet} from './index.mjs';
 import {buildAiMockupPlan} from './ai-mockup-generation.mjs';
-import {isLocalMockup,preservePrintSurface} from './ai-mockup-provider.mjs';
+import {isLocalMockup,preservePrintSurface,createAiMockupRenderer} from './ai-mockup-provider.mjs';
 import {createFoilPolicy} from './foil-policy.mjs';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,rm,writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {userSpace} from './user-space.mjs';
@@ -19,6 +19,23 @@ import {createMultiLogoJobs} from './multi-logo-render.mjs';
 const targets=[{id:'body',masterZoneId:'body',carrierType:'BODY',x:.25,y:.5,widthRatio:.2},{id:'box',masterZoneId:'box',carrierType:'CARTON_FRONT',x:.75,y:.5,widthRatio:.2}];
 const mixed=(version='MIX_ORIGINAL_GOLD')=>schemes.ensureMixedSchemes(schemes.createSchemes(targets),[version]);
 const data=bytes=>'data:image/png;base64,'+bytes.toString('base64');
+
+test('all 36 product/carton combinations stay local even when an AI provider is configured',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'mixed-local-only-'));
+ try{
+  const configPath=join(directory,'provider.json');
+  await writeFile(configPath,JSON.stringify({enabled:true,provider:'APIMART',endpoint:'https://api.apimart.ai',model:'gpt-image-2',apiKey:'test-only'}));
+  const base=await sharp({create:{width:128,height:64,channels:4,background:'#b6a4a0'}}).png().toBuffer();
+  const logo=await sharp(Buffer.from('<svg width="16" height="8"><path fill="#2580a0" d="M1 1H15V7H1Z"/></svg>')).png().toBuffer();
+  let calls=0;const renderer=createAiMockupRenderer({configPath,transport:async()=>{calls++;throw Error('Print combinations must never call AI');}});
+  for(const version of versions.mixedGenerationVersions){
+   const state=mixed(version),rendered=await renderLogoSet({baseImage:base,logoImage:logo,targets,schemes:state.schemes,selectedVersions:[version]}),guide=rendered.outputs[0];
+   const guides=[{version,dataUrl:data(guide.bytes),maskDataUrl:data(guide.mask),foilMaskDataUrl:data(guide.foilMask),goldMaskDataUrl:data(guide.goldMask),roseMaskDataUrl:data(guide.roseMask),laserMaskDataUrl:data(guide.laserMask)}];
+   const outputs=await renderer({model:'gpt-image-2',baseImage:data(base),logoImage:data(logo),originalColor:'#000000',targets,schemes:state.schemes,selectedVersions:[version],guides});
+   assert.equal(outputs.length,1,version);assert.equal(outputs[0].version,version);assert.ok(outputs[0].bytes.length>0);assert.equal(calls,0,version);
+  }
+ }finally{await rm(directory,{recursive:true,force:true});}
+});
 
 test('finite mixed IDs select independent finishes without changing legacy defaults',()=>{
  assert.equal(typeof versions.mixedVersion,'function');

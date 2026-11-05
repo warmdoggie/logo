@@ -39,3 +39,22 @@ installed through the FRAME deployment launcher.
 
 The deployment assets do not contain a real credential, certificate key, or
 server address.
+
+## Updating a workspace that uses the durable scheduler
+
+Read each service's live `WorkingDirectory` before updating code; an existing
+installation may serve the workspace from `/srv/ai-logo/01_Source_Code`.
+The right-hand print combinations use local composition. Only the explicit
+Logo “AI 精细化处理” button invokes the AI Logo processor.
+
+The `logo-scheduler-images.service` process imports application rendering modules
+and caches them until it exits. When changing print versions, finishes, masks or
+rendering modules, wait for active jobs to finish and restart this image worker
+after updating the application files. Restarting only the workspace leaves the
+worker using the previous rules and can make new combinations fail locally.
+Restart `logo-scheduler-api.service` as well when changing the plan upload
+protocol. Preserve the deployed OSS plan reader and protected configuration.
+
+After activation, confirm the image worker started after the code update and
+verify a mixed local print plan through the worker, including rose-gold and laser
+masks. An application health response alone does not verify the image worker.
