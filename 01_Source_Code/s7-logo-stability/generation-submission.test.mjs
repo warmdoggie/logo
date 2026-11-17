@@ -3,17 +3,18 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {createGenerationWatcher,previewStatus} from './generation-client.mjs';
+import {preparePlacementLogo} from './placement-logo.mjs';
 
 const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});promise.catch(()=>{});return {promise,resolve,reject};};
 async function fixture(kind){
- const saved=deferred(),flushing=deferred(),requested=deferred(),response=deferred(),button={},retry={},meta={},status={},nodes={'#generate':button,'#generate-modified':retry,'#apply-product-preset':{},'#product-preset-options':{},'#custom-product-color':{},'#custom-carton-color':{}};
+ const saved=deferred(),flushing=deferred(),requested=deferred(),response=deferred(),button={},retry={},meta={},status={},nodes={'#generate':button,'#generate-modified':retry,'#apply-product-preset':{},'#product-preset-options':{},'#custom-product-color':{},'#custom-carton-color':{},'#custom-product-color-picker':{},'#custom-carton-color-picker':{}};
  for(const name of ['size','color','print-finish','rotation'])nodes['#copy-preset-'+name]={checked:true};
  const versions=['ORIGINAL','BLACK'],record={id:'new',status:'running',outputs:[],stages:{ORIGINAL:{stage:'generating'},BLACK:{stage:'generating'}}};
  let requests=0;
- const c=vm.createContext({addingPrintCombination:false,structuredClone,setTimeout,requestAnimationFrame:callback=>setTimeout(callback,0),generationSubmitting:false,generationBusy:false,multiPackageBusy:false,copyingProductPreset:false,logoSelectionBusy:false,
+ const c=vm.createContext({preparePlacementLogo,loadImage:async()=>({naturalWidth:100,naturalHeight:40}),multiLogoViews:new Map([['a',{}],['b',{}]]),addingPrintCombination:false,structuredClone,setTimeout,requestAnimationFrame:callback=>setTimeout(callback,0),generationSubmitting:false,generationBusy:false,multiPackageBusy:false,copyingProductPreset:false,logoSelectionBusy:false,
   activeScheme:'ORIGINAL',baseData:'base',logoData:'logo',currentTaskId:'task',s7User:{id:'alice'},multiLogoEnabled:true,mockupModel:{value:'local'},
-  aiLogoBusy:false,aiRefineButton:{setAttribute(){}},aiRefineDownload:{},
+  updatePlacementUndo(){},localLogoBusy:false,processButton:{setAttribute(){}},aiLogoBusy:false,aiRefineButton:{setAttribute(){}},aiRefineDownload:{},
   taskLogos:kind==='logos'?[{id:'a',logoImage:'a'},{id:'b',logoImage:'b'}]:[],multiPackageProducts:kind==='products'?[{id:'a'},{id:'b'}]:[{id:'a'}],loadedMultiProductId:'a',selectedMultiProductId:'a',loadedTaskLogoId:'a',multiProductViews:new Map([['a',{}],['b',{}]]),
   schemeState:{schemes:versions.map(version=>({version,targets:[]}))},schemePhases:{},lastResultPayload:{outputs:[]},resultMeta:meta,status,
   document:{querySelectorAll:()=>[],querySelector:id=>nodes[id]},multiProductTabs:{querySelectorAll:()=>[]},selectedProductPlans:()=>c.multiPackageProducts.map(product=>({productId:product.id,selectedVersions:versions})),loadMultiProductView:async product=>c.multiProductViews.get(product.id),selectedGenerationVersions:()=>versions,modifiedSchemes:()=>[],
@@ -36,6 +37,7 @@ for(const kind of ['single','products','logos'])test(`${kind}: 保存草稿和�
  const f=await fixture(kind),pending=f.run();
  assert.equal(f.button.disabled,true);assert.match(f.button.textContent,/生成中|正在生成/);assert.match(f.meta.textContent,/正在生成/);
  assert.equal(f.c.aiRefineButton.disabled,true,'生成期间不能替换 Logo');
+ assert.equal(f.c.processButton.disabled,true,'生成期间不能加工 Logo');
  assert.equal(f.c.multiProductTabs.inert,true);
  assert.equal(previewStatus(null,f.c.schemePhases.BLACK,false).busy,true);
  await f.run();assert.equal(f.requests(),0);

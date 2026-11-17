@@ -40,7 +40,7 @@ test('主工作区同一端口直接提供 S7 页面、静态资源和 API', {ti
     const script=await fetch(base+'/s7/demo.js');
     assert.equal(script.status,200);
     assert.match(await script.text(),/beginResultProgress/);
-    for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css','image-preview.mjs','target-toolbar.mjs','product-preset.mjs']){
+    for(const file of ['multi-logo.html','multi-logo.js','multi-logo.css','image-preview.mjs','product-preset.mjs']){
       const asset=await fetch(base+'/s7/'+file);
       assert.equal(asset.status,200,`新增资源应由主工作区提供：${file}`);
       assert.ok((await asset.text()).length>0);

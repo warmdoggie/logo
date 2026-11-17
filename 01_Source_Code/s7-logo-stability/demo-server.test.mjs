@@ -67,6 +67,18 @@ test('S7 内嵌任务页隐藏重复说明并压缩顶部留白',async()=>{
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
 
+test('browser can load the shared laser material without caching an old version',async()=>{
+ const {server,base}=await openServer();
+ try{
+  const response=await fetch(base+'/laser-foil-texture.mjs');
+  assert.equal(response.status,200);
+  assert.match(response.headers.get('content-type'),/javascript/);
+  assert.match(response.headers.get('cache-control'),/must-revalidate/);
+  assert.ok(response.headers.get('etag'));
+  assert.equal(await response.text(),await readFile(new URL('./laser-foil-texture.mjs',import.meta.url),'utf8'));
+ }finally{await new Promise(resolve=>server.close(resolve));}
+});
+
 test('素材区只从商品库选择产品，并提供 Logo 库选择入口',async()=>{
   const {server,base}=await openServer();
   try{
@@ -76,8 +88,7 @@ test('素材区只从商品库选择产品，并提供 Logo 库选择入口',asy
     assert.match(html,/id="choose-logo-library"[^>]*>从 Logo 库选择/);
     assert.match(html,/id="logo-image"/);
     assert.match(html,/id="selected-logo-thumbnail"/);
-    assert.doesNotMatch(html,/id="process-logo"|id="processing-panel"/);
-    assert.match(html,/点击生成时会自动清理 Logo/);
+    assert.match(html,/id="process-logo"[^>]*>logo处理<\/button>\s*<button id="generate"/);
     const script=await(await fetch(base+'/demo.js')).text();
     assert.match(script,/logoLibraryPath=value=>S7_BASE\?new URL\(value,location\.origin\)\.href:s7Path\(value\)/);
   }finally{await new Promise(resolve=>server.close(resolve));}
@@ -163,7 +174,7 @@ test('展示界面可以先加工Logo再用于上样',async()=>{
     assert.equal(response.status,200);
     const payload=await response.json();
     assert.match(payload.dataUrl,/^data:image\/png;base64,/);
-    assert.deepEqual({width:payload.width,height:payload.height},{width:6,height:4});
+    assert.deepEqual({width:payload.width,height:payload.height},{width:12,height:10});
   }finally{await new Promise(resolve=>server.close(resolve));}
 });
 

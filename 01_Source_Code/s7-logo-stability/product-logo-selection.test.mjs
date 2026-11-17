@@ -4,20 +4,21 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {createSchemes,ensureCustomScheme} from './schemes.mjs';
 import {masterTargetsFromTemplate,rebindMasterZones} from './product-master.mjs';
+import {preparePlacementLogo} from './placement-logo.mjs';
 
 const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
-const red={id:'red',name:'红标',logoImage:'red-image'},blue={id:'blue',name:'蓝标',logoImage:'blue-image'};
+const red={id:'red',name:'红标',logoImage:'red-image',placementPrepared:'crop-only'},blue={id:'blue',name:'蓝标',logoImage:'blue-image',placementPrepared:'crop-only'};
 
 function workspace(ids=['a']){
  const responses=new Map(ids.map(id=>[id,Promise.withResolvers()])),requests=[],renders=[],statuses=[];
  const nodes={};
- const c=vm.createContext({restoreProductSelection(){},selectedGenerationVersions:()=>['ORIGINAL','BLACK'],structuredClone,createSchemes,ensureCustomScheme,masterTargetsFromTemplate,rebindMasterZones,
+ const c=vm.createContext({preparePlacementLogo,restoreProductSelection(){},selectedGenerationVersions:()=>['ORIGINAL','BLACK'],structuredClone,createSchemes,ensureCustomScheme,masterTargetsFromTemplate,rebindMasterZones,
   multiPackageProducts:ids.map(id=>({id,sku:id.toUpperCase()})),multiProductViews:new Map(),multiProductLoads:new Map(),multiProductResults:new Map(),multiProductJob:null,
   selectedMultiProductId:null,loadedMultiProductId:null,multiProductLoadRevision:0,multiPackageBusy:false,generationBusy:false,
   taskLogos:[],selectedTaskLogoId:null,loadedTaskLogoId:null,logoLoadRevision:0,logoSelectionBusy:false,logoDecoding:false,logoImportBusy:false,multiLogoViews:new Map(),multiLogoJob:null,multiLogoEnabled:true,currentTaskId:'task',s7User:{id:'user'},
   baseData:'',baseImage:null,logoData:'',logoSourceData:'',logoImage:null,
   schemeState:createSchemes([{id:'placeholder',x:.5,y:.5,widthRatio:.2}]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'placeholder',savedSignatures:{},schemePhases:{},lastResultPayload:null,
-  fetch:url=>{requests.push(url);const id=url.split('/').at(-1).split('?')[0];return url.includes('/template/')?Promise.resolve({ok:true,json:async()=>({template:{zones:[{id:'body-'+id,zoneType:'logo',x:id==='a'?.1:.6,y:.2,width:.2,height:.2}]}})}):responses.get(id).promise;},
+  fetch:(url,options)=>{requests.push(url);if(url==='/api/prepare-logo')return Promise.resolve(Response.json({dataUrl:'data:image/png;base64,'+JSON.parse(options.body).logoImage}));const id=url.split('/').at(-1).split('?')[0];return url.includes('/template/')?Promise.resolve({ok:true,json:async()=>({template:{zones:[{id:'body-'+id,zoneType:'logo',x:id==='a'?.1:.6,y:.2,width:.2,height:.2}]}})}):responses.get(id).promise;},
   fileData:async blob=>({data:'base-'+blob.id,dataUrl:'base:'+blob.id}),loadImage:async src=>({src,naturalWidth:100,naturalHeight:100}),
   collectTargets:()=>c.schemeState.schemes[0].targets,syncSchemeState(){},loadSchemeTargets:()=>renders.push({product:c.loadedMultiProductId,logo:c.loadedTaskLogoId}),
   setSelectedLogoPreview(){},renderMultiProductResults(){},renderProductLibrary(){},renderLogoLibrary(){},queueSchemeCards(){},updateGenerateButton(){},drawPreview(){},taskDraft:{schedule(){}},
@@ -86,7 +87,7 @@ for(const inputType of ['library','upload'])for(const decodeFails of [false,true
  const {c,complete}=workspace(),added=Promise.withResolvers(),finishSelection=Promise.withResolvers(),decoding=Promise.withResolvers(),finishDecode=Promise.withResolvers();
  const add=c.addTaskLogo,fetch=c.fetch,fileData=c.fileData;
  c.addTaskLogo=async logo=>{await add(logo);added.resolve();await finishSelection.promise;};
- c.fetch=url=>url.includes('/logo-library/')?Promise.resolve({ok:true,headers:new Headers({'X-S7-Task-Asset':'/api/my-space/tasks/task/assets/logo.png'}),blob:async()=>({logo:true})}):fetch(url);
+ c.fetch=(url,options)=>url.includes('/logo-library/')?Promise.resolve({ok:true,headers:new Headers({'X-S7-Task-Asset':'/api/my-space/tasks/task/assets/logo.png'}),blob:async()=>({logo:true})}):fetch(url,options);
  c.fileData=blob=>blob.id?fileData(blob):Promise.resolve({data:'red-image'});
  c.loadImage=async src=>{if(src.startsWith('base:'))return {src};decoding.resolve();return finishDecode.promise;};
  let select,libraryInput;

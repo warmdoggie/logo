@@ -1,0 +1,4 @@
+来源：C:\Users\Administrator\Documents\Codex\2026-09-12\https-chatgpt-com-share-6aa51bc0-eef4\work\prelaunch-project
+此目录为可迁移副本，未修改来源项目。
+已排除：node_modules、.git、规则管理账号.txt、ai-provider.local.json、SQLite WAL/SHM 侧车文件。
+assistant.sqlite 为一致性备份；已移除 RuleUser 与 RuleSession 凭据记录，首次启动会重新生成本机管理员资料。

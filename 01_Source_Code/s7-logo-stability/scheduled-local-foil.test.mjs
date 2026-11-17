@@ -19,7 +19,7 @@ for(const selectedVersions of [['ORIGINAL','BLACK','GOLD FOIL','SILVER FOIL'],['
  const store={
   async beginBatch(user,id,descriptor){batch={id,user_id:user,descriptor,created_at:new Date().toISOString(),status:'PREPARING',jobs:[]};},
   async batch(){return batch;},
-  async create(user,id,params){const job={id,params,status:'QUEUED'};plans.push(await readPlan(folder,params.planHash));batch.jobs.push(job);return job;},
+  async create(user,id,params,{prepare}){await prepare();const job={id,params,status:'QUEUED'};plans.push(await readPlan(folder,params.planHash));batch.jobs.push(job);return job;},
   async commitBatch(){batch.status='READY';return batch;},
   async abortBatch(){batch.status='ABORTED';return batch;}
  };

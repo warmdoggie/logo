@@ -1,3 +1,4 @@
+import {laserTexture,laserTextureWidth,laserTextureHeight} from './laser-foil-texture.mjs';
 export const foilVersions=['GOLD FOIL','SILVER FOIL','ROSE GOLD FOIL','LASER FOIL'];
 export const foilNames={'GOLD FOIL':'烫金','SILVER FOIL':'烫银','ROSE GOLD FOIL':'烫玫瑰金','LASER FOIL':'烫镭射'};
 export const foilFinishes={
@@ -9,12 +10,19 @@ export const foilFinishes={
 export const foilPalettes={
  gold:['#92703B','#E9D397','#C4A052','#92703B'],
  silver:['#767C84','#E7EBEF','#BFC3C9','#767C84'],
- rose:['#8E554E','#F1C7B7','#C58F86','#8E554E'],
- laser:['#8BACE0','#D1A5D9','#E3C98A','#92CDBF','#A9BCE0']
+ rose:['#8E554E','#F1C7B7','#C58F86','#8E554E']
 };
-export function laserFoilColor(position){
- const palette=foilPalettes.laser,scaled=Math.max(0,Math.min(1,position))*(palette.length-1),index=Math.min(palette.length-2,Math.floor(scaled)),mix=scaled-index;
- const rgb=hex=>[1,3,5].map(offset=>parseInt(hex.slice(offset,offset+2),16));
- const a=rgb(palette[index]),b=rgb(palette[index+1]);
- return {r:a[0]+(b[0]-a[0])*mix,g:a[1]+(b[1]-a[1])*mix,b:a[2]+(b[2]-a[2])*mix};
+export function foilBrightness(x,y,width,height,finish){
+ const u=(x+.5)/width,v=(y+.5)/height,diagonal=u*.76+v*.24;
+ const broad=Math.exp(-((diagonal-.53)**2)/.13);
+ const glint=Math.exp(-((diagonal-.39)**2)/.012);
+ return Math.min(1.24,Math.max(.72,.76+broad*.22+glint*.26))*(finish==='laser'?1.1:1);
+}
+export function laserFoilColor(u,v){
+ const x=Math.max(0,Math.min(laserTextureWidth-1,u*laserTextureWidth-.5)),y=Math.max(0,Math.min(laserTextureHeight-1,v*laserTextureHeight-.5));
+ const left=Math.floor(x),top=Math.floor(y),right=Math.min(laserTextureWidth-1,left+1),bottom=Math.min(laserTextureHeight-1,top+1),fx=x-left,fy=y-top;
+ const channel=c=>laserTexture[(top*laserTextureWidth+left)*3+c]*(1-fx)*(1-fy)+laserTexture[(top*laserTextureWidth+right)*3+c]*fx*(1-fy)+laserTexture[(bottom*laserTextureWidth+left)*3+c]*(1-fx)*fy+laserTexture[(bottom*laserTextureWidth+right)*3+c]*fx*fy;
+ // Silver foil carries a restrained rainbow reflection over its neutral metal base.
+ const silver=c=>176+(channel(c)-176)*.42;
+ return {r:silver(0),g:silver(1),b:silver(2)};
 }

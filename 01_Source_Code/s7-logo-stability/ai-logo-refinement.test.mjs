@@ -10,6 +10,7 @@ import {createAiLogoProcessor} from './ai-logo-provider.mjs';
 import {saveLogo,loadSavedLogo} from './saved-logo.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {logoLibrary} from '../logo-library.mjs';
+import {preparePlacementLogo} from './placement-logo.mjs';
 
 async function gradient(){
  const width=96,height=40,raw=Buffer.alloc(width*height*4);
@@ -57,7 +58,8 @@ test('fine-processing uses existing APIMart settings, original colors, transpare
   const output=await processor(png,{targetColor:'original',preserveDetails:true});
   assert.equal(submitted.model,'gpt-image-2.5-flare');assert.equal(submitted.background,'transparent');assert.equal(submitted.output_format,'png');
   assert.equal(submitted.resolution,'2k');assert.equal(submitted.size,'21:9');
-  assert.match(submitted.prompt,/metallic/i);assert.match(submitted.prompt,/specular highlights/i);assert.doesNotMatch(submitted.prompt,/solid pure black/i);
+  assert.match(submitted.prompt,/remove only the background/i);assert.match(submitted.prompt,/preserve the original visible logo colors/i);
+  assert.match(submitted.prompt,/do not add[^.]*gloss[^.]*highlights[^.]*bevel[^.]*3D/i);assert.doesNotMatch(submitted.prompt,/solid pure black/i);
   assert.deepEqual(output.bytes,png);
  }finally{await rm(dir,{recursive:true,force:true});}
 });
@@ -67,14 +69,15 @@ test('AI-processed Logos retain gradients during subsequent automatic generation
  await serverTest({mockupRenderer:async input=>{rendered=Buffer.from(input.logoImage.split(',')[1],'base64');return [{version:'ORIGINAL',bytes:baseImage}];}},async base=>{
   const response=await post(base,'/api/ai-render',{processLogo:true,preserveLogoDetails:true,baseImage:baseImage.toString('base64'),logoImage:png.toString('base64'),model:'test',selectedVersions:['ORIGINAL'],targets:[{id:'body',x:.5,y:.5,widthRatio:.4,rotation:0}]});
   assert.equal(response.status,200,await response.clone().text());
-  assert.ok((await sharp(rendered).raw().toBuffer()).equals(await sharp(png).raw().toBuffer()),'generation must retain AI pixel colors and alpha');
+  const expected=await sharp(png).extract({left:10,top:8,width:76,height:24}).raw().toBuffer();
+  assert.ok((await sharp(rendered).raw().toBuffer()).equals(expected),'generation must retain visible AI pixel colors and alpha after removing padding');
  });
 });
 
 const script=await readFile(new URL('./demo.js',import.meta.url),'utf8');
 function client(request){
  const logo={id:'one',name:'Gold.jpg',logoImage:'original',sourceData:'original',logoAssetUrl:'/snapshot/original'},button={},message={},download={hidden:true},calls=[],saved=[];
- const c=vm.createContext({taskLogos:[logo],loadedTaskLogoId:'one',selectedTaskLogoId:'one',logoData:'original',logoSourceData:'original',logoImage:{},logoSelectionBusy:false,logoDecoding:false,logoImportBusy:false,generationBusy:false,generationSubmitting:false,multiPackageBusy:false,copyingProductPreset:false,aiLogoBusy:false,
+ const c=vm.createContext({schemeState:null,preparePlacementLogo,taskLogos:[logo],loadedTaskLogoId:'one',selectedTaskLogoId:'one',logoData:'original',logoSourceData:'original',logoImage:{},logoSelectionBusy:false,logoDecoding:false,logoImportBusy:false,generationBusy:false,generationSubmitting:false,multiPackageBusy:false,copyingProductPreset:false,aiLogoBusy:false,
   aiRefineButton:button,aiRefineStatus:message,aiRefineDownload:download,logoStorage:{},saveLogo:(_storage,value)=>saved.push(value),
   fetch:async(path,options)=>{calls.push({path,input:options?.body&&JSON.parse(options.body)});return request(path,options);},loadImage:async src=>({src}),
   setSelectedLogoPreview(){logo.logoImage=c.logoData;logo.sourceData=c.logoSourceData;delete logo.logoAssetUrl;},drawPreview(){},queueSchemeCards(){},updateGenerateButton(){},renderLogoLibrary(){},renderProductLibrary(){},renderMultiProductResults(){},setStatus(){},taskDraft:{schedule(){},flush:async()=>{}},document:{querySelector:()=>({hidden:true,textContent:'Gold.jpg'})},useSavedLogoButton:{},clearSavedLogoButton:{},
@@ -104,7 +107,7 @@ test('fine-processing ignores repeat clicks and does not replace a newly selecte
  const running=c.refineSelectedLogo();await Promise.resolve();await c.refineSelectedLogo();
  c.loadedTaskLogoId='two';c.selectedTaskLogoId='two';c.logoData='other';
  release(Response.json({dataUrl:'data:image/png;base64,refined'}));await running;
- assert.equal(calls.filter(call=>call.input).length,1);assert.equal(c.logoData,'other');assert.equal(logo.logoImage,'original');assert.equal(c.logoSelectionBusy,false);
+ assert.equal(calls.filter(call=>call.path==='/api/ai-process-logo').length,1);assert.equal(c.logoData,'other');assert.equal(logo.logoImage,'original');assert.equal(c.logoSelectionBusy,false);
 });
 
 test('saved Logo metadata prevents a reused AI result from being locally flattened',()=>{
@@ -114,7 +117,7 @@ test('saved Logo metadata prevents a reused AI result from being locally flatten
 });
 
 test('restoring a cached AI Logo into an empty page retains its refinement metadata',async()=>{
- const c=vm.createContext({taskLogos:[],loadedTaskLogoId:null,selectedTaskLogoId:null,logoData:'',logoSourceData:'',logoImage:null,crypto:{randomUUID:()=> 'restored'},loadImage:async src=>({src}),useSavedLogoButton:{},clearSavedLogoButton:{},setSelectedLogoPreview(){},drawPreview(){},updateGenerateButton(){}});
+ const c=vm.createContext({schemeState:null,preparePlacementLogo,fetch:async()=>Response.json({dataUrl:'data:image/png;base64,refined'}),taskLogos:[],loadedTaskLogoId:null,selectedTaskLogoId:null,logoData:'',logoSourceData:'',logoImage:null,crypto:{randomUUID:()=> 'restored'},loadImage:async src=>({src}),useSavedLogoButton:{},clearSavedLogoButton:{},setSelectedLogoPreview(){},drawPreview(){},updateGenerateButton(){}});
  vm.runInContext(script.slice(script.indexOf('async function useSavedLogo('),script.indexOf('async function restoreSavedLogo(')),c);
  await c.useSavedLogo({data:'refined',sourceData:'source',name:'Metal.png',aiRefined:true});
  assert.equal(c.taskLogos.length,1);assert.equal(c.taskLogos[0].aiRefined,true);assert.equal(c.loadedTaskLogoId,c.taskLogos[0].id);assert.equal(c.selectedTaskLogoId,c.loadedTaskLogoId);

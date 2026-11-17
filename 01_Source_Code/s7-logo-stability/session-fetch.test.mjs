@@ -12,12 +12,19 @@ function client(nativeFetch,selection={}){
 }
 const responseFor=url=>new Response(url.endsWith('/api/foil-preflight')?JSON.stringify({blocked:[],warnings:[]}):'{}',{headers:{'X-Workspace-User':'alice'}});
 
-test('all ordinary generation buttons enable automatic local Logo processing',async()=>{
+test('ordinary generation buttons do not process the Logo again',async()=>{
  const requests=[],c=client(async(url,init)=>{requests.push({url,body:JSON.parse(init.body)});return responseFor(url);});
  for(const url of ['/api/ai-render','/api/ai-render-multi','/api/ai-render-logos','/api/render'])await c.request(url,{method:'POST',body:JSON.stringify({logoImage:'original'})});
  const generationRequests=requests.filter(request=>!request.url.endsWith('/api/foil-preflight'));
  assert.equal(generationRequests.length,4);
- for(const request of generationRequests)assert.equal(request.body.processLogo,true,request.url);
+ for(const request of generationRequests)assert.notEqual(request.body.processLogo,true,request.url);
+});
+
+for(const aiRefined of [false,true])test(`generation uses the current Logo (AI refined: ${aiRefined})`,async()=>{
+ const requests=[],c=client(async(url,init)=>{requests.push({url,body:JSON.parse(init.body)});return responseFor(url);},{loadedTaskLogoId:'one',taskLogos:[{id:'one',logoImage:'cropped-preview',sourceData:'original-upload',placementPrepared:true,aiRefined}]});
+ await c.request('/api/ai-render',{method:'POST',body:JSON.stringify({logoImage:'cropped-preview'})});
+ const request=requests.find(request=>request.url==='/s7/api/ai-render');
+ assert.equal(request.body.logoImage,'cropped-preview');
 });
 
 test('已携带账号标识的业务响应直接使用，不再串行查询登录状态',async()=>{

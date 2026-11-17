@@ -79,8 +79,9 @@ test('ordinary tasks generate multiple logos with independent layouts and preser
  const wait=async()=>{for(let i=0;i<200;i++){const job=await(await f.call(`/api/my-space/tasks/${task.id}/generation`)).json();if(job.status!=='running')return job;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail('任务未结束');};
  const before=await wait();assert.equal(before.outputs.length,8);
  const geometry=targets=>targets.map(({carrierType,printFinish,preserveOriginalColor,...target})=>target);
- assert.deepEqual(geometry(inputs[0].targets),targets);assert.deepEqual(inputs[0].schemes.map(scheme=>({...scheme,targets:geometry(scheme.targets)})),schemes.map(scheme=>({...scheme,targets:geometry(scheme.targets)})));
- assert.equal(inputs[0].targets[0].carrierType,'BODY');assert.equal(inputs[0].schemes.find(scheme=>scheme.version==='GOLD FOIL').targets[0].printFinish,'GOLD FOIL');
+ const edited=inputs.find(input=>input.targets[0].id==='body');assert.ok(edited);
+ assert.deepEqual(geometry(edited.targets),targets);assert.deepEqual(edited.schemes.map(scheme=>({...scheme,targets:geometry(scheme.targets)})),schemes.map(scheme=>({...scheme,targets:geometry(scheme.targets)})));
+ assert.equal(edited.targets[0].carrierType,'BODY');assert.equal(edited.schemes.find(scheme=>scheme.version==='GOLD FOIL').targets[0].printFinish,'GOLD FOIL');
  assert.equal(before.outputs.find(output=>output.logoId==='red'&&output.version==='ORIGINAL').schemeSignature,'red-original');
  assert.equal((await f.call('/api/ai-render-logos',{...input,onlyLogoId:'red',selectedVersions:['BLACK']})).status,202);
  const after=await wait();assert.equal(after.status,'complete');assert.equal(after.outputs.length,8);
@@ -95,6 +96,16 @@ test('ordinary tasks reject multi-product logo batches and mismatched layouts be
  assert.equal((await f.call('/api/ai-render-logos',{...f.input,taskId:task.id})).status,400);
  for(const logoLayouts of [[{logoId:'missing'}],[{logoId:'red'},{logoId:'red'}],[{logoId:'red',targets:[],schemes:[]}]])assert.equal((await f.call('/api/ai-render-logos',{...f.input,logoLayouts})).status,400);
  assert.equal(calls,0);
+});
+
+test('an unedited logo keeps the product master when only another logo has a custom non-foil layout',async t=>{
+ const inputs=[];
+ const f=await fixture(t,async input=>{inputs.push(input);return input.selectedVersions.map(version=>({version,bytes:f.base}));});
+ const targets=[{id:'edited',masterZoneId:'body',x:.6,y:.5,widthRatio:.25,rotation:15}];
+ const response=await f.call('/api/ai-render-logos',{...f.input,selectedVersions:['BLACK'],logoLayouts:[{logoId:'red',targets,schemes:createSchemes(targets).schemes}]});
+ assert.equal(response.status,202);assert.equal((await f.wait()).status,'complete');
+ const unedited=inputs.find(input=>input.targets[0].id==='master-body');assert.ok(unedited);
+ assert.deepEqual(unedited.targets.map(target=>target.x),[.4,.7]);
 });
 
 test('partial failure keeps other logo results and retries only missing versions without duplicating successes',async t=>{

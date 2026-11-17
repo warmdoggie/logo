@@ -1,11 +1,20 @@
 export async function runStage(stage,job,{store,provider,processImage,pollMs=5000,allowRemote=true}){
  if(stage==='submit'){
   if(!allowRemote&&!job.params?.local){await store.deferSubmit(job);return;}
+  let prepared;
+  if(!job.params?.local&&provider.prepare){
+   try{prepared=await provider.prepare(job.params);}
+   catch{await store.transition(job,'QUEUED',{error_code:'plan_storage_unavailable'},true,60000);return;}
+  }
   if(!await store.startSubmit(job))return;
   if(job.params?.local){await store.transition(job,'DOWNLOADED',{},true);return;}
   let submitted;
-  try{submitted=await provider.submit(job.params);}
-  catch(error){await store.transition(job,error.rejected?'FAILED':'SUBMISSION_UNKNOWN',{error_code:error.rejected?'provider_rejected':'submit_uncertain'},!!error.rejected);return;}
+  try{submitted=await provider.submit(job.params,prepared);}
+  catch(error){
+   if(error.planUnavailable)await store.transition(job,'QUEUED',{error_code:'plan_storage_unavailable'},true,60000);
+   else await store.transition(job,error.rejected?'FAILED':'SUBMISSION_UNKNOWN',{error_code:error.rejected?'provider_rejected':'submit_uncertain'},!!error.rejected);
+   return;
+  }
   // A database failure after a successful POST must be recovered as uncertain, never submitted again.
   if(submitted.url)await store.transition(job,'REMOTE_SUCCEEDED',{source_url:submitted.url},true);
   else await store.transition(job,'GENERATING',{provider_task_id:submitted.taskId},false,pollMs);
@@ -26,7 +35,8 @@ export async function runStage(stage,job,{store,provider,processImage,pollMs=500
  }else if(stage==='process'){
   let result;
   try{result=await processImage(job);}catch(error){
-   if(error.code==='STORAGE_PENDING')await store.retry(job,'DOWNLOADED','storage_pending',60000);
+   if(error.planUnavailable)await store.pausePlanRead(job);
+   else if(error.code==='STORAGE_PENDING')await store.retry(job,'DOWNLOADED','storage_pending',60000);
    else await store.retry(job,job.process_attempts>=3?'PROCESS_FAILED':'DOWNLOADED','image_processing_failed',5000);
    return;
   }

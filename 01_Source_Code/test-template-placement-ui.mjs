@@ -6,36 +6,90 @@ function editor(run,readonly=false,unclassified=false,configure=()=>{}){
  const previous=globalThis.document,listeners=new Map(),controls=new Map(),errors=[],elements=[];let dirtyCalls=0,zoneDeleted=false;
  const element=()=>{const e={append(){},replaceChildren(){},querySelector:selector=>({addEventListener:(type,fn)=>controls.set(selector+':'+type,fn)}),querySelectorAll(){return [];}};elements.push(e);return e;};
  globalThis.document={createElement:element,createElementNS:element};
- const zone={id:'zone',zoneType:'logo',x:.1,y:.1,width:.8,height:.8};
+ const zone={id:'zone',zoneType:'logo',x:.1,y:.1,width:.8,height:.8},zones=[zone];let selected=zone.id;
  const initial={version:1,carriers:[{id:'body',type:'BODY',name:'产品'}],areas:[{id:'area',zoneIndex:0,carrierId:'body',name:'区域',autoEligible:false,presets:[{id:'preset',name:'默认摆放',isDefault:true,orientation:'horizontal',box:{centerX:.5,centerY:.5,width:.4,height:.4,rotation:0}}]}],schemes:[]};
  if(unclassified){zone.name='彩盒正面';initial.carriers=[];initial.areas=[];zone.defaultAnchorX=.5;zone.defaultAnchorY=.5;}
- configure(initial,zone);
+ configure(initial,zone,zones);
  const canvas={classList:{toggle(){}},append(){},setAttribute(){},focus(){},setPointerCapture(){},getBoundingClientRect:()=>({left:0,top:0,width:1000,height:500}),addEventListener:(type,fn)=>listeners.set(type,fn)};
  try{
-  const ui=mountTemplateAutomation({main:{querySelector:element,addEventListener:(type,fn)=>listeners.set(type,fn)},canvas,readonly,zones:()=>zoneDeleted?[]:[zone],selected:()=>zoneDeleted?null:zone.id,image:()=>({width:1000,height:500}),selectMode(){},deleteZone(){ui.removeZone(zone.id);zoneDeleted=true;dirtyCalls++;ui.render();},refresh:()=>ui.render(),dirty(){dirtyCalls++;},reject:e=>errors.push(e)},initial);
+  const ui=mountTemplateAutomation({main:{querySelector:element,addEventListener:(type,fn)=>listeners.set(type,fn)},canvas,readonly,zones:()=>zoneDeleted?[]:zones,selected:()=>zoneDeleted?null:selected,image:()=>({width:1000,height:500}),selectMode(){},deleteZone(){ui.removeZone(zone.id);zoneDeleted=true;dirtyCalls++;ui.render();},refresh:()=>ui.render(),dirty(){dirtyCalls++;},reject:e=>errors.push(e)},initial);
   ui.render();
   const event=(x,y,placement,placementId)=>({clientX:x,clientY:y,button:0,pointerId:1,target:{dataset:{placement,placementId}},stopImmediatePropagation(){},preventDefault(){}});
-  run({ui,errors,html:()=>elements[0].innerHTML,dirtyCount:()=>dirtyCalls,key:(key,options={})=>listeners.get('keydown')({key,target:canvas,preventDefault(){},...options}),control:(selector,type,event)=>{const fn=controls.get(selector+':'+type);assert.equal(typeof fn,'function','missing control '+selector);fn(event);},escape:()=>listeners.get('keydown')({key:'Escape',preventDefault(){}}),send:(type,x,y,placement,altKey=false,placementId='preset',shiftKey=false)=>listeners.get(type)({...event(x,y,placement,placementId),type,altKey,shiftKey})});
+  run({ui,errors,selectZone(id){selected=id;ui.render();},html:()=>elements[0].innerHTML,frameHtml:()=>elements[2].innerHTML,dirtyCount:()=>dirtyCalls,key:(key,options={})=>listeners.get('keydown')({key,target:canvas,preventDefault(){},...options}),control:(selector,type,event)=>{const fn=controls.get(selector+':'+type);assert.equal(typeof fn,'function','missing control '+selector);fn(event);},escape:()=>listeners.get('keydown')({key:'Escape',preventDefault(){}}),send:(type,x,y,placement,altKey=false,placementId='preset',shiftKey=false)=>listeners.get(type)({...event(x,y,placement,placementId),type,altKey,shiftKey})});
  }finally{globalThis.document=previous;}
 }
 
-test('product region foil choices update only its permissions and mark the master dirty',()=>editor(({ui,control,dirtyCount,html})=>{
+test('one product foil checkbox enables all finishes and clears them together',()=>editor(({ui,control,dirtyCount,html})=>{
  const before=structuredClone(ui.serialize().areas[0]);
  assert.match(html(),/区域工艺/);
- assert.equal((html().match(/type="checkbox"/g)||[]).length,4);
- control('#area-foil-0','change',{target:{checked:true}});
- control('#area-foil-3','change',{target:{checked:true}});
- assert.deepEqual(ui.serialize().areas[0],{...before,foilProcesses:['GOLD FOIL','LASER FOIL']});
- control('#area-foil-0','change',{target:{checked:false}});
- assert.deepEqual(ui.serialize().areas[0].foilProcesses,['LASER FOIL']);
- assert.equal(dirtyCount(),3);
+ assert.equal((html().match(/type="checkbox"/g)||[]).length,1);
+ control('#area-foil','change',{target:{checked:true}});
+ assert.deepEqual(ui.serialize().areas[0],{...before,foilProcesses:['GOLD FOIL','SILVER FOIL','ROSE GOLD FOIL','LASER FOIL']});
+ control('#area-foil','change',{target:{checked:false}});
+ assert.deepEqual(ui.serialize().areas[0],{...before,foilProcesses:[]});
+ assert.equal(dirtyCount(),2);
 }));
 
+for(const count of [2,3])test('one foil checkbox updates all '+count+' product regions in the image',()=>editor(({ui,control,dirtyCount,selectZone,html})=>{
+ const before=structuredClone(ui.serialize());
+ control('#area-foil','change',{target:{checked:true}});
+ const enabled=ui.serialize();
+ for(const area of enabled.areas)assert.deepEqual(area.foilProcesses,['GOLD FOIL','SILVER FOIL','ROSE GOLD FOIL','LASER FOIL']);
+ assert.deepEqual({...enabled,areas:enabled.areas.map((a,i)=>({...a,foilProcesses:before.areas[i].foilProcesses}))},before);
+ assert.equal(dirtyCount(),1);
+ selectZone('zone-1');assert.match(html(),/id="area-foil"\s+checked/);
+ control('#area-foil','change',{target:{checked:false}});
+ for(const area of ui.serialize().areas)assert.deepEqual(area.foilProcesses,[]);
+ selectZone('zone');assert.doesNotMatch(html(),/id="area-foil"\s+checked/);
+ assert.equal(dirtyCount(),2);
+},false,false,(initial,zone,zones)=>{
+ for(let i=1;i<count;i++){
+  zones.push({...zone,id:'zone-'+i});
+  initial.carriers.push({id:'carrier-'+i,type:i===1?'CAP':'OTHER',name:'包材 '+i});
+  initial.areas.push({...structuredClone(initial.areas[0]),id:'area-'+i,zoneIndex:i,carrierId:'carrier-'+i});
+ }
+}));
+
+test('image foil toggle includes unclassified product regions and preserves carton and forbidden regions',()=>editor(({ui,control,errors})=>{
+ control('#area-foil','change',{target:{checked:true}});
+ const config=ui.serialize();
+ assert.deepEqual(errors,[]);
+ assert.deepEqual(config.areas.map(a=>a.zoneIndex).sort(),[0,1,2]);
+ for(const area of config.areas.filter(a=>a.zoneIndex!==1))assert.deepEqual(area.foilProcesses,['GOLD FOIL','SILVER FOIL','ROSE GOLD FOIL','LASER FOIL']);
+ assert.deepEqual(config.areas.find(a=>a.zoneIndex===1).foilProcesses,['SILVER FOIL']);
+ assert.equal(ui.carrierType('new-product'),'BODY');
+ control('#area-foil','change',{target:{checked:false}});
+ for(const area of ui.serialize().areas.filter(a=>a.zoneIndex!==1))assert.deepEqual(area.foilProcesses,[]);
+ assert.deepEqual(ui.serialize().areas.find(a=>a.zoneIndex===1).foilProcesses,['SILVER FOIL']);
+},false,false,(initial,zone,zones)=>{
+ initial.carriers.push({id:'carton',type:'CARTON',name:'彩盒'});
+ initial.areas.push({id:'carton-area',zoneIndex:1,carrierId:'carton',name:'彩盒',foilProcesses:['SILVER FOIL'],presets:[]});
+ zones.push({...zone,id:'carton'},{...zone,id:'new-product',name:'产品包材'},{...zone,id:'legacy-carton',name:'彩盒正面'},{id:'forbidden',zoneType:'no-logo',x:0,y:0,width:.01,height:.01});
+}));
+
+test('failed image foil setup leaves every region unchanged',()=>editor(({ui,control,errors,dirtyCount})=>{
+ const before=structuredClone(ui.serialize());
+ control('#area-foil','change',{target:{checked:true}});
+ assert.equal(errors.length,1);
+ assert.deepEqual(ui.serialize(),before);
+ assert.equal(dirtyCount(),0);
+},false,false,(_initial,zone,zones)=>{zones.push({...zone,id:'too-narrow',width:.0001});}));
+
+test('opening legacy partial foil permissions preserves them until the checkbox changes',()=>editor(({ui,control,dirtyCount,html})=>{
+ assert.match(html(),/id="area-foil"\s+checked/);
+ assert.deepEqual(ui.serialize().areas[0].foilProcesses,['ROSE GOLD FOIL']);
+ assert.equal(dirtyCount(),0);
+ control('#area-foil','change',{target:{checked:false}});
+ assert.deepEqual(ui.serialize().areas[0].foilProcesses,[]);
+ control('#area-foil','change',{target:{checked:true}});
+ assert.deepEqual(ui.serialize().areas[0].foilProcesses,['GOLD FOIL','SILVER FOIL','ROSE GOLD FOIL','LASER FOIL']);
+},false,false,initial=>{initial.areas[0].foilProcesses=['ROSE GOLD FOIL'];}));
+
 test('legacy product foil selection creates a product area with valid placement data',()=>editor(({ui,control,dirtyCount})=>{
- control('#area-foil-1','change',{target:{checked:true}});
+ control('#area-foil','change',{target:{checked:true}});
  const config=ui.serialize(),area=config.areas[0];
  assert.equal(config.carriers.find(c=>c.id===area.carrierId).type,'BODY');
- assert.deepEqual(area.foilProcesses,['SILVER FOIL']);
+ assert.deepEqual(area.foilProcesses,['GOLD FOIL','SILVER FOIL','ROSE GOLD FOIL','LASER FOIL']);
  assert.equal(area.presets.length,1);assert.equal(dirtyCount(),1);
 },false,true,(_initial,zone)=>{zone.name='产品正面';}));
 
@@ -60,24 +114,24 @@ test('legacy carton selection shows advice without permitting checkbox changes',
 
 test('read-only region controls cannot mutate permissions or classification',()=>editor(({ui,control,dirtyCount})=>{
  const before=structuredClone(ui.serialize());
- control('#area-foil-0','change',{target:{checked:true}});
+ control('#area-foil','change',{target:{checked:true}});
  control('#area-carrier-type','change',{target:{value:'CARTON'}});
  assert.deepEqual(ui.serialize(),before);assert.equal(dirtyCount(),0);
 },true));
 
 for(const type of ['CAP','OTHER'])test('displaying '+type+' permissions retains its existing carrier classification',()=>editor(({ui,control})=>{
  assert.equal(ui.carrierType('zone'),type);
- control('#area-foil-2','change',{target:{checked:true}});
+ control('#area-foil','change',{target:{checked:true}});
  assert.equal(ui.carrierType('zone'),type);
- assert.deepEqual(ui.serialize().areas[0].foilProcesses,['ROSE GOLD FOIL']);
+ assert.deepEqual(ui.serialize().areas[0].foilProcesses,['GOLD FOIL','SILVER FOIL','ROSE GOLD FOIL','LASER FOIL']);
 },false,false,initial=>{initial.carriers[0].type=type;}));
 
 for(const [corner,start,end,want] of [
- ['0',[300,150],[200,100],{centerX:.45,centerY:.45,width:.5,height:.5,rotation:0}],
- ['1',[700,150],[800,100],{centerX:.55,centerY:.45,width:.5,height:.5,rotation:0}],
- ['2',[700,350],[800,400],{centerX:.55,centerY:.55,width:.5,height:.5,rotation:0}],
- ['3',[300,350],[200,400],{centerX:.45,centerY:.55,width:.5,height:.5,rotation:0}]
-])test('placement corner '+corner+' resizes directly without a separate editing switch',()=>editor(({ui,send})=>{
+ ['0',[300,150],[200,100],{centerX:.5,centerY:.5,width:.6,height:.6,rotation:0}],
+ ['1',[700,150],[800,100],{centerX:.5,centerY:.5,width:.6,height:.6,rotation:0}],
+ ['2',[700,350],[800,400],{centerX:.5,centerY:.5,width:.6,height:.6,rotation:0}],
+ ['3',[300,350],[200,400],{centerX:.5,centerY:.5,width:.6,height:.6,rotation:0}]
+])test('placement corner '+corner+' resizes symmetrically around the region center',()=>editor(({ui,send})=>{
  send('pointerdown',...start,corner);send('pointermove',...end,corner);send('pointerup',...end,corner);
  const actual=ui.serialize().areas[0].presets[0].box;
  for(const key of Object.keys(want))assert.ok(Math.abs(actual[key]-want[key])<1e-10,key);
@@ -102,7 +156,7 @@ test('each new position is retained, and direction changes only affect the selec
  assert.equal(area.presets.length,2);assert.equal(area.presets[0].id,'preset');
  assert.deepEqual(area.presets[0].box,original.box);
  assert.notEqual(preset.id,'preset');assert.equal(preset.isDefault,true);assert.equal(area.presets[0].isDefault,false);
- for(const [key,value]of Object.entries({centerX:.4,centerY:.45,width:.4,height:.5,rotation:0}))assert.ok(Math.abs(preset.box[key]-value)<1e-10,key);
+ for(const [key,value]of Object.entries({centerX:.5,centerY:.5,width:.4,height:.5,rotation:0}))assert.ok(Math.abs(preset.box[key]-value)<1e-10,key);
  const box=structuredClone(preset.box);
  control('#auto-orientation','change',{target:{value:'vertical'}});
  assert.equal(ui.serialize().areas[0].presets[1].orientation,'vertical');
@@ -133,7 +187,7 @@ test('resizing an inactive frame does not change any other saved position',()=>e
  const second=structuredClone(ui.serialize().areas[0].presets[1]);
  send('pointerdown',300,150,'0');send('pointermove',200,100,'0');send('pointerup',200,100,'0');
  const [first,other]=ui.serialize().areas[0].presets;
- assert.equal(first.box.width,.5);assert.equal(first.box.height,.5);
+ assert.equal(first.box.width,.6);assert.equal(first.box.height,.6);
  assert.deepEqual(other.box,second.box);assert.equal(other.orientation,second.orientation);
 }));
 
@@ -156,7 +210,7 @@ test('position count respects the existing ten-position limit',()=>editor(({ui,s
 test('invalid new positions and cancelled drawing preserve the previous position',()=>editor(({ui,send,control,escape,errors})=>{
  const original=structuredClone(ui.serialize());
  control('#add-placement','click');
- send('pointerdown',20,10);send('pointermove',600,350);send('pointerup',600,350);
+ send('pointerdown',20,10);send('pointermove',980,490);send('pointerup',980,490);
  assert.equal(errors.length,1);assert.deepEqual(ui.serialize(),original);
  send('pointerdown',200,100);send('pointermove',600,350);escape();
  send('pointerup',600,350);
@@ -232,3 +286,38 @@ test('Backspace in controls, read-only mode or an unfinished draw does not delet
   assert.deepEqual(ui.serialize(),original);assert.equal(dirtyCount(),dirty);
  },readonly);
 });
+
+for(const type of ['BODY','CARTON'])test(type+' placement uses the geometric region center rather than a legacy anchor',()=>editor(({ui,frameHtml,dirtyCount})=>{
+ const box=ui.serialize().areas[0].presets[0].box;
+ assert.equal(box.centerX,.5);assert.equal(box.centerY,.5);
+ assert.match(frameHtml(),/<circle[^>]*data-placement-center[^>]*cx="500"[^>]*cy="250"/);
+ assert.equal(dirtyCount(),1);
+},false,false,(initial,zone)=>{
+ initial.carriers[0].type=type;zone.defaultAnchorX=.3;zone.defaultAnchorY=.4;
+ initial.areas[0].presets[0].box.centerX=.4;initial.areas[0].presets[0].box.centerY=.45;
+}));
+
+test('dragging the placement body selects it without separating the shared centers',()=>editor(({ui,send,dirtyCount})=>{
+ const before=structuredClone(ui.serialize());
+ send('pointerdown',500,250,'move');send('pointermove',550,275,'move');send('pointerup',550,275,'move');
+ assert.deepEqual(ui.serialize(),before);assert.equal(dirtyCount(),0);
+}));
+
+test('a rotated placement resizes about its center in non-square image coordinates',()=>editor(({ui,send})=>{
+ send('pointerdown',400,350,'2');send('pointermove',350,400,'2');send('pointerup',350,400,'2');
+ const box=ui.serialize().areas[0].presets[0].box;
+ assert.equal(box.centerX,.5);assert.equal(box.centerY,.5);
+ assert.ok(Math.abs(box.width-.3)<1e-10);assert.ok(Math.abs(box.height-.6)<1e-10);
+ assert.equal(box.rotation,90);
+},false,false,initial=>{initial.areas[0].presets[0].box={centerX:.5,centerY:.5,width:.2,height:.4,rotation:90};}));
+
+test('moving, scaling and rotating a region keeps placement centers shared',()=>editor(({ui})=>{
+ assert.equal(ui.transformed('zone',{x:.1,y:.1,width:.8,height:.8,rotation:0},{x:.35,y:.3,width:.4,height:.6,rotation:30}),true);
+ const box=ui.serialize().areas[0].presets[0].box;
+ assert.equal(box.centerX,.55);assert.equal(box.centerY,.6);
+ assert.equal(box.rotation,30);
+}));
+
+test('historical read-only placements retain their saved centers',()=>editor(({ui,dirtyCount})=>{
+ assert.equal(ui.serialize().areas[0].presets[0].box.centerX,.4);assert.equal(dirtyCount(),0);
+},true,false,initial=>{initial.areas[0].presets[0].box.centerX=.4;}));

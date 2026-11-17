@@ -40,7 +40,8 @@ atomic(Path('/etc/s7-logo/scheduler.json'), json.dumps({'url': 'http://127.0.0.1
        0o640, grp.getgrnam('s7-logo').gr_gid)
 units = {
     's7-workspace': '[Service]\nEnvironment=S7_SCHEDULER_CONFIG=/etc/s7-logo/scheduler.json\nMemoryMax=2G\nCPUQuota=150%\n',
-    'logo-scheduler-api': '[Service]\nMemoryMax=512M\n',
+    'logo-scheduler-api': '[Service]\nMemoryMax=1536M\nEnvironment=NODE_OPTIONS=--max-old-space-size=768\n',
+    'logo-scheduler-images': '[Service]\nMemoryMax=2G\nEnvironment=NODE_OPTIONS=--max-old-space-size=768\n',
     'logo-scheduler-network': '[Service]\nLoadCredential=provider.json:/etc/logo-scheduler/provider.json\nEnvironment=PROVIDER_CONFIG=%d/provider.json\n',
 }
 for name, content in units.items():

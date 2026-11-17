@@ -1,7 +1,8 @@
-import {createHash,randomUUID} from 'node:crypto';
-import {mkdir,open,rename,rm,readFile} from 'node:fs/promises';
+import {readFile,readdir,rm} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
 import {join} from 'node:path';
 import {hasDiskSpace} from './capacity.mjs';
+import {writePlan,removePlan,appModule} from './plans.mjs';
 
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail=(status,message)=>{throw Object.assign(Error(message),{status});};
@@ -10,8 +11,27 @@ async function body(req,limit){
  for await(const chunk of req){size+=chunk.length;if(size>limit)fail(413,'payload_too_large');chunks.push(chunk);}
  try{return JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{fail(400,'invalid_json');}
 }
-export async function businessApi(req,res,{store,user,directory,enabled,send}){
+export async function businessApi(req,res,{store,user,directory,enabled,send,planStorage,generationStorage}){
  const url=new URL(req.url,'http://127.0.0.1');
+ if(url.pathname==='/v1/tasks'&&req.method==='DELETE'){
+  const {taskIds,allTasks}=await body(req,1024*1024);
+  if(allTasks!==true&&(!Array.isArray(taskIds)||taskIds.some(id=>typeof id!=='string'||!/^[-a-zA-Z0-9_]{1,80}$/.test(id))))fail(400,'invalid_task_ids');
+  const result=await store.purgeTasks(user,allTasks===true?null:taskIds,async({jobs,planHashes})=>{
+   const files=await readdir(directory);
+   for(const job of jobs){
+    if(!uuid.test(job.id))fail(400,'invalid_job_id');
+    let descriptor;try{descriptor=JSON.parse(await readFile(join(directory,job.id+'.storage.json'),'utf8'));}catch(error){if(error.code!=='ENOENT')throw error;}
+    if(descriptor){generationStorage??=(await import(appModule('logo-generation-storage.mjs'))).createGenerationStorage();await generationStorage.remove(descriptor);}
+   }
+   for(const hash of planHashes)await removePlan(directory,hash,{storage:planStorage});
+   for(const job of jobs)for(const file of files){
+    if(!file.startsWith(job.id+'.'))continue;
+    if(!/^(png|webp|original|storage\.json|[0-9a-f-]{36}\.(png|webp)|original\.[0-9a-f-]{36}\.tmp|storage\.json\.[0-9a-f-]{36})$/.test(file.slice(job.id.length+1)))continue;
+    await rm(join(directory,file),{force:true});
+   }
+  });
+  send(res,200,result);return true;
+ }
  if(url.pathname==='/v1/active-batches'&&req.method==='GET'){
   const after=url.searchParams.get('after');if(after&&!uuid.test(after))fail(400,'invalid_cursor');
   send(res,200,{batches:await store.activeBatches(after)});return true;
@@ -35,14 +55,7 @@ export async function businessApi(req,res,{store,user,directory,enabled,send}){
     if(!['baseImage','placementGuide','maskImage','foilMaskImage','goldMaskImage','roseMaskImage','laserMaskImage'].includes(field)||plan[field]!==null||!Number.isInteger(index)||index<0||typeof plan.request.image_urls?.[index]!=='string')fail(400,'invalid_image_reference');
     plan[field]=plan.request.image_urls[index];
    }
-   const serialized=JSON.stringify(plan),hash=createHash('sha256').update(serialized).digest('hex');
-   const folder=join(directory,'plans');await mkdir(folder,{recursive:true,mode:0o700});
-   const path=join(folder,hash+'.json'),temporary=path+'.'+randomUUID();
-   try{
-    const file=await open(temporary,'wx',0o600);try{await file.writeFile(serialized);await file.sync();}finally{await file.close();}
-    await rename(temporary,path);
-    if(process.platform!=='win32'){const parent=await open(folder,'r');try{await parent.sync();}finally{await parent.close();}}
-   }finally{await rm(temporary,{force:true});}
+   const bytes=Buffer.from(JSON.stringify(plan)),hash=createHash('sha256').update(bytes).digest('hex');
    const previous=uuid.test(resumeJobId||'')?await store.get(user,resumeJobId):null;
    const resume=previous&&previous.params.planHash===hash&&['DOWNLOAD_FAILED','PROCESS_FAILED'].includes(previous.status)?{resumeJobId}:{};
    if(resumeTask){
@@ -50,7 +63,7 @@ export async function businessApi(req,res,{store,user,directory,enabled,send}){
     if(!resumeTask.imageUrl&&(typeof resumeTask.taskId!=='string'||!resumeTask.taskId||resumeTask.taskId.length>200))fail(400,'invalid_provider_task');
     resume.resumeTask=resumeTask;
    }
-   const job=await store.create(user,requestId,{batchId:id,key,planHash:hash,...(plan.local?{local:true}:{}),...resume});send(res,202,{id:job.id,status:job.status});return true;
+   const job=await store.create(user,requestId,{batchId:id,key,planHash:hash,...(plan.local?{local:true}:{}),...resume},{prepare:()=>writePlan(directory,bytes,{storage:planStorage})});send(res,202,{id:job.id,status:job.status});return true;
   }
   if(action==='commit'&&req.method==='POST'){send(res,200,await store.commitBatch(user,id));return true;}
   if(action==='ack'&&req.method==='POST'){await store.acknowledgeBatch(user,id);send(res,200,{ok:true});return true;}

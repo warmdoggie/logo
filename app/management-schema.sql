@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS ProductManagement (
+ productId TEXT PRIMARY KEY REFERENCES Product(id),status TEXT NOT NULL DEFAULT 'ACTIVE',note TEXT NOT NULL DEFAULT '',revision INTEGER NOT NULL DEFAULT 0,metadataVersion INTEGER NOT NULL DEFAULT 0,currentImageVersionId TEXT REFERENCES ProductImageVersion(id));
+CREATE TABLE IF NOT EXISTS ProductSkuHistory (id TEXT PRIMARY KEY,productId TEXT NOT NULL REFERENCES Product(id),oldSku TEXT NOT NULL,newSku TEXT NOT NULL,reason TEXT NOT NULL,changedBy TEXT NOT NULL,changedAt TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ProductImageRevision (productId TEXT NOT NULL REFERENCES Product(id),version INTEGER NOT NULL,productImageVersionId TEXT NOT NULL REFERENCES ProductImageVersion(id),createdBy TEXT NOT NULL,createdAt TEXT NOT NULL,PRIMARY KEY(productId,version),UNIQUE(productId,productImageVersionId));
+CREATE TABLE IF NOT EXISTS TaskProductSnapshot (taskProductId TEXT PRIMARY KEY REFERENCES TaskProduct(id),productImageVersionId TEXT NOT NULL REFERENCES ProductImageVersion(id),sku TEXT NOT NULL,name TEXT NOT NULL,category TEXT NOT NULL,material TEXT,surfaceFinish TEXT,profileVersion INTEGER NOT NULL,createdAt TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS TaskManagement (taskId TEXT PRIMARY KEY REFERENCES Task(id),lifecycle TEXT NOT NULL DEFAULT 'ACTIVE',isTest INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,updatedAt TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS ManagementAudit (id TEXT PRIMARY KEY,action TEXT NOT NULL,entityId TEXT NOT NULL,detail TEXT NOT NULL,actor TEXT NOT NULL,createdAt TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS FileCleanupOperation (id TEXT PRIMARY KEY,status TEXT NOT NULL,manifest TEXT NOT NULL,createdAt TEXT NOT NULL);

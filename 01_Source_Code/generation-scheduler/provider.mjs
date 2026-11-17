@@ -18,9 +18,11 @@ export function createProvider({directory,configPath=process.env.PROVIDER_CONFIG
   if(!response.ok)throw Object.assign(Error('provider_http_'+response.status),{rejected:[400,401,403,422,429].includes(response.status)});
   return response.json();
  }
+ const prepare=async params=>params.batchId?(await readPlan(directory,params.planHash)).request:params;
  return {
-  async submit(params){
-   const input=params.batchId?(await readPlan(directory,params.planHash)).request:params;
+  prepare,
+  async submit(params,prepared){
+   const input=prepared??await prepare(params);
    const payload=await request('/images/generations',input),first=payload.data?.[0]||payload.data;
    if(typeof first?.url==='string')return {url:first.url};
    const taskId=first?.task_id||first?.id;if(typeof taskId!=='string'||!taskId)throw Error('missing_task_id');return {taskId};

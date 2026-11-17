@@ -1,10 +1,10 @@
 import {foilVersions,foilNames} from './foil-finishes.mjs';
 import {applyFoilSelection,visibleSchemeVersions,allowedFoilVersions,canSelectMixedVersion} from './foil-selection.mjs';
-import {mountFoilConfirmation,mountPrintCombinationDialog} from './foil-confirmation.mjs';
+import {mountFoilConfirmation,mountPrintCombinationDialog,createPrintDropdown,closePrintMenus} from './foil-confirmation.mjs';
 import {mixedVersion,isMixedVersion,mixedVersionName,mixedVersionFinishes} from './generation-versions.mjs';
 import {createSchemes,editScheme,restoreSharedGeometry,schemeSignature,ensureCustomScheme as ensureLegacyCustomScheme,ensureFoilSchemes,ensureMixedSchemes,setCustomColors,editSelectedLogos} from './schemes.mjs';
-import {clampTargetCenter,pointerToNormalized,rotationFromPointer,widthRatioFromScalePointer} from './demo-geometry.mjs';
-import {canMoveTarget,rotateTargetInPlace,setTargetMoveEnabled} from './target-state.mjs';
+import {pointerToNormalized,rotationFromPointer,widthRatioFromScalePointer} from './demo-geometry.mjs';
+import {canMoveTarget,rotateTargetInPlace,setTargetMoveEnabled,createPlacementHistory} from './target-state.mjs';
 import {renderTintedLogoLayer} from './preview-logo-layer.mjs';
 import {isCarton,resolveTargetPrint} from './target-print.mjs';
 import {chooseContrastColor} from './contrast-color.mjs';
@@ -20,7 +20,9 @@ import {saveDownloadFolder} from './download-folder.mjs';
 import {createPreviewImages,previewImageUrl} from './preview-images.mjs';
 import {createImagePreview} from './image-preview.mjs';
 import {copyScopedPreset,presetGroups,presetParameters} from './product-preset.mjs';
-import {bindLogoImageTransfer} from './logo-image-transfer.mjs';
+import {bindLogoImageTransfer,visibleLogoBounds} from './logo-image-transfer.mjs';
+import {preparePlacementLogo} from './placement-logo.mjs';
+import {fitDefaultPlacements,constrainLogoPlacement} from './s7-placement.js';
 
 const targets=document.querySelector('#targets');
 const status=document.querySelector('#status');
@@ -52,6 +54,11 @@ const clearSavedLogoButton=document.querySelector('#clear-saved-logo');
 const selectedLogoPreview=document.querySelector('#selected-logo-preview');
 const selectedLogoThumbnail=document.querySelector('#selected-logo-thumbnail');
 const aiRefineButton=document.querySelector('#ai-refine-logo');
+const processButton=document.querySelector('#process-logo');
+const undoPlacementButton=document.querySelector('#undo-placement');
+const placementHistory=createPlacementHistory();
+let placementGestureStart=null;
+let localLogoBusy=false;
 const aiRefineStatus=document.querySelector('#ai-refine-status');
 const aiRefineDownload=document.querySelector('#ai-refine-download');
 let aiLogoBusy=false;
@@ -72,7 +79,12 @@ let thumbnailImages=[],thumbnailImageRevision=0;
 const schemeThumbnails=new Map();
 const ensureCustomScheme=state=>ensureFoilSchemes(ensureLegacyCustomScheme(state));
 const confirmFoilReport=mountFoilConfirmation(document.querySelector('#foil-confirmation'));
-const choosePrintCombination=mountPrintCombinationDialog(document.querySelector('#print-combination-dialog'));
+const combinationDialog=document.querySelector('#print-combination-dialog');
+const openPrintCombination=mountPrintCombinationDialog(combinationDialog);
+const combinationDropdowns=[...combinationDialog.querySelectorAll('select')].map(select=>createPrintDropdown(select,()=>{}));
+const choosePrintCombination=templates=>{const pending=openPrintCombination(templates);combinationDropdowns.forEach(refresh=>refresh());return pending;};
+combinationDialog.addEventListener('close',closePrintMenus);
+combinationDialog.addEventListener('scroll',closePrintMenus,{passive:true});
 const readFoilRegions=()=>[...document.querySelectorAll('[data-foil-region]:checked')].map(input=>input.dataset.foilRegion);
 function scopedFoilState(state){return {...state,...applyFoilSelection(state.sharedTargets,state.schemes,readFoilRegions()),sharedTargets:state.sharedTargets};}
 const schemeNames={ORIGINAL:'原色方案',BLACK:'黑白方案',CUSTOM:'自定义配色',...foilNames,'GOLD FOIL':'烫金搭配','SILVER FOIL':'烫银搭配'};
@@ -86,6 +98,7 @@ let dragTarget=null;
 let dragMode=null;
 let dragBatchGroup=null;
 let rotateTimer=null;
+let rotationGesture=null;
 let rotateStartedAt=0;
 let rotatePointerId=null;
 const ROTATE_LONG_PRESS_MS=350;
@@ -118,9 +131,6 @@ let s7User=null;
 let logoStorage=localStorage;
 function requireLogin(){fullImagePreview.close();previewImages.clear();document.body.replaceChildren();const link=document.createElement('a');link.textContent='登录已失效，请返回主工作空间登录';link.href=S7_BASE?'/':`http://${location.hostname}:3210/`;link.target='_top';document.body.append(link);}
 const fetch=async(input,init)=>{
- if(init?.method==='POST'&&['/api/ai-render','/api/ai-render-multi','/api/ai-render-logos','/api/render'].includes(input)){
-  init={...init,body:JSON.stringify({...JSON.parse(init.body),processLogo:true,preserveLogoDetails:taskLogos.find(logo=>logo.id===loadedTaskLogoId)?.aiRefined===true})};
- }
  if(currentTaskId&&s7User&&init?.method==='POST'&&['/api/ai-render','/api/ai-render-multi','/api/ai-process-logo','/api/process-logo','/api/render'].includes(input)){
   const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);
   init={...init,body:JSON.stringify({...JSON.parse(init.body),taskId:currentTaskId,...(logo?.logoAssetUrl?{logoAssetUrl:logo.logoAssetUrl,logoImage:undefined}:{})})};
@@ -146,7 +156,6 @@ const fetch=async(input,init)=>{
    if(session.status===401||(session.ok&&value?.user?.id!==s7User.id)){requireLogin();throw Error('登录已变更，请重新进入个人空间');}
    if(!session.ok)throw Error('认证服务暂时无法读取，请稍后重试');
   }
-  if(init?.method==='POST'&&response.ok)refreshHistory().catch(()=>{});
  }
  return response;
 };
@@ -158,16 +167,19 @@ const fetch=async(input,init)=>{
   setInterval(async()=>{if(!taskActive)return;try{const r=await nativeFetch(s7Path('/api/session'));const v=r.ok?await r.json():null;if(r.status===401||(r.ok&&v?.user?.id!==s7User.id))requireLogin();}catch{}},10000);
  }
 }
-async function refreshHistory(){
- if(!s7User)return;
- let section=document.querySelector('#personal-history');if(!section){section=document.createElement('section');section.id='personal-history';section.className='panel';document.querySelector('main').append(section);}
- const response=await fetch('/api/my-space/history'+(currentTaskId?'?taskId='+encodeURIComponent(currentTaskId):''));if(!response.ok){section.textContent='个人生成历史暂时无法读取';return;}
- const history=(await response.json()).filter(record=>!['AI上样','多包材印刷效果','多 Logo 印刷效果'].includes(record.kind));section.hidden=!history.length;section.innerHTML=`<h2>我的 Logo 素材</h2>${history.map(record=>`<details><summary>${esc(new Date(record.createdAt).toLocaleString())} · ${esc(record.kind)} · ${esc(record.model||'')}</summary><div class="result-grid">${record.images.map(image=>`<article><p>${esc(image.label)}</p><a href="${esc(s7Path(image.url))}" download><img src="${esc(s7Path(image.url))}" alt="${esc(image.label)}" loading="lazy" width="180"><p>下载图片</p></a>${image.label==='透明Logo'?`<button class="button secondary" data-restore-logo="${esc(image.url)}">使用此 Logo</button>`:''}</article>`).join('')}</div></details>`).join('')}`;
- for(const button of section.querySelectorAll('[data-restore-logo]'))button.onclick=async()=>{try{const r=await fetch(button.dataset.restoreLogo);if(!r.ok)throw Error('Logo读取失败');const loaded=await fileData(await r.blob());const saved={data:loaded.data,name:'个人空间透明Logo.png'};saveLogo(logoStorage,saved);await useSavedLogo(saved);setStatus('已从个人空间恢复透明Logo','success');}catch(error){setStatus(error.message,'error');}};
-}
 function setStatus(message,type=''){status.textContent=message;status.className=`status ${type}`;taskDraft?.schedule();notifyTask(type==='busy'?'生成中…':type==='error'?'操作失败':type==='success'?'已完成':'编辑中',type==='busy');}
 function fileData(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve({dataUrl:String(reader.result),data:String(reader.result).split(',')[1]});reader.onerror=reject;reader.readAsDataURL(file);});}
-function loadImage(dataUrl){return new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(Error('图片无法读取'));image.src=dataUrl;});}
+async function loadImage(dataUrl,trimTransparent=false){
+  const image=await new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(Error('图片无法读取'));image.src=dataUrl;});
+  if(!trimTransparent)return image;
+  const canvas=document.createElement('canvas');canvas.width=image.naturalWidth;canvas.height=image.naturalHeight;
+  const context=canvas.getContext('2d');context.drawImage(image,0,0);
+  const bounds=visibleLogoBounds(context.getImageData(0,0,canvas.width,canvas.height).data,canvas.width,canvas.height);
+  if(!bounds||bounds.width===canvas.width&&bounds.height===canvas.height)return image;
+  const pixels=context.getImageData(bounds.left,bounds.top,bounds.width,bounds.height);
+  canvas.width=bounds.width;canvas.height=bounds.height;context.putImageData(pixels,0,0);
+  return loadImage(canvas.toDataURL('image/png'));
+}
 function setSelectedLogoPreview(dataUrl,name){if(!dataUrl){selectedLogoPreview.hidden=true;return;}const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);if(logo){if(logo.logoImage!==logoData)delete logo.logoAssetUrl;logo.logoImage=logoData;logo.sourceData=logoSourceData;}multiProductResults=new Map();selectedLogoThumbnail.src=dataUrl;selectedLogoThumbnail.alt=`${name||'已选 Logo'}预览`;document.querySelector('#logo-name').textContent=name||'已选择 Logo';selectedLogoPreview.hidden=false;renderMultiProductResults();}
 function renderProductLibrary(){
   const query=productLibrarySearch.value.trim().toUpperCase();
@@ -217,6 +229,10 @@ function captureMultiProductLayouts(){
   saveMultiProductView();
   return multiPackageProducts.flatMap(product=>{
     const view=multiProductViews.get(product.id);if(!view?.schemeState)return [];
+    if(logoImage&&view.baseImage){
+      view.schemeState=fitDefaultPlacements(view.schemeState,view.foilTemplate,{width:view.baseImage.naturalWidth,height:view.baseImage.naturalHeight},{width:logoImage.naturalWidth,height:logoImage.naturalHeight});
+      view.targets=view.schemeState.schemes.find(scheme=>scheme.version===view.activeScheme)?.targets||view.schemeState.sharedTargets;
+    }
     return [{productId:product.id,selectedVersions:view.selectedVersions||['ORIGINAL','BLACK'],baseAssetUrl:view.baseAssetUrl||'',masterTargets:structuredClone(view.masterTargets),targets:view.targets,schemeState:structuredClone(view.schemeState),activeScheme:view.activeScheme,placementScope:view.placementScope,selectedTargetId:view.selectedTargetId,savedSignatures:{...view.savedSignatures}}];
   });
 }
@@ -286,7 +302,8 @@ async function applyPresetToOtherProducts(selection,referenceTargetId){
       if(!multiPackageProducts.some(item=>item.id===product.id))continue;
       const view=multiProductViews.get(product.id),dimensions=logoAspect?{width:view.baseImage.naturalWidth,height:view.baseImage.naturalHeight,logoAspect}:undefined;
       const scope=product.id===sourceId?selection.filter(key=>key.startsWith('product/')):selection;
-      const copied=copyScopedPreset(preset,view.schemeState,scope,dimensions,referenceTargetId);
+      const edited=copyScopedPreset(preset,view.schemeState,scope,dimensions,referenceTargetId);
+      const copied=dimensions?fitDefaultPlacements(edited,view.foilTemplate,{width:dimensions.width,height:dimensions.height},{width:logoImage.naturalWidth,height:logoImage.naturalHeight},view.schemeState):edited;
       if(JSON.stringify(copied)===JSON.stringify(view.schemeState))continue;
       const current=copied.schemes.find(scheme=>scheme.version===view.activeScheme);
       updates.push([product.id,{...view,schemeState:copied,targets:structuredClone(current.targets),placementScope:current.independentGeometry?'current':view.placementScope}]);
@@ -377,7 +394,7 @@ function openPresetScope({source,products,targets,version,carrier,referenceTarge
 function saveMultiLogoView(){
   if(!loadedTaskLogoId)return;
   const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);
-  if(logo){logo.logoImage=logoData;logo.sourceData=logoSourceData;}
+  if(logo){logo.logoImage=logoData;logo.sourceData=logoSourceData;if(logoImage){logo.placementWidth=logoImage.naturalWidth;logo.placementHeight=logoImage.naturalHeight;}}
   syncSchemeState();
   multiLogoViews.set(loadedTaskLogoId,{targets:structuredClone(collectTargets()),schemeState:structuredClone(schemeState),activeScheme,placementScope,selectedTargetId,lastResultPayload,savedSignatures:{...savedSignatures},schemePhases:structuredClone(schemePhases)});
 }
@@ -386,7 +403,10 @@ function captureMultiLogoLayouts(){
   const template=multiProductViews.get(loadedMultiProductId)?.foilTemplate;
   return taskLogos.flatMap(logo=>{
     const view=multiLogoViews.get(logo.id);if(!view?.schemeState)return [];
-    const state=rebindMasterZones(view.schemeState,template),targets=state.schemes.find(scheme=>scheme.version===view.activeScheme)?.targets||state.sharedTargets;
+    const rebound=rebindMasterZones(view.schemeState,template);
+    const state=baseImage&&logo.placementWidth&&logo.placementHeight?fitDefaultPlacements(rebound,template,{width:baseImage.naturalWidth,height:baseImage.naturalHeight},{width:logo.placementWidth,height:logo.placementHeight}):rebound;
+    const targets=state.schemes.find(scheme=>scheme.version===view.activeScheme)?.targets||state.sharedTargets;
+    view.schemeState=state;view.targets=targets;
     return [{logoId:logo.id,targets:structuredClone(targets),schemeState:structuredClone(state),activeScheme:view.activeScheme,placementScope:view.placementScope,selectedTargetId:view.selectedTargetId,savedSignatures:{...view.savedSignatures}}];
   });
 }
@@ -401,9 +421,15 @@ async function showTaskLogo(id){
   saveMultiLogoView();selectedTaskLogoId=id;
   const revision=++logoLoadRevision;logoDecoding=true;logoSelectionBusy=true;updateGenerateButton();renderMultiProductResults();queueSchemeCards();
   try{
-    const image=await loadImage('data:image/png;base64,'+logo.logoImage);
+    await preparePlacementLogo(logo,fetch,currentTaskId);
+    const image=await loadImage('data:image/png;base64,'+logo.logoImage,true);
     if(revision!==logoLoadRevision)return;
     const view={schemeState:structuredClone(schemeState),activeScheme,placementScope,selectedTargetId,lastResultPayload:null,savedSignatures:{},schemePhases:{},...multiLogoViews.get(id)};
+    if(!multiLogoViews.has(id)&&view.schemeState){
+      const masters=masterTargetsFromTemplate(multiProductViews.get(loadedMultiProductId)?.foilTemplate);
+      const reset=target=>{const master=masters.find(master=>master.masterZoneId===target.masterZoneId);if(!master)return target;const {x,y,widthRatio,rotation,quad}=master;return {...target,x,y,widthRatio,rotation,quad};};
+      view.schemeState={...view.schemeState,placementLogoAspect:undefined,sharedTargets:view.schemeState.sharedTargets?.map(reset),schemes:view.schemeState.schemes.map(scheme=>({...scheme,targets:scheme.targets.map(reset)}))};
+    }
     logoData=logo.logoImage;logoSourceData=logo.sourceData||'';logoImage=image;loadedTaskLogoId=id;
     schemeState=structuredClone(view.schemeState);activeScheme=view.activeScheme;placementScope=view.placementScope;selectedTargetId=view.selectedTargetId;
     lastResultPayload=view.lastResultPayload||null;savedSignatures={...view.savedSignatures};schemePhases=structuredClone(view.schemePhases||{});submittedSignatures={};showModifiedPreview=new Set();
@@ -478,6 +504,12 @@ async function runMultiLogoGeneration(options={}){
   multiPackageBusy=true;
   try{
     await showGenerationSubmission(options.selectedVersions);
+    for(const logo of taskLogos){
+      await preparePlacementLogo(logo,fetch,currentTaskId);
+      const image=await loadImage('data:image/png;base64,'+logo.logoImage,true);
+      logo.placementWidth=image.naturalWidth;logo.placementHeight=image.naturalHeight;
+      if(!multiLogoViews.has(logo.id))multiLogoViews.set(logo.id,{schemeState:structuredClone(schemeState),activeScheme,placementScope,selectedTargetId});
+    }
     const layouts=captureMultiLogoLayouts();
     const logoLayouts=taskLogos.map(logo=>{
       const view=layouts.find(view=>view.logoId===logo.id)||{targets:collectTargets(),schemeState:structuredClone(schemeState)};
@@ -578,8 +610,10 @@ function setRowQuad(row,quad){row.dataset.quad=JSON.stringify(quad);}
 
 async function useSavedLogo(saved=loadSavedLogo(logoStorage)){
   if(!saved)throw Error('没有可使用的已保存 Logo');
+  const prepared=await preparePlacementLogo({logoImage:saved.data,sourceData:saved.sourceData,aiRefined:saved.aiRefined,localProcessed:saved.localProcessed},fetch);
+  saved={...saved,data:prepared.logoImage,sourceData:prepared.sourceData};
   if(!taskLogos.some(logo=>logo.id===loadedTaskLogoId)){const id=crypto.randomUUID();taskLogos.push({id,name:saved.name,logoImage:saved.data,sourceData:saved.sourceData||'',aiRefined:saved.aiRefined===true});loadedTaskLogoId=id;selectedTaskLogoId=id;}
-  logoData=saved.data;logoSourceData=saved.sourceData||'';const dataUrl=`data:image/png;base64,${saved.data}`;logoImage=await loadImage(dataUrl);const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);if(logo)logo.aiRefined=saved.aiRefined===true;useSavedLogoButton.hidden=false;clearSavedLogoButton.hidden=false;setSelectedLogoPreview(dataUrl,`已使用：${saved.name}`);drawPreview();updateGenerateButton();
+  logoData=saved.data;logoSourceData=saved.sourceData||'';const dataUrl=`data:image/png;base64,${saved.data}`;logoImage=await loadImage(dataUrl,true);const logo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);if(logo){logo.aiRefined=saved.aiRefined===true;logo.localProcessed=saved.localProcessed===true;logo.placementPrepared='crop-only';}useSavedLogoButton.hidden=false;clearSavedLogoButton.hidden=false;setSelectedLogoPreview(dataUrl,`已使用：${saved.name}`);if(schemeState)loadSchemeTargets();drawPreview();updateGenerateButton();
 }
 
 async function restoreSavedLogo(){
@@ -604,6 +638,7 @@ function updateSchemeHeading(){
 }
 function loadSchemeTargets(){
   schemeState=scopedFoilState(rebindMasterZones(ensureCustomScheme(schemeState),multiProductViews.get(loadedMultiProductId)?.foilTemplate));
+  if(baseImage&&logoImage)schemeState=fitDefaultPlacements(schemeState,multiProductViews.get(loadedMultiProductId)?.foilTemplate,{width:baseImage.naturalWidth,height:baseImage.naturalHeight},{width:logoImage.naturalWidth,height:logoImage.naturalHeight});
   const context=[loadedMultiProductId,loadedTaskLogoId,activeScheme].join('/');
   if(context!==targetSelectionContext){selectedTargetIds.clear();targetSelectionContext=context;}
   rebuildingTargets=true;targets.replaceChildren();targetNumber=0;
@@ -861,46 +896,17 @@ function createSchemeCards(){
 for(const button of document.querySelectorAll('[data-scope]'))button.onclick=()=>{syncSchemeState();placementScope=button.dataset.scope;updateSchemeHeading();taskDraft?.schedule();};
 document.querySelector('#restore-shared').onclick=()=>{schemeState=restoreSharedGeometry(schemeState,activeScheme);placementScope='shared';loadSchemeTargets();};
 
-function closePrintMenus(){
-  for(const menu of document.querySelectorAll('.print-select-menu:not([hidden])')){
-    menu.hidden=true;menu.parentElement.querySelector('.print-select-trigger').setAttribute('aria-expanded','false');
-  }
-}
 document.addEventListener('pointerdown',event=>{if(!event.target.closest('.print-select'))closePrintMenus();});
 window.addEventListener('blur',closePrintMenus);
 
-function createPrintDropdown(select,onOpen){
-  const wrapper=select.parentElement;wrapper.classList.add('print-select');
-  const label=wrapper.firstChild.textContent.trim();select.hidden=true;
-  const trigger=document.createElement('button');trigger.type='button';trigger.className='print-select-trigger';
-  trigger.setAttribute('aria-haspopup','listbox');trigger.setAttribute('aria-expanded','false');
-  const menu=document.createElement('div');menu.className='print-select-menu';menu.hidden=true;
-  menu.id=`print-options-${select.closest('.target-row').dataset.targetId}-${select.dataset.key}`;
-  menu.setAttribute('role','listbox');menu.setAttribute('aria-label',label);trigger.setAttribute('aria-controls',menu.id);
-  const options=[...select.options].map(option=>{
-    const button=document.createElement('button');button.type='button';button.className='print-select-option';
-    button.textContent=option.textContent;button.setAttribute('role','option');
-    button.onclick=event=>{event.stopPropagation();if(option.disabled)return;select.value=option.value;refresh();closePrintMenus();select.dispatchEvent(new Event('input',{bubbles:true}));select.dispatchEvent(new Event('change',{bubbles:true}));trigger.focus();};
-    menu.append(button);return {option,button};
-  });
-  function refresh(){
-    trigger.textContent=select.selectedOptions[0]?.textContent||'';trigger.setAttribute('aria-label',`${label}：${trigger.textContent}`);
-    for(const {option,button} of options){button.disabled=option.disabled;button.setAttribute('aria-selected',String(option.selected));}
-  }
-  function open(){closePrintMenus();onOpen();refresh();menu.hidden=false;trigger.setAttribute('aria-expanded','true');}
-  trigger.onclick=event=>{event.stopPropagation();if(menu.hidden)open();else closePrintMenus();};
-  trigger.onkeydown=event=>{if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();open();(options.find(({option})=>option.selected&&!option.disabled)||options.find(({option})=>!option.disabled))?.button.focus();}};
-  wrapper.addEventListener('keydown',event=>{
-    if(event.key==='Escape'){event.preventDefault();closePrintMenus();trigger.focus();}
-    if(event.target===trigger)return;
-    const enabled=options.filter(({button})=>!button.disabled).map(({button})=>button),index=enabled.indexOf(document.activeElement);
-    if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?enabled.length-1:(index+(event.key==='ArrowDown'?1:-1)+enabled.length)%enabled.length;enabled[next]?.focus();}
-  });
-  wrapper.addEventListener('focusout',event=>{if(!wrapper.contains(event.relatedTarget))closePrintMenus();});
-  select.addEventListener('input',refresh);wrapper.append(trigger,menu);refresh();return refresh;
-}
-
 function addTarget(value={}){
+  if(!rebuildingTargets&&!value.masterZoneId){
+    const template=multiProductViews.get(loadedMultiProductId)?.foilTemplate;
+    const selected=collectTargets().find(target=>target.id===selectedTargetId);
+    const master=masterTargetsFromTemplate(template).find(target=>target.masterZoneId===selected?.masterZoneId)||masterTargetsFromTemplate(template)[0];
+    if(master)value={...master,...value,id:value.id,masterLocked:false,moveEnabled:true};
+  }
+  if(!rebuildingTargets&&baseImage&&logoImage)keepTargetInsideCanvas(value);
   targetNumber++;
   const existingIds=new Set([...targets.children].map(row=>row.dataset.targetId));
   while(!value.id&&existingIds.has(`target-${targetNumber}`))targetNumber++;
@@ -911,6 +917,7 @@ function addTarget(value={}){
   row.dataset.masterLocked=String(value.masterLocked===true);
   row.dataset.masterZoneId=String(value.masterZoneId||'');
   row.dataset.moveEnabled=String(value.moveEnabled===true||value.masterLocked!==true);
+  row.dataset.regionUnlocked=String(value.regionUnlocked===true);
   row.dataset.logoColor=value.color||'#000000';
   row.dataset.keepOriginal=String(value.preserveOriginalColor??!value.color);
   row.dataset.autoContrast=String(value.autoContrast!==false);
@@ -938,8 +945,8 @@ function addTarget(value={}){
   selection.addEventListener('change',()=>{setTargetSelection(row.dataset.targetId,true);refreshTargetSelection();drawPreview();});
   row.querySelector('.target-head').prepend(selection);
   row.addEventListener('click',event=>{if(event.target.closest('button,input,select,label'))return;setTargetSelection(row.dataset.targetId,event.ctrlKey||event.metaKey);refreshTargetSelection();drawPreview();});
-  row.querySelector('.rotate-target').onclick=event=>{event.stopPropagation();const target=collectTargets().find(item=>item.id===row.dataset.targetId);if(!target)return;rotateTargetInPlace(target,-90);updateInputs(target);updateQuad(target);selectedTargetId=target.id;refreshTargetSelection();drawPreview();setStatus('已将 Logo 原地逆时针旋转 90°，中心位置和大小保持不变。','success');};
-  row.querySelector('.remove-target').onclick=event=>{event.stopPropagation();if(targets.children.length===1){setStatus('至少保留一个上样目标','error');return;}const wasSelected=row.dataset.targetId===selectedTargetId;row.remove();if(wasSelected)selectedTargetId=targets.firstElementChild.dataset.targetId;refreshTargetSelection();drawPreview();};
+  row.querySelector('.rotate-target').onclick=event=>{event.stopPropagation();const target=collectTargets().find(item=>item.id===row.dataset.targetId);if(!target)return;syncSchemeState();const before=structuredClone(schemeState),previous=structuredClone(target);rotateTargetInPlace(target,-90,canvas.width/canvas.height);keepTargetInsideCanvas(target,previous);updateInputs(target);updateQuad(target);selectedTargetId=target.id;refreshTargetSelection();drawPreview();placementHistory.record(placementHistoryContext(),before,schemeState);updatePlacementUndo();setStatus('已将 Logo 逆时针旋转 90°，并限制在对应区域内。','success');};
+  row.querySelector('.remove-target').onclick=event=>{event.stopPropagation();if(targets.children.length===1){setStatus('至少保留一个上样目标','error');return;}const wasSelected=row.dataset.targetId===selectedTargetId;row.remove();if(schemeState)schemeState.sharedTargets=schemeState.sharedTargets.filter(target=>target.id!==row.dataset.targetId);if(wasSelected)selectedTargetId=targets.firstElementChild.dataset.targetId;refreshTargetSelection();drawPreview();};
   row.querySelectorAll('[data-key]').forEach(input=>input.addEventListener('input',()=>{
     selectedTargetId=row.dataset.targetId;
     if(input.dataset.key==='id'){if(row.dataset.targetId===selectedTargetId)selectedTargetId=input.value.trim();row.dataset.targetId=input.value.trim();}
@@ -949,13 +956,15 @@ function addTarget(value={}){
   targets.append(row);refreshTargetSelection();drawPreview();
 }
 
-function collectTargets(){return [...targets.children].map(row=>({...Object.fromEntries([...row.querySelectorAll('[data-key]')].map(input=>[input.dataset.key,['id','surface','carrierType','printFinish'].includes(input.dataset.key)?input.value.trim():Number(input.value)])),quad:rowQuad(row)||undefined,color:row.dataset.logoColor||'#000000',autoContrast:row.dataset.autoContrast==='true',preserveOriginalColor:row.dataset.keepOriginal==='true',masterZoneId:row.dataset.masterZoneId||undefined,masterLocked:row.dataset.masterLocked==='true',moveEnabled:row.dataset.moveEnabled==='true'}));}
-function applySelectedLogoPatch(group,patch){
+function collectTargets(){return [...targets.children].map(row=>({...Object.fromEntries([...row.querySelectorAll('[data-key]')].map(input=>[input.dataset.key,['id','surface','carrierType','printFinish'].includes(input.dataset.key)?input.value.trim():Number(input.value)])),quad:rowQuad(row)||undefined,color:row.dataset.logoColor||'#000000',autoContrast:row.dataset.autoContrast==='true',preserveOriginalColor:row.dataset.keepOriginal==='true',masterZoneId:row.dataset.masterZoneId||undefined,masterLocked:row.dataset.masterLocked==='true',moveEnabled:row.dataset.moveEnabled==='true',regionUnlocked:row.dataset.regionUnlocked==='true'}));}
+function applySelectedLogoPatch(group,patch,sourceState){
   if(copyingProductPreset||generationSubmitting||generationBusy||multiPackageBusy||logoSelectionBusy||selectedMultiProductId!==loadedMultiProductId)return;
   try{
     syncSchemeState();
-    const dimensions=baseImage&&logoImage?{width:baseImage.naturalWidth,height:baseImage.naturalHeight,logoAspect:logoImage.naturalHeight/logoImage.naturalWidth}:undefined;
-    schemeState=editSelectedLogos(schemeState,activeScheme,[...selectedTargetIds],group,patch,dimensions);
+    const template=multiProductViews.get(loadedMultiProductId)?.foilTemplate,previous=sourceState||schemeState;
+    const dimensions=baseImage&&logoImage?{width:baseImage.naturalWidth,height:baseImage.naturalHeight,logoAspect:logoImage.naturalHeight/logoImage.naturalWidth,fitRotation:patch.rotation!==undefined&&!!template?.zones?.length}:undefined;
+    const edited=editSelectedLogos(previous,activeScheme,[...selectedTargetIds],group,patch,dimensions);
+    schemeState=dimensions?fitDefaultPlacements(edited,template,{width:dimensions.width,height:dimensions.height},{width:logoImage.naturalWidth,height:logoImage.naturalHeight},previous):edited;
     loadSchemeTargets();taskDraft?.schedule();
     setStatus('已修改选中同类 Logo，并将大小、角度同步到本 SKU 的所有版本。已有成图需重新生成。','success');
   }catch(error){setStatus(error.message,'error');}
@@ -973,11 +982,22 @@ function refreshTargetSelection(){
   originalColorInput.value=color.toUpperCase();originalColorInput.setAttribute('aria-invalid','false');
   const keepOriginal=selectedRow?.dataset.keepOriginal==='true';
   const selected=collectTargets().find(target=>target.id===selectedTargetId);
+  const moveButton=document.querySelector('#toggle-target-move');
+  moveButton.disabled=!selected;
+  moveButton.textContent=selected&&canMoveTarget(selected)?'锁定位置':'移动位置';
+  moveButton.setAttribute('aria-pressed',String(!!selected&&canMoveTarget(selected)));
+  const regionButton=document.querySelector('#toggle-target-region');
+  const regionUnlocked=selected?.regionUnlocked===true;
+  regionButton.disabled=!selected;
+  regionButton.setAttribute('aria-pressed',String(regionUnlocked));
+  regionButton.setAttribute('aria-label',regionUnlocked?'锁定产品框范围':'解锁产品框范围');
+  regionButton.title=regionUnlocked?'已解锁：可移出产品框，点击恢复范围限制':'限制在产品框内，点击解锁后可自由移动';
   const print=selected?resolveTargetPrint(selected,activeScheme):null;
   document.querySelector('#custom-colors').hidden=activeScheme!=='CUSTOM';
   for(const group of ['product','carton']){
     const target=collectTargets().find(target=>isCarton(target)===(group==='carton')),input=document.querySelector(`#custom-${group}-color`);
     input.value=(target?.color||'#000000').toUpperCase();input.setAttribute('aria-invalid','false');input.disabled=!target||copyingProductPreset||generationBusy||multiPackageBusy||logoSelectionBusy;
+    const picker=document.querySelector(`#custom-${group}-color-picker`);picker.value=input.value;picker.disabled=input.disabled;
     document.querySelector(`#custom-${group}-color-value`).textContent=target?'':'无对应区域';
   }
   document.querySelector('#original-colors-field').hidden=activeScheme==='CUSTOM'||print?.version!=='ORIGINAL';
@@ -989,7 +1009,8 @@ function refreshTargetSelection(){
   autoContrastInput.checked=autoContrast;
   autoContrastInput.disabled=isMixedVersion(activeScheme)||!selectedRow||isCarton({carrierType:selectedRow.querySelector('[data-key="carrierType"]').value})||selectedRow.querySelector('[data-key="printFinish"]').value==='INK';
   originalColorValue.textContent=print?.version==='ORIGINAL'&&keepOriginal?'Logo 原色':'';
-  document.querySelector('#selected-target').textContent=selectedTargetIds.size>1?`已选择 ${selectedTargetIds.size} 个 Logo`:selectedTargetId?`当前：${selectedTargetId}`:'未选择目标';
+  document.querySelector('#selected-target').textContent=selectedTargetIds.size>1?`已选择 ${selectedTargetIds.size} 个 Logo`:selectedTargetId?`当前：${carrierNames[selected?.carrierType]||'Logo'}`:'未选择目标';
+  updatePlacementUndo();
 }
 function targetRect(target){
   const width=target.widthRatio*canvas.width;
@@ -1024,15 +1045,21 @@ function handlePoints(target){
   const center={x:target.x*canvas.width,y:target.y*canvas.height};
   const width=target.widthRatio*canvas.width,height=logoImage?width*logoImage.naturalHeight/logoImage.naturalWidth:width;
   const rotationLocal=rotationHandleLocalPosition(width,height,Math.max(24,canvas.width/120));
-  return {center,scale:rotateLocal(center,width/2,height/2,target.rotation),rotation:rotateLocal(center,rotationLocal.x,rotationLocal.y,target.rotation),rotationReferenceAngle:Math.atan2(rotationLocal.y,rotationLocal.x)*180/Math.PI};
+  const rotation=rotateLocal(center,rotationLocal.x,rotationLocal.y,target.rotation),inset=Math.max(18,canvas.width/35);
+  rotation.x=Math.max(inset,Math.min(canvas.width-inset,rotation.x));rotation.y=Math.max(inset,Math.min(canvas.height-inset,rotation.y));
+  return {center,scale:rotateLocal(center,width/2,height/2,target.rotation),rotation};
 }
 function distance(a,b){return Math.hypot(a.x-b.x,a.y-b.y);}
 function updateInputs(target){
   const row=[...targets.children].find(item=>item.dataset.targetId===target.id);if(!row)return;
-  for(const key of ['x','y','widthRatio','rotation']){const input=row.querySelector(`[data-key="${key}"]`);if(input)input.value=Number(target[key].toFixed(4));}
+  for(const key of ['x','y','widthRatio','rotation']){const input=row.querySelector(`[data-key="${key}"]`);if(input)input.value=target[key];}
 }
-function updateQuad(target){const row=[...targets.children].find(item=>item.dataset.targetId===target.id);if(row&&target.quad)setRowQuad(row,target.quad);}
-function keepTargetInsideCanvas(target){if(!logoImage||target.quad)return target;Object.assign(target,clampTargetCenter(target,logoImage.naturalHeight/logoImage.naturalWidth));return target;}
+function updateQuad(target){const row=[...targets.children].find(item=>item.dataset.targetId===target.id);if(row){if(target.quad)setRowQuad(row,target.quad);else delete row.dataset.quad;}}
+function keepTargetInsideCanvas(target,previous){
+  if(!logoImage||!baseImage)return target;
+  Object.assign(target,constrainLogoPlacement(target,previous,multiProductViews.get(loadedMultiProductId)?.foilTemplate,{width:baseImage.naturalWidth,height:baseImage.naturalHeight},{width:logoImage.naturalWidth,height:logoImage.naturalHeight}));
+  return target;
+}
 function curvePreviewLogo(layer,curve){
   if(!curve)return layer;
   const source=layer.getContext('2d').getImageData(0,0,layer.width,layer.height),output=document.createElement('canvas');
@@ -1085,6 +1112,17 @@ function drawRotationArrow(context,point,size,rotation){
   context.restore();
 }
 function isTargetSelected(id){return selectedTargetId!==null&&(id===selectedTargetId||selectedTargetIds.has(id));}
+function placementHistoryContext(){return JSON.stringify([loadedMultiProductId,loadedTaskLogoId]);}
+function updatePlacementUndo(){
+ const available=placementHistory.canUndo(placementHistoryContext());
+ undoPlacementButton.disabled=!available||!!dragTarget||copyingProductPreset||generationSubmitting||generationBusy||multiPackageBusy||logoSelectionBusy||selectedMultiProductId!==loadedMultiProductId;
+}
+function undoPlacement(){
+ updatePlacementUndo();if(undoPlacementButton.disabled)return;
+ syncSchemeState();const restored=placementHistory.undo(placementHistoryContext(),schemeState);if(!restored)return;
+ schemeState=restored;loadSchemeTargets();taskDraft?.schedule();updatePlacementUndo();
+ setStatus('已撤回上一步 Logo 位置、大小和角度调整。最多可撤回三步。','success');
+}
 function setTargetSelection(id,additive=false){
   if(!additive)selectedTargetIds.clear();
   if(id){
@@ -1135,37 +1173,44 @@ canvas.addEventListener('pointerdown',event=>{
   if(!baseImage||!logoImage)return;
   const normalized=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect()),point={x:normalized.x*canvas.width,y:normalized.y*canvas.height};
   if(event.ctrlKey||event.metaKey){event.preventDefault();setTargetSelection(targetAt(normalized)?.id||null,true);refreshTargetSelection();drawPreview();return;}
-  dragBatchGroup=null;
-  const multiple=selectedTargetIds.size>1,hitRadius=Math.max(18,canvas.width/35),hit=multiple?selectedHandleAt(point,hitRadius):null;
+  dragBatchGroup=null;rotationGesture=null;
+  const multiple=selectedTargetIds.size>1,hitRadius=Math.max(18,canvas.width/35),hit=selectedHandleAt(point,hitRadius);
   const selected=hit?.target||(!multiple?collectTargets().find(target=>target.id===selectedTargetId):null),handles=selected?handlePoints(selected):null;
   const quadDistances=(!multiple?selected?.quad:null)?.map(corner=>distance(point,{x:corner.x*canvas.width,y:corner.y*canvas.height}))||[];
   const quadIndex=quadDistances.findIndex(distanceToCorner=>distanceToCorner<=hitRadius);
-  if(quadIndex>=0){dragTarget=selected;dragMode=`quad-${quadIndex}`;}
-  else if(hit?.mode==='scale'||(!multiple&&handles&&distance(point,handles.scale)<=hitRadius)){dragTarget=selected;dragMode='scale';}
-  else if(hit?.mode==='rotate-pending'||(!multiple&&handles&&distance(point,handles.rotation)<=hitRadius)){
+  if(quadIndex>=0&&hit?.mode!=='rotate-pending'){dragTarget=selected;dragMode=`quad-${quadIndex}`;}
+  else if(hit?.mode==='scale'||(!hit&&!multiple&&handles&&distance(point,handles.scale)<=hitRadius)){dragTarget=selected;dragMode='scale';}
+  else if(hit?.mode==='rotate-pending'||(!hit&&!multiple&&handles&&distance(point,handles.rotation)<=hitRadius)){
     dragTarget=selected;dragMode='rotate-pending';rotatePointerId=event.pointerId;rotateStartedAt=Date.now();
+    syncSchemeState();
+    rotationGesture={target:structuredClone(selected),state:structuredClone(schemeState),center:{x:selected.x*canvas.width,y:selected.y*canvas.height},referenceAngle:Math.atan2(point.y-selected.y*canvas.height,point.x-selected.x*canvas.width)*180/Math.PI-selected.rotation};
     if(rotateTimer!==null)clearTimeout(rotateTimer);
     rotateTimer=setTimeout(()=>{if(dragTarget===selected&&dragMode==='rotate-pending'&&rotatePointerId===event.pointerId)dragMode='rotate';},ROTATE_LONG_PRESS_MS);
   }
-  else{dragTarget=targetAt(normalized);if(dragTarget&&!canMoveTarget(dragTarget)){setTargetSelection(dragTarget.id);refreshTargetSelection();drawPreview();setStatus('该 Logo 的母版位置已锁定，请先点击目标卡片中的“移动位置”。','success');dragTarget=null;return;}dragMode=dragTarget?'move':null;}
+  else{dragTarget=targetAt(normalized);if(dragTarget&&!canMoveTarget(dragTarget)){setTargetSelection(dragTarget.id);refreshTargetSelection();drawPreview();setStatus('该 Logo 的母版位置已锁定，请先点击画布上方的“移动位置”。','success');dragTarget=null;return;}dragMode=dragTarget?'move':null;}
   if(!dragTarget){setTargetSelection(null);refreshTargetSelection();drawPreview();return;}
+  syncSchemeState();placementGestureStart={context:placementHistoryContext(),state:structuredClone(schemeState)};
   if(multiple&&['scale','rotate-pending'].includes(dragMode)){dragBatchGroup=isCarton(dragTarget)?'carton':'product';selectedTargetId=dragTarget.id;}else setTargetSelection(dragTarget.id);
   canvas.setPointerCapture(event.pointerId);canvas.classList.add('dragging');refreshTargetSelection();drawPreview();
 });
 canvas.addEventListener('pointermove',event=>{
   if(!dragTarget)return;
   if(dragMode==='rotate-pending')return;
-  const normalized=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect()),point={x:normalized.x*canvas.width,y:normalized.y*canvas.height};
+  const rect=canvas.getBoundingClientRect(),normalized=pointerToNormalized(event.clientX,event.clientY,rect),point=dragMode==='rotate'?{x:(event.clientX-rect.left)/rect.width*canvas.width,y:(event.clientY-rect.top)/rect.height*canvas.height}:{x:normalized.x*canvas.width,y:normalized.y*canvas.height};
   if(dragBatchGroup){
     if(dragMode==='scale')applySelectedLogoPatch(dragBatchGroup,{widthRatio:widthRatioFromScalePointer(dragTarget,point,canvas.width,canvas.height)});
-    if(dragMode==='rotate')applySelectedLogoPatch(dragBatchGroup,{rotation:rotationFromPointer({x:dragTarget.x*canvas.width,y:dragTarget.y*canvas.height},point,handlePoints(dragTarget).rotationReferenceAngle)});
+    if(dragMode==='rotate')applySelectedLogoPatch(dragBatchGroup,{rotation:rotationFromPointer(rotationGesture.center,point,rotationGesture.referenceAngle)},rotationGesture.state);
     return;
   }
+  const previous=structuredClone(dragTarget);
   if(dragMode==='move'){const offsetX=normalized.x-dragTarget.x,offsetY=normalized.y-dragTarget.y;dragTarget.x=normalized.x;dragTarget.y=normalized.y;if(dragTarget.quad){dragTarget.quad=dragTarget.quad.map(corner=>({x:Math.min(1,Math.max(0,corner.x+offsetX)),y:Math.min(1,Math.max(0,corner.y+offsetY))}));updateQuad(dragTarget);}}
   if(dragMode==='scale')dragTarget.widthRatio=widthRatioFromScalePointer(dragTarget,point,canvas.width,canvas.height);
-  if(dragMode==='rotate')dragTarget.rotation=rotationFromPointer({x:dragTarget.x*canvas.width,y:dragTarget.y*canvas.height},point,handlePoints(dragTarget).rotationReferenceAngle);
-  if(!dragTarget.quad)keepTargetInsideCanvas(dragTarget);
+  if(dragMode==='rotate'){
+    const rotation=rotationFromPointer(rotationGesture.center,point,rotationGesture.referenceAngle);
+    Object.assign(dragTarget,rotateTargetInPlace(structuredClone(rotationGesture.target),rotation-rotationGesture.target.rotation,canvas.width/canvas.height));
+  }
   if(dragMode?.startsWith('quad-')){const index=Number(dragMode.slice(5));dragTarget.quad[index]={x:normalized.x,y:normalized.y};updateQuad(dragTarget);}
+  keepTargetInsideCanvas(dragTarget,dragMode==='rotate'?rotationGesture.target:previous);updateQuad(dragTarget);
   updateInputs(dragTarget);drawPreview();
 });
 function endDrag(event){
@@ -1173,10 +1218,15 @@ function endDrag(event){
   const target=dragTarget,step=dragMode==='rotate-pending'&&event.type!=='pointercancel'&&rotationGestureMode(Date.now()-rotateStartedAt)==='step';
   if(rotateTimer!==null){clearTimeout(rotateTimer);rotateTimer=null;}
   if(step&&dragBatchGroup)applySelectedLogoPatch(dragBatchGroup,{rotation:rotateTargetInPlace({rotation:target.rotation},-90).rotation});
-  if(step&&!dragBatchGroup){rotateTargetInPlace(target,-90);updateInputs(target);updateQuad(target);refreshTargetSelection();drawPreview();setStatus('已自动将 Logo 逆时针旋转 90°。长按旋转箭头可进行自由旋转。','success');}
-  dragTarget=null;dragMode=null;dragBatchGroup=null;rotatePointerId=null;canvas.classList.remove('dragging');if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
+  if(step&&!dragBatchGroup){const previous=structuredClone(target);rotateTargetInPlace(target,-90,canvas.width/canvas.height);keepTargetInsideCanvas(target,previous);updateInputs(target);updateQuad(target);refreshTargetSelection();drawPreview();setStatus('已自动将 Logo 逆时针旋转 90°。长按旋转箭头可进行自由旋转。','success');}
+  syncSchemeState();
+  if(placementGestureStart&&placementGestureStart.context===placementHistoryContext())placementHistory.record(placementGestureStart.context,placementGestureStart.state,schemeState);
+  placementGestureStart=null;
+  dragTarget=null;dragMode=null;dragBatchGroup=null;rotatePointerId=null;rotationGesture=null;canvas.classList.remove('dragging');if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
+  updatePlacementUndo();
 }
 canvas.addEventListener('pointerup',endDrag);canvas.addEventListener('pointercancel',endDrag);
+undoPlacementButton.onclick=undoPlacement;
 canvas.addEventListener('contextmenu',async event=>{
   if(!baseImage||!logoImage||!logoData)return;
   const normalized=pointerToNormalized(event.clientX,event.clientY,canvas.getBoundingClientRect());
@@ -1185,7 +1235,21 @@ canvas.addEventListener('contextmenu',async event=>{
   try{const asset=taskLogos.find(logo=>logo.id===loadedTaskLogoId)?.logoAssetUrl;let data=logoData;if(asset){const response=await fetch(asset);if(!response.ok)throw Error('Logo 原图读取失败');data=(await fileData(await response.blob())).data;}triggerTransparentLogoDownload(data,{filename:'logo-transparent.png'});setStatus('已保存透明 Logo PNG，可直接复用，无需再次调用 AI。','success');}catch(error){setStatus(error.message,'error');}
 });
 
-document.querySelector('#add-target').onclick=()=>addTarget();
+function toggleTargetRegionLock(){
+  const row=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);
+  const target=collectTargets().find(target=>target.id===selectedTargetId);
+  if(!row||!target)return;
+  const previous=structuredClone(target);
+  target.regionUnlocked=!target.regionUnlocked;
+  row.dataset.regionUnlocked=String(target.regionUnlocked);
+  if(target.regionUnlocked){setTargetMoveEnabled(target,true);row.dataset.moveEnabled='true';}
+  else keepTargetInsideCanvas(target,previous);
+  updateInputs(target);updateQuad(target);refreshTargetSelection();drawPreview();
+  setStatus(target.regionUnlocked?'已解锁产品框：Logo 可在整张图片内自由移动。':'已锁定产品框：Logo 仅可在原产品框内移动。','success');
+}
+document.querySelector('#add-target').onclick=()=>{addTarget();setTargetSelection(targets.lastElementChild.dataset.targetId);refreshTargetSelection();drawPreview();};
+document.querySelector('#toggle-target-move').onclick=()=>{const row=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);row?.querySelector('.move-target').click();};
+document.querySelector('#toggle-target-region').onclick=toggleTargetRegionLock;
 chooseProductButton.onclick=openProductLibrary;
 closeProductLibraryButton.onclick=()=>{productLibraryPanel.hidden=true;};
 productLibrarySearch.oninput=renderProductLibrary;
@@ -1200,14 +1264,43 @@ function readHexColor(input,output){
   if(!valid)return null;
   input.value='#'+hex.toUpperCase();return input.value;
 }
-for(const group of ['product','carton'])document.querySelector(`#custom-${group}-color`).oninput=event=>{
+for(const group of ['product','carton']){
+ const input=document.querySelector(`#custom-${group}-color`),picker=document.querySelector(`#custom-${group}-color-picker`);
+ picker.oninput=()=>{input.value=picker.value;input.dispatchEvent(new Event('input',{bubbles:true}));};
+ input.oninput=event=>{
   if(activeScheme!=='CUSTOM'||copyingProductPreset||generationBusy||multiPackageBusy||logoSelectionBusy)return;
   const color=readHexColor(event.target,document.querySelector(`#custom-${group}-color-value`));if(!color)return;
+  picker.value=color;
   syncSchemeState();schemeState=setCustomColors(schemeState,{[group]:color});loadSchemeTargets();taskDraft?.schedule();
 };
+}
 originalColorInput.oninput=()=>{const selectedRow=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);if(!selectedRow)return;const color=readHexColor(originalColorInput,originalColorValue);if(!color)return;selectedRow.dataset.logoColor=color;selectedRow.dataset.keepOriginal='false';drawPreview();};
 document.querySelector('#keep-original-colors').onchange=event=>{const row=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);if(!row)return;row.dataset.keepOriginal=String(event.target.checked);refreshTargetSelection();drawPreview();};
 autoContrastInput.onchange=()=>{const selectedRow=[...targets.children].find(row=>row.dataset.targetId===selectedTargetId);if(!selectedRow)return;selectedRow.dataset.autoContrast=String(autoContrastInput.checked);drawPreview();};
+async function processSelectedLogo(){
+  if(localLogoBusy||logoSelectionBusy||generationBusy||generationSubmitting||multiPackageBusy||copyingProductPreset||!logoData)return;
+  const id=loadedTaskLogoId,source=logoData,logo=taskLogos.find(logo=>logo.id===id);
+  localLogoBusy=true;logoSelectionBusy=true;updateGenerateButton();renderLogoLibrary();renderProductLibrary();
+  setStatus('正在处理当前 Logo，去除背景…','busy');
+  try{
+    const response=await fetch('/api/process-logo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({logoImage:logoSourceData||source,targetColor:'original'})});
+    const payload=await response.json();if(!response.ok)throw Error(payload.error||'Logo 处理失败');
+    if(typeof payload.dataUrl!=='string'||!payload.dataUrl.startsWith('data:image/png;base64,'))throw Error('未返回有效透明 PNG');
+    const image=await loadImage(payload.dataUrl,true);
+    if(loadedTaskLogoId!==id||logoData!==source)throw Error('当前 Logo 已变化，请重新处理。');
+    logoSourceData=logoSourceData||source;logoData=payload.dataUrl.split(',')[1];logoImage=image;
+    const name=`${(logo?.name||'Logo').replace(/\.[^.]+$/,'')}（透明底）.png`;
+    if(logo){logo.localProcessed=true;logo.aiRefined=false;logo.placementPrepared='crop-only';logo.name=name;}
+    setSelectedLogoPreview(payload.dataUrl,name);if(schemeState)loadSchemeTargets();drawPreview();queueSchemeCards();
+    saveLogo(logoStorage,{data:logoData,name,sourceData:logoSourceData,localProcessed:true});
+    useSavedLogoButton.hidden=false;clearSavedLogoButton.hidden=false;
+    taskDraft?.schedule();await taskDraft?.flush();
+    setStatus(payload.logoLibraryError?'Logo 处理完成，已应用到当前任务；Logo 库保存失败。':'Logo 处理完成，已应用透明底，可生成方案。','success');
+  }catch(error){setStatus(error.message||'Logo 处理失败，请重试','error');}
+  finally{localLogoBusy=false;logoSelectionBusy=logoDecoding||logoImportBusy;updateGenerateButton();renderLogoLibrary();renderProductLibrary();renderMultiProductResults();}
+}
+processButton.onclick=processSelectedLogo;
+
 async function refineSelectedLogo(){
   if(aiLogoBusy||logoSelectionBusy||generationBusy||generationSubmitting||multiPackageBusy||copyingProductPreset||!logoData)return;
   const id=loadedTaskLogoId,source=logoData,logo=taskLogos.find(logo=>logo.id===id);
@@ -1217,15 +1310,17 @@ async function refineSelectedLogo(){
   try{
     const ready=await fetch('/api/ai-logo/status'),provider=await ready.json();
     if(!ready.ok||!provider.configured)throw Error('尚未配置可用的 AI 图片接口，请检查原有 APIMart 设置。');
-    const response=await fetch('/api/ai-process-logo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({logoImage:source,targetColor:'original',preserveDetails:true})});
+    const response=await fetch('/api/ai-process-logo',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({logoImage:logo?.aiRefined?source:logoSourceData||source,targetColor:'original',preserveDetails:true})});
     const payload=await response.json();if(!response.ok)throw Error(payload.error||'AI 精细化处理失败');
     if(typeof payload.dataUrl!=='string'||!payload.dataUrl.startsWith('data:image/png;base64,'))throw Error('AI 未返回有效透明 PNG');
-    const image=await loadImage(payload.dataUrl);
+    const prepared=await preparePlacementLogo({logoImage:payload.dataUrl.split(',')[1],aiRefined:true},fetch);
+    payload.dataUrl=`data:image/png;base64,${prepared.logoImage}`;
+    const image=await loadImage(payload.dataUrl,true);
     if(loadedTaskLogoId!==id||logoData!==source)throw Error('当前 Logo 已变化，未替换新选中的图片；处理结果可从 Logo 库获取。');
     logoSourceData=logoSourceData||source;logoData=payload.dataUrl.split(',')[1];logoImage=image;
     const name=`${(logo?.name||'Logo').replace(/\.[^.]+$/,'')}（AI精细化）.png`;
-    if(logo){logo.aiRefined=true;logo.name=name;}
-    setSelectedLogoPreview(payload.dataUrl,name);drawPreview();queueSchemeCards();
+    if(logo){logo.aiRefined=true;logo.placementPrepared='crop-only';logo.name=name;}
+    setSelectedLogoPreview(payload.dataUrl,name);if(schemeState)loadSchemeTargets();drawPreview();queueSchemeCards();
     saveLogo(logoStorage,{data:logoData,name,sourceData:logoSourceData,aiRefined:true});
     useSavedLogoButton.hidden=false;clearSavedLogoButton.hidden=false;
     taskDraft?.schedule();await taskDraft?.flush();
@@ -1337,7 +1432,11 @@ for(const input of document.querySelectorAll('[data-foil-region]'))input.onchang
 
 let generationBusy=false,generationSubmitting=false;
 function updateGenerateButton(){
+ updatePlacementUndo();
  const currentLogo=taskLogos.find(logo=>logo.id===loadedTaskLogoId);
+ processButton.disabled=!logoData||localLogoBusy||logoSelectionBusy||generationSubmitting||generationBusy||multiPackageBusy||copyingProductPreset;
+ processButton.textContent=localLogoBusy?'处理中…':'logo处理';
+ processButton.setAttribute('aria-busy',String(localLogoBusy));
  aiRefineButton.disabled=!logoData||aiLogoBusy||logoSelectionBusy||generationSubmitting||generationBusy||multiPackageBusy||copyingProductPreset;
  aiRefineButton.textContent=aiLogoBusy?'AI 处理中…':'AI 精细化处理';
  aiRefineButton.setAttribute('aria-busy',String(aiLogoBusy));
@@ -1356,17 +1455,20 @@ function updateGenerateButton(){
   if(changed)queueSchemeCards();
  }
  updateAllSchemeSelection();
- multiProductTabs.inert=generationSubmitting||aiLogoBusy;
+ multiProductTabs.inert=generationSubmitting||aiLogoBusy||localLogoBusy;
  const apply=document.querySelector('#apply-product-preset');
  apply.hidden=multiPackageProducts.length<2||taskLogos.length>1;
  apply.disabled=copyingProductPreset||generationSubmitting||generationBusy||multiPackageBusy||logoSelectionBusy||selectedMultiProductId!==loadedMultiProductId;
  apply.title='选择载体、搭配和参数；产品设置应用到所有已选 SKU 的全部产品 Logo';
  apply.textContent=copyingProductPreset?'正在应用…':'同步设置…';
  const colorEditingDisabled=copyingProductPreset||generationSubmitting||generationBusy||multiPackageBusy||logoSelectionBusy||selectedMultiProductId!==loadedMultiProductId;
- for(const group of ['product','carton'])document.querySelector(`#custom-${group}-color`).disabled=colorEditingDisabled||!collectTargets().some(target=>isCarton(target)===(group==='carton'));
+ for(const group of ['product','carton']){
+  const disabled=colorEditingDisabled||!collectTargets().some(target=>isCarton(target)===(group==='carton'));
+  document.querySelector(`#custom-${group}-color`).disabled=disabled;document.querySelector(`#custom-${group}-color-picker`).disabled=disabled;
+ }
  multiProductTabs.querySelectorAll('.remove-task-asset').forEach(button=>button.disabled=generationBusy||multiPackageBusy||logoSelectionBusy);
  const count=selectedGenerationVersions().length,plans=multiPackageProducts.length>1?selectedProductPlans().filter(plan=>plan.selectedVersions.length):[],total=multiPackageProducts.length>1?plans.reduce((sum,plan)=>sum+plan.selectedVersions.length,0):count,button=document.querySelector('#generate');
- button.textContent=generationSubmitting||generationBusy||multiPackageBusy?'正在生成…':!total?'请至少选择一套方案':taskLogos.length>1?`为 ${taskLogos.length} 个 Logo 生成 ${count} 种效果 · 共 ${taskLogos.length*count} 张`:multiPackageProducts.length>1?`为 ${plans.length} 个产品生成各自所选搭配 · 共 ${total} 张`:`生成选中的 ${count} 套方案`;
+ button.textContent=generationSubmitting||generationBusy||multiPackageBusy?'正在生成…':!total?'请至少选择一套方案':`生成方案 · ${taskLogos.length>1?taskLogos.length*count:total} 张`;
  button.disabled=copyingProductPreset||generationSubmitting||generationBusy||multiPackageBusy||logoSelectionBusy||!total||(taskLogos.length>1&&(!multiLogoEnabled||multiPackageProducts.length!==1));
  const modified=modifiedSchemes(),retry=document.querySelector('#generate-modified');
  retry.hidden=(multiPackageProducts.length>1&&!(currentTaskId&&s7User))||!modified.length;retry.textContent=`重新生成已修改的 ${modified.length} 套方案`;retry.disabled=copyingProductPreset||generationBusy||multiPackageBusy;
@@ -1468,6 +1570,12 @@ imagePreviewViewport.addEventListener('wheel',event=>{
 },{passive:false});
 document.addEventListener('keydown',event=>{
   if(event.key==='Escape'&&!imagePreview.hidden)closeImagePreview();
+  if(event.key!=='Backspace'||event.defaultPrevented||event.repeat||event.isComposing||event.ctrlKey||event.metaKey||event.altKey)return;
+  if(event.target?.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])'))return;
+  if(generationBusy||generationSubmitting||multiPackageBusy||copyingProductPreset||logoSelectionBusy||dragTarget||!imagePreview.hidden||document.querySelector('dialog[open]'))return;
+  const buttons=[...targets.children].filter(row=>isTargetSelected(row.dataset.targetId)).map(row=>row.querySelector('.remove-target')).filter(button=>button&&!button.disabled);
+  if(!buttons.length)return;
+  event.preventDefault();buttons.forEach(button=>button.click());
 });
 
 async function showGenerationSubmission(versions){
@@ -1554,7 +1662,6 @@ async function runMultiPackageGeneration(options={}){
     const failed=products.filter(product=>!multiProductResults.get(product.id)?.complete);
     const firstFailure=failed.length?multiProductResults.get(failed[0].id):null;
     setStatus(failed.length?`${failed.length}/${products.length} 个产品未全部生成成功：${firstFailure?.error||firstFailure?.failures?.[0]?.error||'所选效果未全部返回'}。成功图片已保留。`:'所选产品的所选效果已生成。',failed.length?'error':'success');
-    if(s7User)await refreshHistory();
   }catch(error){multiProductResults.set(selectedMultiProductId,{error:error.message||'多包材生成失败'});setStatus(error.message||'多包材生成失败','error');}
   finally{multiPackageBusy=false;multiProductJob.status=Object.values(multiProductJob.stages).every(value=>value.stage==='complete')?'complete':'partial';for(const [key,value]of Object.entries(multiProductJob.stages))if(!['complete','failed'].includes(value.stage))multiProductJob.stages[key]={stage:'failed',error:'生成连接中断，请重试'};restoreMultiProductGeneration(multiProductJob);}
   }catch(error){multiPackageBusy=false;failGenerationSubmission(currentVersions,error);}
@@ -1585,6 +1692,7 @@ if(currentTaskId&&s7User){
   if(Array.isArray(state.multiLogoLayouts))multiLogoViews=new Map(state.multiLogoLayouts.map(layout=>[layout.logoId,{...layout,...(layout.schemeState?{schemeState:ensureCustomScheme(layout.schemeState)}:{})}]));
   if(state.mode==='multi-logo'&&state.productId&&!state.multiPackageProducts?.length){const response=await fetch('/api/product-library');if(!response.ok)throw Error('产品库读取失败');const products=await response.json();const product=products.find(product=>product.id===state.productId);if(product)state.multiPackageProducts=[product];}
   const restoredLogo=taskLogos.find(logo=>logo.id===selectedTaskLogoId);
+  if(restoredLogo)await preparePlacementLogo(restoredLogo,fetch,currentTaskId);
   if(restoredLogo){state.logoData=restoredLogo.logoImage;state.logoSourceData=restoredLogo.sourceData||'';state.logoName=restoredLogo.name;}
 
   downloadSelection=state.downloadSelection||{};
@@ -1602,7 +1710,7 @@ if(currentTaskId&&s7User){
   const baseAssetUrl=!state.baseData&&baseUrl?.startsWith(`/api/my-space/tasks/${currentTaskId}/assets/`)?baseUrl:'';
   if(baseAssetUrl){const response=await fetch(`${baseAssetUrl}?preview=1`);if(!response.ok)throw Error('任务产品快照读取失败，请重试');const loaded=await fileData(await response.blob());baseData=loaded.data;baseImage=await loadImage(loaded.dataUrl);}
   else baseImage=baseUrl?await loadImage(baseUrl):null;
-  logoImage=logoUrl?await loadImage(logoUrl):null;
+  logoImage=logoUrl?await loadImage(logoUrl,true):null;
   if(restoredBase&&baseImage){multiProductViews.set(restoredBase.id,{...multiProductViews.get(restoredBase.id),baseData,baseImage,baseAssetUrl});loadedMultiProductId=restoredBase.id;}
   if(state.schemeState?.schemes?.length){schemeState=state.schemeState;activeScheme=state.activeScheme||'ORIGINAL';placementScope=state.placementScope||'shared';savedSignatures=state.savedSignatures||{};document.querySelector('#preview-version').value=activeScheme;selectedTargetId=state.selectedTargetId;loadSchemeTargets();}
   else if(state.targets?.length){schemeState=null;rebuildingTargets=true;targets.replaceChildren();targetNumber=0;state.targets.forEach(addTarget);rebuildingTargets=false;selectedTargetId=state.selectedTargetId||state.targets[0].id;}
@@ -1613,7 +1721,7 @@ if(currentTaskId&&s7User){
   taskDraft.activate();notifyTask('已恢复');
   generationWatcher=createGenerationWatcher({
    request:async()=>{const response=await fetch(`/api/my-space/tasks/${currentTaskId}/generation`);const record=await response.json();if(!response.ok)throw Object.assign(Error(record.error||'生成进度读取失败'),{status:response.status});return record;},
-   onChange:record=>{restoreGeneration(record);if(record.status!=='running')refreshHistory().catch(()=>{});},
+   onChange:record=>{restoreGeneration(record);},
    onError:error=>{if(!generationSubmitting&&error.status!==401)setStatus('进度暂时无法读取，后台生成会继续；稍后自动重连。','error');}
   });
   await generationWatcher.refresh();
@@ -1623,9 +1731,8 @@ if(currentTaskId&&s7User){
   window.addEventListener('beforeunload',event=>{if(taskDraft.isDirty()){event.preventDefault();event.returnValue='';}});
  }catch(error){setStatus(error.message,'error');document.querySelector('#generate').disabled=true;}
 }else await restoreSavedLogo();
-if(multiPackageProducts.length){try{await showMultiProduct(selectedMultiProductId||multiPackageProducts[0].id);await Promise.all(multiPackageProducts.map(product=>loadMultiProductView(product)));updateGenerateButton();}catch(error){setStatus(error.message,'error');}}
+if(multiPackageProducts.length){try{await showMultiProduct(selectedMultiProductId||multiPackageProducts[0].id);updateGenerateButton();}catch(error){setStatus(error.message,'error');}}
 const restoredLogoView=multiLogoViews.get(selectedTaskLogoId);
 if(restoredLogoView?.schemeState){schemeState=structuredClone(restoredLogoView.schemeState);activeScheme=restoredLogoView.activeScheme||'ORIGINAL';placementScope=restoredLogoView.placementScope||'shared';selectedTargetId=restoredLogoView.selectedTargetId;savedSignatures={...restoredLogoView.savedSignatures};document.querySelector('#preview-version').value=activeScheme;loadSchemeTargets();}
 if(multiLogoJob)restoreMultiLogoGeneration(multiLogoJob);
 downloadSelectionReady=true;updateDownloadSelection();queueSchemeCards();
-refreshHistory().catch(error=>setStatus(error.message,'error'));

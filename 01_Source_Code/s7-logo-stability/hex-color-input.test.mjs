@@ -9,7 +9,7 @@ async function workspace(){
   const start=source.indexOf('function readHexColor(');
   assert.ok(start>=0,'HEX 输入应先验证再修改配色');
   const input=()=>({value:'#000000',setAttribute(name,value){this[name]=value;}}),nodes={};
-  for(const group of ['product','carton']){nodes[`#custom-${group}-color`]=input();nodes[`#custom-${group}-color-value`]={};}
+  for(const group of ['product','carton']){nodes[`#custom-${group}-color`]=input();nodes[`#custom-${group}-color-picker`]=input();nodes[`#custom-${group}-color-value`]={};}
   const row={dataset:{targetId:'body',logoColor:'#000000'}},originalColorInput=input(),originalColorValue={};
   let previews=0;
   const c=vm.createContext({setCustomColors,activeScheme:'CUSTOM',copyingProductPreset:false,generationBusy:false,multiPackageBusy:false,logoSelectionBusy:false,

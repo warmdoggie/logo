@@ -29,3 +29,13 @@ test('private generation storage verifies original bytes and publishes a separat
   assert.deepEqual(await readFile(file),original);
  }finally{await rm(folder,{recursive:true,force:true});}
 });
+
+test('deleting generation storage removes original and preview and rejects unrelated object keys',async()=>{
+ const {createGenerationStorage}=await import('./logo-generation-storage.mjs'),deleted=[];
+ const storage=createGenerationStorage({client:async()=>({delete:async key=>deleted.push(key)})});
+ const prefix='s7-logo/generations/v1/'+randomUUID()+'/',descriptor={original:prefix+'a'.repeat(64)+'.png',preview:prefix+'b'.repeat(64)+'.webp'};
+ assert.equal(typeof storage.remove,'function');await storage.remove(descriptor);
+ assert.deepEqual(deleted,[descriptor.original,descriptor.preview]);
+ await assert.rejects(storage.remove({...descriptor,original:'frame/private.png'}),/Invalid/);
+ assert.equal(deleted.length,2);
+});

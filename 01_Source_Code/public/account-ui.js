@@ -1,4 +1,5 @@
 let currentUser=null;
+export function clearWorkspace(){document.querySelector('#main').replaceChildren();document.querySelector('#s7-module-panel')?.remove();}
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function request(path,body){const response=await fetch(path,{...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});const value=await response.json();if(!response.ok)throw Error(value.error||'账号操作失败');return value;}
 export async function initializeAccounts(){
@@ -15,10 +16,10 @@ export async function initializeAccounts(){
   await new Promise(resolve=>{loginForm.onsubmit=async event=>{event.preventDefault();const form=event.currentTarget,button=form.querySelector('button');button.disabled=true;try{currentUser=await request('/api/auth/login',Object.fromEntries(new FormData(form)));resolve();}catch(error){document.querySelector('#account-error').textContent=error.message;}finally{button.disabled=false;}};});
  }
  document.querySelector('#current-user').textContent=`${currentUser.username} · ${currentUser.role==='ADMIN'?'管理员':'个人空间'}`;
- const logout=document.createElement('button');logout.className='btn';logout.textContent='退出登录';logout.onclick=async()=>{document.querySelector('#main').replaceChildren();await request('/api/auth/logout',{});location.reload();};document.querySelector('.sidebar-bottom').append(logout);
+ const logout=document.createElement('button');logout.className='btn';logout.textContent='退出登录';logout.onclick=async()=>{clearWorkspace();await request('/api/auth/logout',{});location.reload();};document.querySelector('.sidebar-bottom').append(logout);
  if(currentUser.role==='ADMIN'){const link=document.createElement('a');link.href='#/settings/accounts';link.textContent='账号管理';document.querySelector('nav').append(link);}
  // A session replaced or revoked in another tab must not leave the previous user's page visible.
- setInterval(async()=>{try{const user=await request('/api/auth/session');if(user.id!==currentUser.id){document.querySelector('#main').replaceChildren();location.reload();}}catch{document.querySelector('#main').replaceChildren();location.reload();}},10000);
+ setInterval(async()=>{try{const user=await request('/api/auth/session');if(user.id!==currentUser.id){clearWorkspace();location.reload();}}catch{clearWorkspace();location.reload();}},10000);
  return currentUser;
 }
 export async function renderAccounts(main){

@@ -11,7 +11,7 @@ export function createStore(pool,{maxRunning=0,userRunning=2,maxPending=200,leas
   catch(error){await db.query('ROLLBACK');throw error;}finally{db.release();}
  }
  const event=(db,job,code=null)=>db.query('INSERT INTO job_events(job_id,status,code) VALUES($1,$2,$3)',[job.id,job.status,code]);
- async function create(user,key,params){
+ async function create(user,key,params,{prepare}={}){
   return tx(async db=>{
    await db.query('INSERT INTO scheduler_users(id) VALUES($1) ON CONFLICT DO NOTHING',[user]);
    await db.query('SELECT id FROM scheduler_users WHERE id=$1 FOR UPDATE',[user]);
@@ -24,6 +24,7 @@ export function createStore(pool,{maxRunning=0,userRunning=2,maxPending=200,leas
    }
    const count=(await db.query('SELECT count(*)::int n FROM jobs WHERE user_id=$1 AND NOT(status=ANY($2::text[]))',[user,terminal])).rows[0].n;
    if(count>=maxPending)fail(429,'Pending job quota reached');
+   if(prepare){await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[params.planHash]);await prepare();}
    let status='QUEUED',source=null,file=null,providerId=null,slot=false;
    if(params.resumeJobId){
     const old=(await db.query('SELECT * FROM jobs WHERE id=$1 AND user_id=$2',[params.resumeJobId,user])).rows[0];
@@ -82,7 +83,7 @@ export function createStore(pool,{maxRunning=0,userRunning=2,maxPending=200,leas
    AND status='SUBMITTING' AND NOT submit_started AND lease_until>now() RETURNING *`,[job.id,job.lease_token])).rows[0]||null;
  }
  async function transition(job,status,patch={},release=false,delayMs=0){
-  const allowed=['provider_task_id','source_url','file_path','result_path','error_code','download_attempts'];
+  const allowed=['provider_task_id','source_url','file_path','result_path','error_code','download_attempts','process_attempts'];
   if(Object.keys(patch).some(key=>!allowed.includes(key)))throw Error('Unsupported transition field');
   return tx(async db=>{
    const values=[job.id,job.lease_token,status,release,delayMs];
@@ -137,7 +138,25 @@ export function createStore(pool,{maxRunning=0,userRunning=2,maxPending=200,leas
    await db.query("UPDATE business_batches SET status='READY' WHERE id=$1",[id]);return {id};
   });
  }
- return {create,reserve,claim,startSubmit,transition,recover,cancel,beginBatch,batch,commitBatch,
+ async function purgeTasks(user,taskIds,cleanup){
+  return tx(async db=>{
+   await db.query('SELECT id FROM scheduler_users WHERE id=$1 FOR UPDATE',[user]);
+   const batches=(await db.query("SELECT * FROM business_batches WHERE user_id=$1 AND ($2::text[] IS NULL OR descriptor->>'taskId'=ANY($2::text[])) FOR UPDATE",[user,taskIds])).rows;
+   const batchIds=batches.map(batch=>batch.id),jobs=(await db.query("SELECT * FROM jobs WHERE user_id=$1 AND params->>'batchId'=ANY($2::text[]) FOR UPDATE",[user,batchIds])).rows;
+   if(batches.some(batch=>batch.status==='PREPARING')||jobs.some(job=>!terminal.includes(job.status)))fail(409,'Tasks are still running');
+   const hashes=[...new Set(jobs.map(job=>job.params.planHash).filter(hash=>/^[a-f0-9]{64}$/.test(hash||'')))].sort(),planHashes=[];
+   for(const hash of hashes){
+    await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[hash]);
+    if(!(await db.query("SELECT 1 FROM jobs WHERE params->>'planHash'=$1 AND NOT(id=ANY($2::uuid[])) LIMIT 1",[hash,jobs.map(job=>job.id)])).rowCount)planHashes.push(hash);
+   }
+   await cleanup({jobs,planHashes});
+   await db.query('DELETE FROM job_events WHERE job_id=ANY($1::uuid[])',[jobs.map(job=>job.id)]);
+   await db.query('DELETE FROM jobs WHERE id=ANY($1::uuid[])',[jobs.map(job=>job.id)]);
+   await db.query('DELETE FROM business_batches WHERE id=ANY($1::uuid[])',[batchIds]);
+   return {deleted:batches.length};
+  });
+ }
+ return {create,reserve,claim,startSubmit,transition,recover,cancel,beginBatch,batch,commitBatch,purgeTasks,
   renew:job=>pool.query("UPDATE jobs SET lease_until=now()+$3*interval '1 millisecond' WHERE id=$1 AND lease_token=$2 AND lease_until>now()",[job.id,job.lease_token,leaseMs]),
   deferSubmit:job=>pool.query("UPDATE jobs SET status='QUEUED',slot_reserved=false,lease_token=NULL,lease_until=NULL WHERE id=$1 AND lease_token=$2 AND lease_until>now() AND status='SUBMITTING' AND NOT submit_started",[job.id,job.lease_token]),
   abortBatch:(user,id)=>tx(async db=>{
@@ -149,6 +168,7 @@ export function createStore(pool,{maxRunning=0,userRunning=2,maxPending=200,leas
   acknowledgeBatch:(user,id)=>pool.query(`UPDATE business_batches b SET projected_at=now() WHERE id=$1 AND user_id=$2 AND status IN ('READY','ABORTED')
    AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.params->>'batchId'=b.id::text AND NOT(j.status=ANY($3::text[])))`,[id,user,terminal]),
   pauseDownload:job=>transition(job,'REMOTE_SUCCEEDED',{error_code:'disk_reserve_required',download_attempts:Math.max(0,job.download_attempts-1)},false,30000),
+  pausePlanRead:job=>transition(job,'DOWNLOADED',{error_code:'plan_storage_unavailable',process_attempts:Math.max(0,job.process_attempts-1)},false,60000),
   retry:(job,status,code,delay=5000)=>transition(job,status,{error_code:code},false,delay),
   get:async(user,id)=>(await pool.query('SELECT * FROM jobs WHERE id=$1 AND user_id=$2',[id,user])).rows[0]||null,
   list:async user=>(await pool.query('SELECT * FROM jobs WHERE user_id=$1 ORDER BY created_at DESC LIMIT 100',[user])).rows,

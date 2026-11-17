@@ -1,0 +1,132 @@
+{
+  "verifiedAt": "2026-09-14T03:03:05.634Z",
+  "tables": {
+    "Product": {
+      "before": 5,
+      "after": 5,
+      "allFieldsUnchanged": true
+    },
+    "Task": {
+      "before": 3,
+      "after": 3,
+      "allFieldsUnchanged": true
+    },
+    "LogoAsset": {
+      "before": 3,
+      "after": 3,
+      "allFieldsUnchanged": true
+    },
+    "TaskProduct": {
+      "before": 9,
+      "after": 9,
+      "allFieldsUnchanged": true
+    },
+    "AppMeta": {
+      "before": 1,
+      "after": 1,
+      "allFieldsUnchanged": true
+    },
+    "ProductTemplate": {
+      "before": 3,
+      "after": 3,
+      "allFieldsUnchanged": true
+    },
+    "TemplateZone": {
+      "before": 9,
+      "after": 9,
+      "allFieldsUnchanged": true
+    },
+    "TaskProductTemplate": {
+      "before": 0,
+      "after": 0,
+      "allFieldsUnchanged": true
+    },
+    "OriginalLogoVersion": {
+      "before": 3,
+      "after": 3,
+      "allFieldsUnchanged": true
+    },
+    "LogoElement": {
+      "before": 3,
+      "after": 3,
+      "allFieldsUnchanged": true
+    },
+    "ProductionLogo": {
+      "before": 1,
+      "after": 1,
+      "allFieldsUnchanged": true
+    },
+    "ProductionLogoElement": {
+      "before": 1,
+      "after": 1,
+      "allFieldsUnchanged": true
+    },
+    "LogoUsageReference": {
+      "before": 0,
+      "after": 0,
+      "allFieldsUnchanged": true
+    }
+  },
+  "files": {
+    "count": 12,
+    "allSHA256Unchanged": true
+  },
+  "databaseIntegrity": "ok",
+  "rules": [
+    {
+      "ruleCode": "CLR-001",
+      "enabled": 1,
+      "isExample": 0,
+      "version": 1
+    },
+    {
+      "ruleCode": "CLR-003",
+      "enabled": 1,
+      "isExample": 0,
+      "version": 1
+    },
+    {
+      "ruleCode": "CLR-004",
+      "enabled": 1,
+      "isExample": 0,
+      "version": 1
+    },
+    {
+      "ruleCode": "DEMO-005",
+      "enabled": 0,
+      "isExample": 1,
+      "version": 1
+    },
+    {
+      "ruleCode": "DEMO-006",
+      "enabled": 0,
+      "isExample": 1,
+      "version": 1
+    },
+    {
+      "ruleCode": "DEMO-007",
+      "enabled": 0,
+      "isExample": 1,
+      "version": 1
+    },
+    {
+      "ruleCode": "INFO-008",
+      "enabled": 1,
+      "isExample": 0,
+      "version": 1
+    },
+    {
+      "ruleCode": "LOGO-001",
+      "enabled": 1,
+      "isExample": 0,
+      "version": 1
+    },
+    {
+      "ruleCode": "LOGO-009",
+      "enabled": 1,
+      "isExample": 0,
+      "version": 1
+    }
+  ],
+  "formalTestEvaluations": 0
+}

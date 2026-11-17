@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {pointerToNormalized} from './demo-geometry.mjs';
+import {createSchemes} from './schemes.mjs';
+import {createPlacementHistory} from './target-state.mjs';
 
 const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
 function workspace(){
@@ -10,6 +12,7 @@ function workspace(){
  const context={clearRect(){},drawImage(){},getImageData:()=>({data:new Uint8ClampedArray(400*200*4)}),save(){},restore(){},translate(){},rotate(){},setLineDash(){},strokeRect:(...args)=>outlines.push(args),beginPath(){},moveTo(){},lineTo(){},stroke:()=>outlines.push('stroke'),fillRect(){}};
  const c=vm.createContext({canvas:{width:400,height:200,getContext:()=>context,getBoundingClientRect:()=>({left:0,top:0,width:400,height:200}),addEventListener:(name,callback)=>events[name]=callback,setPointerCapture:id=>captures.push(id),classList:{add(){}}},
   baseImage:{naturalWidth:400,naturalHeight:200},logoImage:{naturalWidth:40,naturalHeight:20},baseData:'base',previewEmpty:{},previewBaseImage:null,previewBasePixels:null,rebuildingTargets:false,selectedTargetId:'logo',selectedTargetIds:new Set(['logo']),dragTarget:null,dragMode:null,
+  schemeState:createSchemes([target]),structuredClone,placementGestureStart:null,placementHistory:createPlacementHistory(),loadedMultiProductId:'product',loadedTaskLogoId:'logo',
   syncSchemeState(){},queueSchemeCards(){},taskDraft:{schedule(){}},collectTargets:()=>[target],targetRect:()=>({left:160,top:80,width:80,height:40}),handlePoints:()=>({center:{x:200,y:100},scale:{x:240,y:120},rotation:{x:200,y:40}}),
   pointerToNormalized,distance:(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),targetAt:point=>point.x>=.4&&point.x<=.6&&point.y>=.4&&point.y<=.6?target:null,canMoveTarget:()=>true,
   refreshTargetSelection(){},chooseContrastColor:()=>null,resolveTargetPrint:()=>({color:'#000000',finish:'flat'}),renderTintedLogoLayer:()=>({}),curvePreviewLogo:layer=>layer,drawRotationArrow:(...args)=>arrows.push(args),document:{querySelector:()=>({value:'BLACK'})}

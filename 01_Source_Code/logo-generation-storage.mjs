@@ -8,6 +8,11 @@ const valid=new RegExp('^'+prefix+'[0-9a-f-]{36}/[0-9a-f]{64}\\.(png|webp)$');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 export function createGenerationStorage({client=createLogoStorageClients()}={}){
  return {
+  async remove(descriptor){
+   if(!valid.test(descriptor?.original||'')||!valid.test(descriptor?.preview||'')||descriptor.original.split('/').slice(0,-1).join('/')!==descriptor.preview.split('/').slice(0,-1).join('/'))throw Error('Invalid generation storage descriptor');
+   const remote=await client(true);
+   await remote.delete(descriptor.original);await remote.delete(descriptor.preview);
+  },
   async publish(id,file){
    if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id))throw Error('Invalid generation id');
    const bytes=await readFile(file),preview=await sharp(bytes,{limitInputPixels:40000000}).resize({width:1200,height:1200,fit:'inside',withoutEnlargement:true}).webp({quality:84}).toBuffer();

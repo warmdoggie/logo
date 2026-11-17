@@ -1,0 +1,9 @@
+.logo-upload-zone{transition:background-color .15s,border-color .15s;outline-offset:4px}
+.logo-upload-zone:focus{outline:2px solid #254bd84d;border-color:#254bd8}
+.logo-upload-zone.is-dragover{background:#edf2ff;border:2px solid #254bd8;padding:24px 19px}
+.logo-upload-zone .logo-upload-help{margin:10px 0 5px;color:#4c5b73}
+.logo-upload-zone .logo-upload-status{font-size:13px;color:#52627b;margin:10px 0;overflow-wrap:anywhere}
+.logo-upload-zone .logo-upload-status:empty{display:none}
+.logo-upload-zone .logo-upload-error{text-align:left;margin:10px 0}
+.logo-upload-zone .logo-upload-clear{margin-top:4px}
+.logo-upload-zone .preview-image{border:1px solid #e1e6ef;border-radius:6px;background-color:#fff;background-image:linear-gradient(45deg,#edf0f5 25%,transparent 25%),linear-gradient(-45deg,#edf0f5 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#edf0f5 75%),linear-gradient(-45deg,transparent 75%,#edf0f5 75%);background-size:16px 16px;background-position:0 0,0 8px,8px -8px,-8px 0}

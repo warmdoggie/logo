@@ -10,7 +10,7 @@ import {readPlan} from './plans.mjs';
 
 test('rose and laser mask image references survive scheduler plan upload',async()=>{
  const directory=await mkdtemp(join(tmpdir(),'foil-mask-plan-')),jobs=[];
- const store={batch:async()=>({descriptor:{items:[{key:'LASER FOIL'}]}}),get:async()=>null,create:async(user,id,params)=>{const job={id,params,status:'QUEUED'};jobs.push(job);return job;}};
+ const store={batch:async()=>({descriptor:{items:[{key:'LASER FOIL'}]}}),get:async()=>null,create:async(user,id,params,{prepare})=>{await prepare();const job={id,params,status:'QUEUED'};jobs.push(job);return job;}};
  const send=(res,status,value)=>{res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(value));};
  const server=createServer(async(req,res)=>{try{await businessApi(req,res,{store,user:'fixture',directory,enabled:false,send});}catch(error){send(res,error.status||500,{error:error.message});}});
  try{

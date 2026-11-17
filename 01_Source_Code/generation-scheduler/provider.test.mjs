@@ -17,6 +17,9 @@ test('persisted business plans submit their original image request once',async()
    calls++;assert.equal(String(url),'https://api.apimart.ai/v1/images/generations');assert.deepEqual(JSON.parse(options.body),request);
    return Response.json({data:[{task_id:'remote-1'}]});
   }});
-  assert.deepEqual(await provider.submit({batchId:'batch',planHash:hash}),{taskId:'remote-1'});assert.equal(calls,1);
+  assert.equal(typeof provider.prepare,'function','the plan must load before recording a paid submission');
+  const params={batchId:'batch',planHash:hash},prepared=await provider.prepare(params);assert.equal(calls,0);
+  await rm(join(directory,'plans',hash+'.json'));
+  assert.deepEqual(await provider.submit(params,prepared),{taskId:'remote-1'});assert.equal(calls,1);
  }finally{await rm(directory,{recursive:true,force:true});}
 });

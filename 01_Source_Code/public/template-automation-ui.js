@@ -2,10 +2,11 @@ import {transformPlacement} from './placement-transform.js';
 import {placementRotation} from './auto-placement.js';
 import {zonePoints,containsPolygon,polygonOverlap,pointInside} from './zone-geometry.js';
 const uid=()=>crypto.randomUUID();
-const foilProcesses=[['GOLD FOIL','烫金'],['SILVER FOIL','烫银'],['ROSE GOLD FOIL','烫玫瑰金'],['LASER FOIL','烫镭射']];
+const foilProcesses=['GOLD FOIL','SILVER FOIL','ROSE GOLD FOIL','LASER FOIL'];
 export function mountTemplateAutomation(ctx,initial){
- const {main,canvas,readonly}=ctx;let config=structuredClone(initial||{version:1,carriers:[],areas:[],schemes:[]}),drawing=false,drawingBackup=null,drawingOrientation=null,presetId=null,frameSelected=false,drag=null;
- config.areas.forEach(a=>{a.zoneRef=a.zoneRef||ctx.zones()[a.zoneIndex]?.id;a.foilProcesses=a.foilProcesses||[];});
+ const {main,canvas,readonly}=ctx;let config=structuredClone(initial||{version:1,carriers:[],areas:[],schemes:[]}),drawing=false,drawingBackup=null,drawingOrientation=null,presetId=null,frameSelected=false,drag=null,centersChanged=false;
+ function centered(box,z=ctx.zones().find(z=>z.id===ctx.selected())){return z&&z.shapeType!=='POLYGON'?{...box,centerX:z.x+z.width/2,centerY:z.y+z.height/2}:box;}
+ config.areas.forEach(a=>{a.zoneRef=a.zoneRef||ctx.zones()[a.zoneIndex]?.id;a.foilProcesses=a.foilProcesses||[];if(!readonly)for(const p of a.presets){const box=centered(p.box,ctx.zones().find(z=>z.id===a.zoneRef));if(box.centerX!==p.box.centerX||box.centerY!==p.box.centerY){p.box=box;centersChanged=true;}}});
  const panel=document.createElement('section');panel.className='panel';main.querySelector('.template-properties').append(panel);
  const layer=document.createElementNS('http://www.w3.org/2000/svg','g');canvas.append(layer);
  function area(){return config.areas.find(a=>a.zoneRef===ctx.selected());}
@@ -13,11 +14,11 @@ export function mountTemplateAutomation(ctx,initial){
  function classifyZone(z,type){
   let a=config.areas.find(a=>a.zoneRef===z.id),box;
   if(!a){
-   const image=ctx.image(),poly=zonePoints(z,image),centers=[{x:z.defaultAnchorX,y:z.defaultAnchorY},{x:z.x+z.width/2,y:z.y+z.height/2}];
-   for(let y=1;y<10;y++)for(let x=1;x<10;x++)centers.push({x:z.x+z.width*x/10,y:z.y+z.height*y/10});
+   const image=ctx.image(),poly=zonePoints(z,image),centers=z.shapeType==='POLYGON'?[{x:z.defaultAnchorX,y:z.defaultAnchorY},{x:z.x+z.width/2,y:z.y+z.height/2}]:[{x:z.x+z.width/2,y:z.y+z.height/2}];
+   if(z.shapeType==='POLYGON')for(let y=1;y<10;y++)for(let x=1;x<10;x++)centers.push({x:z.x+z.width*x/10,y:z.y+z.height*y/10});
    for(let scale=.4;scale*z.width>=.001&&scale*z.height>=.001&&!box;scale/=2){
     const edgeCenters=[],inset=Math.hypot(z.width*scale,z.height*scale)/2;
-    for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],length=Math.hypot(b.x-a.x,b.y-a.y);if(!length)continue;for(const sign of [-1,1])edgeCenters.push({x:(a.x+b.x)/2-sign*(b.y-a.y)*inset/length,y:(a.y+b.y)/2+sign*(b.x-a.x)*inset/length});}
+    if(z.shapeType==='POLYGON')for(let i=0;i<poly.length;i++){const a=poly[i],b=poly[(i+1)%poly.length],length=Math.hypot(b.x-a.x,b.y-a.y);if(!length)continue;for(const sign of [-1,1])edgeCenters.push({x:(a.x+b.x)/2-sign*(b.y-a.y)*inset/length,y:(a.y+b.y)/2+sign*(b.x-a.x)*inset/length});}
     for(const center of [...centers,...edgeCenters]){const candidate={centerX:center.x,centerY:center.y,width:z.width*scale,height:z.height*scale,rotation:z.rotation||0},points=zonePoints({shapeType:'ROTATED_RECT',x:center.x-candidate.width/2,y:center.y-candidate.height/2,width:candidate.width,height:candidate.height,rotation:candidate.rotation},image);
      if(containsPolygon(poly,points)&&!ctx.zones().some(n=>n.zoneType==='no-logo'&&polygonOverlap(points,zonePoints(n,image)))){box=candidate;break;}
     }
@@ -39,7 +40,7 @@ export function mountTemplateAutomation(ctx,initial){
   const {width:W,height:H}=ctx.image(),pts=zonePoints({shapeType:'ROTATED_RECT',x:b.centerX-b.width/2,y:b.centerY-b.height/2,width:b.width,height:b.height,rotation:b.rotation},{width:W,height:H}),scale=W/(canvas.getBoundingClientRect().width||W),r=b.rotation*Math.PI/180,active=!preview&&frameSelected&&p.id===preset()?.id;
   const direction=placementRotation(ctx.zones().find(z=>z.id===ctx.selected()),{...p,box:b},{width:W,height:H})*Math.PI/180,relative=direction-r,length=.3/Math.max(Math.abs(Math.cos(relative))/(b.width*W),Math.abs(Math.sin(relative))/(b.height*H)),cx=b.centerX*W,cy=b.centerY*H,dx=Math.cos(direction)*length,dy=Math.sin(direction)*length,tipX=cx+dx,tipY=cy+dy,head=5*scale;
   const arrow=`<path data-placement-direction="${p.orientation}" pointer-events="none" d="M${cx-dx},${cy-dy} L${tipX},${tipY} M${tipX-head*Math.cos(direction-.6)},${tipY-head*Math.sin(direction-.6)} L${tipX},${tipY} L${tipX-head*Math.cos(direction+.6)},${tipY-head*Math.sin(direction+.6)}" fill="none" stroke="#08785c" stroke-width="${1.5*scale}"/>`;
-  return `<g ${preview?'data-placement-preview':`data-placement-frame="${p.id}"`} class="${active?'placement-selected':''}"><polygon data-placement="move" data-placement-id="${p.id}" points="${pts.map(q=>q.x*W+','+q.y*H).join(' ')}" fill="${active?'#10b98122':'#10b9810d'}" stroke="${valid(b)?active?'#08916b':'#6eac94':'#e04545'}" stroke-width="${(active?2.5:1.5)*scale}" pointer-events="${!drawing?'all':'none'}"/><text x="${b.centerX*W+6*scale}" y="${b.centerY*H-6*scale}" font-size="${12*scale}" fill="#08785c" pointer-events="none">${preview?'新位置':'位置 '+(index+1)}${p.orientation==='vertical'?' · 竖排':p.orientation==='horizontal'?' · 横排':''}</text>${arrow}${active&&!readonly&&!drawing?pts.map((q,i)=>`<rect data-placement="${i}" data-placement-id="${p.id}" x="${q.x*W-5*scale}" y="${q.y*H-5*scale}" width="${10*scale}" height="${10*scale}" fill="white" stroke="#08916b" stroke-width="${2*scale}"/>`).join(''):''}</g>`;
+  return `<g ${preview?'data-placement-preview':`data-placement-frame="${p.id}"`} class="${active?'placement-selected':''}"><polygon data-placement="move" data-placement-id="${p.id}" points="${pts.map(q=>q.x*W+','+q.y*H).join(' ')}" fill="${active?'#10b98122':'#10b9810d'}" stroke="${valid(b)?active?'#08916b':'#6eac94':'#e04545'}" stroke-width="${(active?2.5:1.5)*scale}" pointer-events="${!drawing?'all':'none'}"/><text x="${b.centerX*W+6*scale}" y="${b.centerY*H-6*scale}" font-size="${12*scale}" fill="#08785c" pointer-events="none">${preview?'新位置':'位置 '+(index+1)}${p.orientation==='vertical'?' · 竖排':p.orientation==='horizontal'?' · 横排':''}</text>${arrow}<circle data-placement-center cx="${cx}" cy="${cy}" r="${4*scale}" fill="white" stroke="#08785c" stroke-width="${1.5*scale}" pointer-events="none"><title>摆放中心</title></circle>${active&&!readonly&&!drawing?pts.map((q,i)=>`<rect data-placement="${i}" data-placement-id="${p.id}" x="${q.x*W-5*scale}" y="${q.y*H-5*scale}" width="${10*scale}" height="${10*scale}" fill="white" stroke="#08916b" stroke-width="${2*scale}"/>`).join(''):''}</g>`;
  }
  function draw(){
   layer.replaceChildren();const a=area(),p=preset();if(!a)return;
@@ -47,17 +48,28 @@ export function mountTemplateAutomation(ctx,initial){
   layer.innerHTML=positions.map(({p,index})=>placementFrame(p,index)).join('')+(drag?.kind==='create'?placementFrame({id:'preview',orientation:drawingOrientation},-1,drag.preview,true):'');
  }
  function render(){
+  if(centersChanged){centersChanged=false;ctx.dirty();}
   const z=ctx.zones().find(z=>z.id===ctx.selected()),a=area(),p=preset(),orientation=drawing?drawingOrientation:p?.orientation;
   const type=carrierType(z?.id)||(/彩盒|纸盒|carton/i.test(z?.name||'')?'CARTON':'BODY');
-  const processes=z?.zoneType==='logo'?`<fieldset ${readonly||drawing?'disabled':''}><h3>区域工艺</h3><label for="area-carrier-type">区域类型</label><select id="area-carrier-type">${['CAP','OTHER'].includes(type)?`<option value="${type}" selected>产品（${type==='CAP'?'盖子':'其他载体'}）</option>`:''}<option value="BODY" ${type==='BODY'?'selected':''}>产品</option><option value="CARTON" ${type==='CARTON'?'selected':''}>彩盒</option></select>${type==='CARTON'?'<p class="hint">彩盒不建议烫印，业务员知晓后可继续</p>':`<p class="hint">允许的烫印工艺（未勾选则不可使用）</p>${foilProcesses.map(([value,label],i)=>`<label class="checkbox-label"><input type="checkbox" id="area-foil-${i}" ${a?.foilProcesses.includes(value)?'checked':''}>${label}</label>`).join('')}`}</fieldset>`:'';
-  panel.innerHTML=`<div class="panel-head"><h2>摆放设置 <span class="count">${a?.presets.length||0} 个位置</span></h2></div><div class="panel-body">${processes}<fieldset ${readonly?'disabled':''}><button type="button" class="btn" id="add-placement" ${z?.zoneType==='logo'&&(!a||a.presets.length<10)?'':'disabled'}>＋ 新增摆放位置</button><label for="auto-orientation">摆放方向</label><select id="auto-orientation" ${p||drawing?'':'disabled'}>${p&&!['horizontal','vertical'].includes(orientation)?`<option value="${orientation}" selected disabled>保持原有方向</option>`:''}<option value="horizontal" ${orientation==='horizontal'?'selected':''}>横排 →</option><option value="vertical" ${orientation==='vertical'?'selected':''}>竖排 ↓</option></select></fieldset><p class="hint">${drawing?'在图上拖出摆放位置；按 Esc 取消。':z?.zoneType==='logo'?'点击框选择位置，拖动或拖四角调整；按 Backspace 删除选中框；方向只改变 Logo 朝向。'+(a?.presets.length>1?'重叠时按 Shift 点击切换。':''):'先点击图中的产品或彩盒区域，再设置 Logo 摆放位置。'}</p></div>`;
+  const processes=z?.zoneType==='logo'?`<fieldset ${readonly||drawing?'disabled':''}><h3>区域工艺</h3><label for="area-carrier-type">区域类型</label><select id="area-carrier-type">${['CAP','OTHER'].includes(type)?`<option value="${type}" selected>产品（${type==='CAP'?'盖子':'其他载体'}）</option>`:''}<option value="BODY" ${type==='BODY'?'selected':''}>产品</option><option value="CARTON" ${type==='CARTON'?'selected':''}>彩盒</option></select>${type==='CARTON'?'<p class="hint">彩盒不建议烫印，业务员知晓后可继续</p>':`<label class="checkbox-label"><input type="checkbox" id="area-foil" ${a?.foilProcesses.length?'checked':''}>允许烫印</label><p class="hint">统一应用于本图所有产品包材区域，允许烫金、烫银、烫玫瑰金和烫镭射</p>`}</fieldset>`:'';
+  panel.innerHTML=`<div class="panel-head"><h2>摆放设置 <span class="count">${a?.presets.length||0} 个位置</span></h2></div><div class="panel-body">${processes}<fieldset ${readonly?'disabled':''}><button type="button" class="btn" id="add-placement" ${z?.zoneType==='logo'&&(!a||a.presets.length<10)?'':'disabled'}>＋ 新增摆放位置</button><label for="auto-orientation">摆放方向</label><select id="auto-orientation" ${p||drawing?'':'disabled'}>${p&&!['horizontal','vertical'].includes(orientation)?`<option value="${orientation}" selected disabled>保持原有方向</option>`:''}<option value="horizontal" ${orientation==='horizontal'?'selected':''}>横排 →</option><option value="vertical" ${orientation==='vertical'?'selected':''}>竖排 ↓</option></select></fieldset><p class="hint">${drawing?'在图上拖出摆放框大小，中心与所属区域重合；按 Esc 取消。':z?.zoneType==='logo'?'点击框选择位置，拖动四角以中心缩放；中心与所属区域重合，移动区域可整体移动；按 Backspace 删除选中框；方向只改变 Logo 朝向。'+(a?.presets.length>1?'重叠时按 Shift 点击切换。':''):'先点击图中的产品或彩盒区域，再设置 Logo 摆放位置。'}</p></div>`;
   panel.querySelector('#area-carrier-type')?.addEventListener('change',e=>{
    if(readonly||drawing||z?.zoneType!=='logo'||!['BODY','CARTON'].includes(e.target.value))return;
    try{classifyZone(z,e.target.value);change();render();}catch(e){ctx.reject(e);}
   });
-  for(const [i,[value]] of foilProcesses.entries())panel.querySelector('#area-foil-'+i)?.addEventListener('change',e=>{
+  panel.querySelector('#area-foil')?.addEventListener('change',e=>{
    if(readonly||drawing||z?.zoneType!=='logo'||type==='CARTON')return;
-   try{if(!area())classifyZone(z,type);const a=area();a.foilProcesses=foilProcesses.map(([v])=>v).filter(v=>v===value?e.target.checked:a.foilProcesses.includes(v));change();render();}catch(e){ctx.reject(e);}
+   const backup=structuredClone(config);
+   try{
+    for(const zone of ctx.zones()){
+     const zoneType=carrierType(zone.id)||(/彩盒|纸盒|carton/i.test(zone.name||'')?'CARTON':'BODY');
+     if(zone.zoneType!=='logo'||zoneType==='CARTON')continue;
+     let target=config.areas.find(a=>a.zoneRef===zone.id);
+     if(!target&&e.target.checked){classifyZone(zone,zoneType);target=config.areas.find(a=>a.zoneRef===zone.id);}
+     if(target)target.foilProcesses=e.target.checked?[...foilProcesses]:[];
+    }
+    change();render();
+   }catch(e){config=backup;render();ctx.reject(e);}
   });
   panel.querySelector('#add-placement')?.addEventListener('click',()=>{
    if(!z||readonly||a?.presets.length>=10)return;
@@ -72,22 +84,23 @@ export function mountTemplateAutomation(ctx,initial){
   canvas.setAttribute('tabindex','0');canvas.focus();
   if(e.altKey){frameSelected=false;if(drawing)cancelDrawing();return;}
   if(!drawing&&!preset()){frameSelected=false;return;}
-  if(drawing){if(readonly)return;e.stopImmediatePropagation();e.preventDefault();const q=point(e);drag={kind:'create',start:q,preview:{centerX:q.x,centerY:q.y,width:.001,height:.001,rotation:0}};}
+  if(drawing){if(readonly)return;e.stopImmediatePropagation();e.preventDefault();const q=point(e);drag={kind:'create',start:q,preview:centered({centerX:q.x,centerY:q.y,width:.001,height:.001,rotation:ctx.zones().find(z=>z.id===ctx.selected())?.rotation||0})};}
   else{
    const id=e.target.dataset.placementId,kind=e.target.dataset.placement;if(!area().presets.some(p=>p.id===id)||kind===undefined){frameSelected=false;return;}
    frameSelected=true;
    e.stopImmediatePropagation();e.preventDefault();
    if(e.shiftKey){const image=ctx.image(),q=point(e),hits=area().presets.filter(p=>pointInside(q,zonePoints({shapeType:'ROTATED_RECT',x:p.box.centerX-p.box.width/2,y:p.box.centerY-p.box.height/2,width:p.box.width,height:p.box.height,rotation:p.box.rotation},image))).reverse(),index=hits.findIndex(p=>p.id===preset().id);if(hits.length)selectPreset(hits[(index+1)%hits.length].id);render();return;}
-   selectPreset(id);if(readonly){render();return;}
+   selectPreset(id);if(readonly||kind==='move'&&ctx.zones().find(z=>z.id===ctx.selected())?.shapeType!=='POLYGON'){render();return;}
    drag={kind,start:point(e),box:structuredClone(preset().box),preset:preset()};render();
   }
   canvas.setPointerCapture(e.pointerId);
  },true);
  canvas.addEventListener('pointermove',e=>{
   if(!drag)return;e.stopImmediatePropagation();const q=point(e);
-  if(drag.kind==='create'){drag.preview={centerX:(q.x+drag.start.x)/2,centerY:(q.y+drag.start.y)/2,width:Math.max(.001,Math.abs(q.x-drag.start.x)),height:Math.max(.001,Math.abs(q.y-drag.start.y)),rotation:0};draw();return;}
+  if(drag.kind==='create'){drag.preview=centered({centerX:(q.x+drag.start.x)/2,centerY:(q.y+drag.start.y)/2,width:Math.max(.001,Math.abs(q.x-drag.start.x)),height:Math.max(.001,Math.abs(q.y-drag.start.y)),rotation:drag.preview.rotation});draw();return;}
   const o=drag.box,b={...o},{width:W,height:H}=ctx.image(),r=o.rotation*Math.PI/180,c=Math.cos(r),s=Math.sin(r);
   if(drag.kind==='move'){b.centerX+=q.x-drag.start.x;b.centerY+=q.y-drag.start.y;}
+  else if(ctx.zones().find(z=>z.id===ctx.selected())?.shapeType!=='POLYGON'){const n=Number(drag.kind),sx=[-1,1,1,-1][n],sy=[-1,-1,1,1][n],dx=(q.x-o.centerX)*W,dy=(q.y-o.centerY)*H;b.width=Math.max(.001,2*sx*(dx*c+dy*s)/W);b.height=Math.max(.001,2*sy*(-dx*s+dy*c)/H);}
   else{const n=Number(drag.kind),sx=[-1,1,1,-1][n],sy=[-1,-1,1,1][n],fixed={x:o.centerX*W-(sx*o.width*W*c-sy*o.height*H*s)/2,y:o.centerY*H-(sx*o.width*W*s+sy*o.height*H*c)/2},dx=q.x*W-fixed.x,dy=q.y*H-fixed.y,w=Math.max(.001*W,sx*(dx*c+dy*s)),h=Math.max(.001*H,sy*(-dx*s+dy*c));b.width=w/W;b.height=h/H;b.centerX=(fixed.x+(sx*w*c-sy*h*s)/2)/W;b.centerY=(fixed.y+(sx*w*s+sy*h*c)/2)/H;}
   if(valid(b)){drag.preset.box=b;draw();}
  },true);
@@ -107,6 +120,10 @@ export function mountTemplateAutomation(ctx,initial){
  canvas.addEventListener('pointerup',end,true);canvas.addEventListener('pointercancel',end,true);
  main.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&drawing){e.preventDefault();cancelDrawing();return;}
+  if(e.target===canvas&&!readonly&&(e.ctrlKey||e.metaKey)&&!e.altKey&&!e.isComposing&&['c','v'].includes(e.key.toLowerCase())){
+   if(e.repeat||drawing||drag||frameSelected)return;
+   e.preventDefault();if(e.key.toLowerCase()==='c')ctx.copyZone?.();else ctx.pasteZone?.();return;
+  }
   if(e.key!=='Backspace'||e.target!==canvas||readonly||e.ctrlKey||e.metaKey||e.altKey||e.isComposing)return;
   e.preventDefault();if(e.repeat||drawing||drag)return;
   if(!frameSelected){ctx.deleteZone();return;}
@@ -115,8 +132,15 @@ export function mountTemplateAutomation(ctx,initial){
   a.presets.forEach(v=>v.isDefault=v.id===presetId);removeTargets(t=>t.areaId===a.id&&t.presetId===p.id);change();render();
  },{signal:ctx.signal});
  function moved(zoneId,dx,dy){const a=config.areas.find(a=>a.zoneRef===zoneId);if(a)for(const p of a.presets){p.box.centerX+=dx;p.box.centerY+=dy;}}
+ function cloned(source,before,after){
+  if(!source)return;
+  const copy=structuredClone(source),image=ctx.image();copy.id=uid();copy.zoneRef=after.id;copy.name=after.name;
+  copy.presets.forEach(p=>{p.id=uid();p.box=transformPlacement(p.box,before,after,image);});
+  if(copy.presets.some(p=>{const b=p.box,poly=zonePoints({shapeType:'ROTATED_RECT',x:b.centerX-b.width/2,y:b.centerY-b.height/2,width:b.width,height:b.height,rotation:b.rotation},image);return !containsPolygon(zonePoints(after,image),poly)||ctx.zones().some(z=>z.zoneType==='no-logo'&&polygonOverlap(poly,zonePoints(z,image)));}))throw Error('粘贴后的摆放框超出区域或覆盖禁止区域，请调整位置后重试');
+  config.areas.push(copy);presetId=null;frameSelected=false;
+ }
  function transformed(zoneId,before,after,force=false){const a=config.areas.find(a=>a.zoneRef===zoneId);if(!a)return true;const image=ctx.image();const proposals=a.presets.map(p=>({p,box:transformPlacement(p.box,before,after,image)}));if(!force&&proposals.some(({box})=>{const poly=zonePoints({shapeType:'ROTATED_RECT',x:box.centerX-box.width/2,y:box.centerY-box.height/2,width:box.width,height:box.height,rotation:box.rotation},image);return !containsPolygon(zonePoints(after,image),poly)||ctx.zones().some(n=>n.zoneType==='no-logo'&&polygonOverlap(poly,zonePoints(n,image)));})){ctx.reject('调整后默认框越界或碰到禁区，请先调整默认框');return false;}for(const {p,box} of proposals){p.box=box;if(Math.abs((after.rotation||0)-(before.rotation||0))>1e-8&&['horizontal','vertical'].includes(p.orientation))p.orientation='custom';}return true;}
  function removeTargets(matches){config.schemes.forEach(s=>s.targets=s.targets.filter(t=>!matches(t)));config.schemes=config.schemes.filter(s=>s.targets.length);if(config.schemes.length&&!config.schemes.some(s=>s.role==='DEFAULT'))config.schemes[0].role='DEFAULT';}
  function removeZone(zoneId){if(drawing)cancelDrawing();const a=config.areas.find(a=>a.zoneRef===zoneId);if(!a)return true;removeTargets(t=>t.areaId===a.id);config.areas=config.areas.filter(v=>v!==a);return true;}
- return {render,draw,serialize,assertReady(){if(drawing)throw Error('请先完成摆放位置框选，或按 Esc 取消后再保存');},moved,transformed,removeZone,classifyZone,carrierType};
+ return {render,draw,serialize,assertReady(){if(drawing)throw Error('请先完成摆放位置框选，或按 Esc 取消后再保存');},moved,cloned,transformed,removeZone,classifyZone,carrierType};
 }

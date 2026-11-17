@@ -48,3 +48,14 @@ test('APIMart Logo加工可选择保留原色',()=>{
   assert.match(request.prompt,/preserve the original visible logo colors/i);
   assert.doesNotMatch(request.prompt,/solid pure black/i);
 });
+
+for(const preserveDetails of [false,true]){
+  for(const provider of ['JSON','APIMART'])test(`${provider}: original-color cutout only removes the background (preserveDetails=${preserveDetails})`,()=>{
+    const options={model:'gpt-image-2',targetColor:'original',preserveDetails};
+    const request=provider==='JSON'?buildAiLogoRequest('AQIDBA==',options):buildApimartLogoRequest('data:image/png;base64,AQID',options);
+    assert.match(request.prompt,/remove only the background/i);
+    assert.match(request.prompt,/preserve the original visible logo colors/i);
+    assert.match(request.prompt,/do not add[^.]*gloss[^.]*highlights[^.]*bevel[^.]*3D/i,'cutout must prohibit invented surface effects');
+    assert.doesNotMatch(request.prompt,/recreate|generate one|preserve[^.]*metallic materials|bright specular highlights/i,'cutout must not ask for reconstruction or a material finish');
+  });
+}

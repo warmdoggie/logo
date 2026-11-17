@@ -1,0 +1,156 @@
+{
+  "verifiedAt": "2026-09-14T09:22:04.827Z",
+  "tables": {
+    "Product": {
+      "count": 12,
+      "originalFieldsUnchanged": true
+    },
+    "Task": {
+      "count": 3,
+      "originalFieldsUnchanged": true
+    },
+    "LogoAsset": {
+      "count": 3,
+      "originalFieldsUnchanged": true
+    },
+    "TaskProduct": {
+      "count": 9,
+      "originalFieldsUnchanged": true
+    },
+    "AppMeta": {
+      "count": 1,
+      "originalFieldsUnchanged": true
+    },
+    "ProductTemplate": {
+      "count": 4,
+      "originalFieldsUnchanged": true
+    },
+    "TemplateZone": {
+      "count": 12,
+      "originalFieldsUnchanged": true
+    },
+    "TaskProductTemplate": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "OriginalLogoVersion": {
+      "count": 3,
+      "originalFieldsUnchanged": true
+    },
+    "LogoElement": {
+      "count": 3,
+      "originalFieldsUnchanged": true
+    },
+    "ProductionLogo": {
+      "count": 2,
+      "originalFieldsUnchanged": true
+    },
+    "ProductionLogoElement": {
+      "count": 2,
+      "originalFieldsUnchanged": true
+    },
+    "LogoUsageReference": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "Rule": {
+      "count": 9,
+      "originalFieldsUnchanged": true
+    },
+    "RuleCondition": {
+      "count": 13,
+      "originalFieldsUnchanged": true
+    },
+    "ProcessPolicy": {
+      "count": 7,
+      "originalFieldsUnchanged": true
+    },
+    "ProductProcessProfile": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "LogoRuleFacts": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "TaskProcessSelection": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "RuleEvaluationRun": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "TaskRuleEvaluation": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "EvaluationConfirmation": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "RuleUser": {
+      "count": 2,
+      "originalFieldsUnchanged": true
+    },
+    "RuleSession": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "ProductImageVersion": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "TaskStyleMaster": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "MockupJob": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "MockupVersion": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "MockupReview": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "TaskWorkspaceState": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "TaskStyleRevision": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "BatchJob": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "BatchItem": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "BatchAttempt": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "BatchOutput": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    },
+    "BatchExport": {
+      "count": 0,
+      "originalFieldsUnchanged": true
+    }
+  },
+  "uploads": {
+    "count": 20,
+    "allSHA256Unchanged": true
+  },
+  "integrity": "ok",
+  "geometryMigration": "complete",
+  "noTestData": true
+}

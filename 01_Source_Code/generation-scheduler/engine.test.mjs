@@ -16,7 +16,7 @@ test('turning paid generation off also blocks submit jobs already waiting in Red
 });
 
 function fixture(){
- const changes=[];return {changes,store:{startSubmit:async j=>j,transition:async(...args)=>changes.push(args),retry:async(...args)=>changes.push(args)}};
+ const changes=[];return {changes,store:{startSubmit:async j=>j,transition:async(...args)=>changes.push(args),retry:async(...args)=>changes.push(args),pausePlanRead:async job=>changes.push([job,'DOWNLOADED','plan_storage_unavailable',60000])}};
 }
 test('OSS outages keep retrying only storage and never exhaust successful image processing',async()=>{
  const {changes,store}=fixture();await runStage('process',{id:'job',process_attempts:30},{store,processImage:async()=>{throw Object.assign(Error('upload failed'),{code:'STORAGE_PENDING'});}});
@@ -25,6 +25,24 @@ test('OSS outages keep retrying only storage and never exhaust successful image 
 test('lost submit acknowledgement never retries generation and keeps the slot',async()=>{
  const {changes,store}=fixture();await runStage('submit',{id:'job'}, {store,provider:{submit:async()=>{throw Error('timeout');}}});
  assert.equal(changes[0][1],'SUBMISSION_UNKNOWN');assert.equal(changes[0][3],false);
+});
+test('an unavailable plan retries preparation without treating it as an uncertain paid POST',async()=>{
+ const {changes,store}=fixture();await runStage('submit',{id:'job'}, {store,provider:{submit:async()=>{throw Object.assign(Error('plan unavailable'),{planUnavailable:true});}}});
+ assert.equal(changes[0][1],'QUEUED');assert.equal(changes[0][2].error_code,'plan_storage_unavailable');assert.equal(changes[0][3],true);assert.equal(changes[0][4],60000);
+});
+test('plan retrieval completes before marking any paid submission as started',async()=>{
+ const events=[],job={id:'job',params:{batchId:'fixture'}};
+ await runStage('submit',job,{store:{startSubmit:async()=>{events.push('started');return job;},transition:async()=>{}},provider:{prepare:async()=>{events.push('prepared');return {prompt:'original'};},submit:async(params,input)=>{assert.deepEqual(input,{prompt:'original'});events.push('posted');return {taskId:'remote'};}}});
+ assert.deepEqual(events,['prepared','started','posted']);
+});
+test('a failed preparation never sets the paid submission marker',async()=>{
+ const events=[];
+ await runStage('submit',{id:'job',params:{}},{store:{startSubmit:async()=>events.push('started'),transition:async(job,status,patch,release,delay)=>events.push({status,release,delay})},provider:{prepare:async()=>{throw Error('cloud offline');},submit:async()=>events.push('posted')}});
+ assert.deepEqual(events,[{status:'QUEUED',release:true,delay:60000}]);
+});
+test('a temporary plan read outage does not exhaust finished image processing',async()=>{
+ const {changes,store}=fixture();await runStage('process',{id:'job',process_attempts:30},{store,processImage:async()=>{throw Object.assign(Error('plan unavailable'),{planUnavailable:true});}});
+ assert.equal(changes[0][1],'DOWNLOADED');assert.equal(changes[0][2],'plan_storage_unavailable');assert.equal(changes[0][3],60000);
 });
 test('confirmed rejection releases the slot',async()=>{
  const {changes,store}=fixture();await runStage('submit',{id:'job'}, {store,provider:{submit:async()=>{throw Object.assign(Error(),{rejected:true});}}});

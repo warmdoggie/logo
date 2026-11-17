@@ -6,6 +6,7 @@ import {join,resolve,sep,basename} from 'node:path';
 import sharp from 'sharp';
 import {createDemoServer} from './demo-server.mjs';
 import {createSchemes} from './schemes.mjs';
+import {preparePlacementLogo} from './placement-logo.mjs';
 
 async function workspace(run){
  const dir=await mkdtemp(join(tmpdir(),'s7-logo-asset-')),calls=[],processed=[];
@@ -27,6 +28,16 @@ test('选择 Logo 返回轻量预览，并在当前用户任务内保存完整�
  replace(Buffer.alloc(1));const saved=await call(url);assert.ok(Buffer.from(await saved.arrayBuffer()).equals(original));
  assert.equal((await call(url,null,{cookie:'bob'})).status,404);
  assert.equal((await call('/api/logo-library/one/image?selection=1',null,{cookie:'bob','X-S7-Task-Id':task.id})).status,404);
+}));
+
+test('centering a selected library Logo uses its full-resolution task snapshot',()=>workspace(async({call,task,original})=>{
+ const response=await call('/api/logo-library/one/image?selection=1',null,{'X-S7-Task-Id':task.id});
+ const logo={logoImage:Buffer.from(await response.arrayBuffer()).toString('base64'),logoAssetUrl:response.headers.get('X-S7-Task-Asset'),aiRefined:true};
+ await preparePlacementLogo(logo,(url,options)=>call(url,JSON.parse(options.body)),task.id);
+ const bytes=Buffer.from(logo.logoImage,'base64'),meta=await sharp(bytes).metadata();
+ assert.deepEqual([meta.width,meta.height],[2172,1148]);
+ assert.deepEqual(await sharp(bytes).extract({left:62,top:62,width:2048,height:1024}).raw().toBuffer(),await sharp(original).raw().toBuffer());
+ assert.ok(logo.logoAssetUrl?.startsWith(`/api/my-space/tasks/${task.id}/assets/`),'generation and explicit AI processing retain the full-resolution original');
 }));
 
 for(const mode of ['single','background','multi-product','multi-logo','processing'])test(`${mode} 使用快照完整 Logo，忽略客户端轻量预览`,()=>workspace(async({call,task,original,calls,processed})=>{

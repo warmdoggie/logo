@@ -1,5 +1,5 @@
 import {mkdir,readdir,readFile,writeFile,rename,rm,stat} from 'node:fs/promises';
-import {join} from 'node:path';
+import {join,resolve,sep} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import sharp from 'sharp';
 const fail=(message,status)=>{throw Object.assign(Error(message),{status});};
@@ -54,13 +54,25 @@ export function userSpace(root,{storage}={}){
    try{await writeFile(temporary,JSON.stringify(record),{flag:'wx'});await rename(temporary,file);await writeSummary(file,record);}catch(e){await rm(temporary,{force:true});throw e;}return input.summary?summary(record):record;
   });
  }
- async function deleteTask(user,id){
+ async function deleteTask(user,id,{online=true}={}){
   const file=taskFile(user,id),folder=join(directory(user),'tasks',safe(id));return serialized(file,async()=>{
    if((await readGeneration(user,id))?.status==='running')fail('任务正在生成，请完成后再删除',409);
    await task(user,id);let names;try{names=await readdir(directory(user));}catch(e){if(e.code==='ENOENT')names=[];else throw e;}
-   for(const name of names){if(!/^[a-f0-9-]{36}$/.test(name))continue;const recordFile=join(directory(user),name,'record.json');let record;try{record=JSON.parse(await readFile(recordFile,'utf8'));}catch(e){if(e.code==='ENOENT')continue;throw e;}if(record.taskId===id)await rm(join(directory(user),name),{recursive:true,force:true});}
-   await rm(folder,{recursive:true,force:true});
+   const records=[];
+   for(const name of names){if(!/^[a-f0-9-]{36}$/.test(name))continue;const recordFile=join(directory(user),name,'record.json');let record;try{record=JSON.parse(await readFile(recordFile,'utf8'));}catch(e){if(e.code==='ENOENT')continue;throw e;}if(record.taskId===id)records.push({record,folder:join(directory(user),name)});}
+   if(online)for(const {record}of records)for(const image of record.images)if(image.storage){if(!storage?.remove)fail('线上存储清理尚未配置，未删除任务',503);await storage.remove(image.storage);}
+   for(const target of [...records.map(record=>record.folder),folder]){
+    if(!resolve(target).startsWith(resolve(directory(user))+sep))fail('删除路径无效',400);
+    await rm(target,{recursive:true,force:true});
+   }
   });
+ }
+ async function deleteAllTasks(user){
+  const rows=await tasks(user);
+  for(const row of rows)if((await generation(user,row.id))?.status==='running')fail('有任务正在生成，请完成后再全部删除',409);
+  for(const row of rows)for(const record of await history(user,row.id))for(const image of record.images)if(image.storage){if(!storage?.remove)fail('线上存储清理尚未配置，未删除任务',503);await storage.remove(image.storage);}
+  for(const row of rows)await deleteTask(user,row.id,{online:false});
+  return {deleted:rows.length};
  }
  async function save(user,{taskId,kind,model,images,recordId}){
   const persist=async()=>{
@@ -94,5 +106,5 @@ export function userSpace(root,{storage}={}){
   const record=await change(await readGeneration(user,id)),file=join(taskFile(user,id),'..','generation.json'),temporary=file+'.'+randomUUID();
   try{await writeFile(temporary,JSON.stringify(record),{flag:'wx'});await rename(temporary,file);}catch(e){await rm(temporary,{force:true});throw e;}return record;
  });}
- return {save,history,image,imageRedirect,task,taskSummary,tasks,createTask,updateTask,deleteTask,generation,updateGeneration,saveTaskAsset,taskAsset,taskAssetFromUrl};
+ return {save,history,image,imageRedirect,task,taskSummary,tasks,createTask,updateTask,deleteTask,deleteAllTasks,generation,updateGeneration,saveTaskAsset,taskAsset,taskAssetFromUrl};
 }

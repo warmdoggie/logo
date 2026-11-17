@@ -54,3 +54,20 @@ for(const mode of ['background','streaming','multi-logo'])test(`${mode} 生成�
  assert.equal(calls.length,2);
  const expected=await sharp(original).raw().toBuffer();for(const input of calls)assert.ok((await sharp(Buffer.from(input.baseImage.split(',')[1],'base64')).raw().toBuffer()).equals(expected),'生成应使用任务快照的原始像素');
 }));
+
+for(const moveEnabled of [false,true])test(`多 Logo 快照生成使用各自编辑区域，移动位置${moveEnabled?'解锁':'锁定'}均不要求重复的顶层区域`,()=>workspace(async({call,calls})=>{
+ const task=await(await call('/api/my-space/tasks',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({title:'edited logo layouts'})})).json();
+ const snapshot=await call('/api/product-library/image/p',{headers:{'X-S7-Task-Id':task.id}}),baseAssetUrl=snapshot.headers.get('X-S7-Task-Asset');await snapshot.arrayBuffer();
+ const pixels=Buffer.alloc(16*16*4);for(let y=4;y<12;y++)for(let x=2;x<14;x++)pixels[(y*16+x)*4+3]=255;
+ const logoImage=(await sharp(pixels,{raw:{width:16,height:16,channels:4}}).png().toBuffer()).toString('base64');
+ const logoLayouts=['one','two'].map((logoId,index)=>{
+  const targets=[{id:'saved',masterZoneId:'body',masterLocked:true,moveEnabled,x:index===0?.35:.65,y:.5,widthRatio:.2,rotation:0}];
+  return {logoId,targets,schemes:createSchemes(targets).schemes};
+ });
+ const response=await call('/api/ai-render-logos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({taskId:task.id,productId:'p',baseAssetUrl,model:'test',selectedVersions:['BLACK'],logos:['one','two'].map(id=>({id,name:id,logoImage})),logoLayouts})});
+ assert.equal(response.status,202,response.ok?'':await response.text());await response.text();
+ let job;for(let n=0;n<100;n++){job=await(await call(`/api/my-space/tasks/${task.id}/generation`)).json();if(job.status!=='running')break;await new Promise(resolve=>setTimeout(resolve,10));}
+ assert.equal(job.status,'complete');assert.equal(job.outputs.length,2);
+ assert.deepEqual(calls.map(input=>input.targets[0].x).sort((a,b)=>a-b),[.35,.65]);
+ assert.ok(calls.every(input=>input.targets[0].moveEnabled===moveEnabled));
+}));

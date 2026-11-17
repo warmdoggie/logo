@@ -43,7 +43,7 @@ test('曲面弯曲后的字形按变形后的落点取色，实际成图在深�
   for(let y=40;y<60;y++)for(let x=40;x<45;x++)logo.data.set([0,0,0,255],(y*200+x)*4);
   assert.equal(chooseContrastColor({data,width:200,height:100,left:20,top:10,boxWidth:160,boxHeight:80,logo,curve:1}),'#FFFFFF');
   const baseImage=await sharp(data,{raw:{width:200,height:100,channels:4}}).png().toBuffer(),logoImage=await sharp(logo.data,{raw:{width:200,height:100,channels:4}}).png().toBuffer();
-  const result=await renderLogoSet({baseImage,logoImage,targets:[{id:'curved',x:.5,y:.5,widthRatio:.8,curve:1,autoContrast:true}],selectedVersions:['BLACK']});
+  const result=await renderLogoSet({baseImage,logoImage,targets:[{id:'curved',x:.22,y:.5,widthRatio:.04,curve:1,autoContrast:true}],selectedVersions:['BLACK']});
   const pixels=await sharp(result.outputs[0].bytes).ensureAlpha().raw().toBuffer();
   let white=0;for(let y=35;y<65;y++)for(let x=38;x<50;x++)if(pixels[(y*200+x)*4]>240)white++;
   assert.ok(white>0,'弯曲后的 Logo 应在深色带上显示白色字形');

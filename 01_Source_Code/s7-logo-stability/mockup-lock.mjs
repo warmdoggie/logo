@@ -37,7 +37,8 @@ export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskI
       const generatedLuma=.2126*generated[offset]+.7152*generated[offset+1]+.0722*generated[offset+2];
       const metallic=foilMask?foilMask[i]>0:!!foilFinish;
       const goldPixel=goldMask?goldMask[i]>0:foilFinish==='gold';
-      const coloredFoil=(roseMask?roseMask[i]>0:foilFinish==='rose')||(laserMask?laserMask[i]>0:foilFinish==='laser');
+      const laserPixel=laserMask?laserMask[i]>0:foilFinish==='laser';
+      const coloredFoil=roseMask?roseMask[i]>0:foilFinish==='rose';
       if(surfaceBase&&!goldPixel){
         const sceneLuma=.2126*surfaceBase[offset]+.7152*surfaceBase[offset+1]+.0722*surfaceBase[offset+2];
         const light=sceneLuma/255,texture=Math.max(-.035,Math.min(.035,(baseLuma-sceneLuma)/255));
@@ -48,10 +49,10 @@ export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskI
         const core=[0,1,2].map(channel=>Math.max(0,Math.min(255,(guide[offset+channel]-base[offset+channel]*(1-alpha))/alpha)));
         if(metallic){
           // The package supplies the foil reflection; AI glyph-edge lighting is discarded.
-          const peak=Math.max(1,...core),reflection=peak*(.97+light*.05+texture*.35);
+          const peak=Math.max(1,...core),reflection=peak*(laserPixel?.97+light*.05+texture*.35:1.09+light*.05+texture*.1);
           const silver=190+72*Math.tanh((reflection-205)/42),patch=silverPatch(x,y);
-          // Fine irregular foil detail varies in density, while retaining bright silver reflections.
-          const detail=grain*(6+10*(patch+.5))+patch*20+texture*40;
+          // Polished foil keeps smooth reflections; the laser material retains its established texture.
+          const detail=laserPixel?grain*(6+10*(patch+.5))+patch*20+texture*40:grain*.8+patch*1.2+texture*8;
           const sample=(dx,dy)=>silverHeight[Math.max(0,Math.min(baseMeta.height-1,y+dy))*baseMeta.width+Math.max(0,Math.min(baseMeta.width-1,x+dx))]/255;
           const left=sample(-1,0),right=sample(1,0),top=sample(0,-1),bottom=sample(0,1);
           // A subpixel foil layer catches light on one edge and softly shades the opposite edge.
@@ -60,11 +61,21 @@ export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskI
           const rim=slope*(slope>0?28:22);
           const tone=silver+detail,highlight=tone>245?245+8*Math.tanh((tone-245)/8):tone;
           const layer=rim<0?rim*Math.min(1,Math.max(.35,(highlight-110)/80)):rim;
+          if(laserPixel){
+            // Keep the accepted rainbow tone, grain and bonded edges.
+            const laserLight=.83+.16*baseLuma/255;
+            for(let channel=0;channel<3;channel++){
+              const reflected=Math.max(0,Math.min(255,core[channel]*laserLight+detail+layer));
+              output[offset+channel]=Math.round(reflected*alpha+base[offset+channel]*(1-alpha));
+            }
+            output[offset+3]=base[offset+3];continue;
+          }
           // Keep silver reflections below a bright substrate, including the light-facing rim.
           const whiteSurface=Math.max(0,Math.min(1,(sceneLuma-210)/25));
           const highlightLimit=253+(sceneLuma-24-253)*whiteSurface;
           for(let channel=0;channel<3;channel++){
-            const silverChannel=Math.max(0,Math.min(253,highlight+layer+(core[channel]-peak)*(coloredFoil?1:.15)));
+            const reflected=highlight+layer+(core[channel]-peak)*(coloredFoil?1:.15);
+            const silverChannel=Math.max(0,Math.min(253,reflected));
             const visibleSilver=silverChannel-(253-highlightLimit)*Math.max(0,Math.min(1,(silverChannel-140)/80));
             output[offset+channel]=Math.round(visibleSilver*alpha+base[offset+channel]*(1-alpha));
           }
@@ -87,12 +98,22 @@ export async function lockOutsideLogo({baseImage,generatedImage,guideImage,maskI
         const edge=(sample(1,0)-sample(-1,0)+sample(0,1)-sample(0,-1))/255*.09;
         let hash=Math.imul(x+1,374761393)^Math.imul(y+1,668265263);
         hash=Math.imul(hash^(hash>>>13),1274126177);hash^=hash>>>16;
-        const grain=((hash>>>0)/4294967295-.5)*.05;
+        const grain=((hash>>>0)/4294967295-.5)*.004;
         const smoothLuma=.2126*softGenerated[offset]+.7152*softGenerated[offset+1]+.0722*softGenerated[offset+2];
-        const detail=Math.max(-.04,Math.min(.04,(generatedLuma/Math.max(1,smoothLuma)-1)*.12));
+        const detail=Math.max(-.008,Math.min(.008,(generatedLuma/Math.max(1,smoothLuma)-1)*.02));
         // Smooth compression retains tonal detail in darker foil instead of clipping it flat.
-        factor=Math.max(.65,1+.24*Math.tanh((rawFactor-1)*1.3)+edge+grain+detail);
+        factor=Math.max(.65,1.1+.24*Math.tanh((rawFactor-1)*1.3)+edge+grain+detail);
         factor=Math.min(factor,255/Math.max(1,guide[offset],guide[offset+1],guide[offset+2]));
+        const core=[0,1,2].map(channel=>Math.max(0,Math.min(255,(guide[offset+channel]-base[offset+channel]*(1-alpha))/alpha)));
+        // Recover the foil highlight before substrate shading, then reflect warm light only at its peak.
+        const peak=Math.max(...core)/(.82+baseLuma/255*.28);
+        const glint=Math.max(0,Math.min(1,(peak-196)/45))**2*.88;
+        const warmLight=[255,248,220];
+        for(let channel=0;channel<3;channel++){
+          const reflected=Math.min(255,core[channel]*factor)*(1-glint)+warmLight[channel]*glint;
+          output[offset+channel]=Math.round(reflected*alpha+base[offset+channel]*(1-alpha));
+        }
+        output[offset+3]=base[offset+3];continue;
       }
       output[offset]=Math.min(255,Math.round(guide[offset]*factor*alpha+base[offset]*(1-alpha)));
       output[offset+1]=Math.min(255,Math.round(guide[offset+1]*factor*alpha+base[offset+1]*(1-alpha)));

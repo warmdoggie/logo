@@ -1,5 +1,6 @@
 # Dependencies
 01_Source_Code/node_modules/
+app/node_modules/
 
 # Runtime data and generated files
 01_Source_Code/data/
@@ -7,6 +8,8 @@
 01_Source_Code/outputs/
 01_Source_Code/logs/
 01_Source_Code/uploads/
+app/work/
+app/acceptance-data/
 outputs/
 workspace-release-tests.txt
 

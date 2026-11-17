@@ -35,9 +35,9 @@ docker compose up -d --wait --wait-timeout 90
 docker exec -i logo-scheduler-postgres psql -v ON_ERROR_STOP=1 -U scheduler -d scheduler < schema.sql >/dev/null
 for role in api network images; do
   case "$role" in
-    api) entry=api.mjs; memory=512M; cpu=50% ;;
-    network) entry=worker.mjs; memory=512M; cpu=50% ;;
-    images) entry='worker.mjs images'; memory=768M; cpu=200% ;;
+    api) entry=api.mjs; memory=1536M; heap=768; cpu=50% ;;
+    network) entry=worker.mjs; memory=512M; heap=320; cpu=50% ;;
+    images) entry='worker.mjs images'; memory=2G; heap=768; cpu=200% ;;
   esac
   cat > "/etc/systemd/system/logo-scheduler-$role.service" <<UNIT
 [Unit]
@@ -53,7 +53,7 @@ User=logo-scheduler
 Group=logo-scheduler
 WorkingDirectory=/srv/logo-scheduler
 EnvironmentFile=/etc/logo-scheduler/app.env
-Environment=NODE_OPTIONS=--max-old-space-size=320
+Environment=NODE_OPTIONS=--max-old-space-size=$heap
 ExecStart=/opt/node-v24.17.0/bin/node /srv/logo-scheduler/$entry
 Restart=on-failure
 RestartSec=5

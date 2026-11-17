@@ -36,7 +36,7 @@ function workspace(){
  const targets=[{id:'body',x:.5,y:.5,widthRatio:.2}],a={foilTemplate:{zones:[{id:'body',zoneType:'logo'}]},baseData:'base-a',baseImage:{id:'a'},schemeState:createSchemes(targets),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'body',savedSignatures:{}};
  const pending=Promise.withResolvers(),requests=[],rendered=[],errors=[];
  const c=vm.createContext({restoreProductSelection(){},selectedGenerationVersions:()=>['ORIGINAL','BLACK'],currentTaskId:null,s7User:null,structuredClone,createSchemes,ensureCustomScheme,masterTargetsFromTemplate,rebindMasterZones,multiProductViews:new Map([['a',a]]),multiProductLoads:new Map(),multiPackageProducts:[{id:'a',sku:'A'},{id:'b',sku:'B'}],selectedMultiProductId:'a',loadedMultiProductId:'a',multiProductLoadRevision:0,taskLogos:[],multiProductJob:null,...a,
-  renderMultiProductResults(){},saveMultiProductView(){},queueSchemeCards(){},setStatus:(message,type)=>{if(type==='error')errors.push(message);},
+  logoImage:null,renderMultiProductResults(){},saveMultiProductView(){},queueSchemeCards(){},setStatus:(message,type)=>{if(type==='error')errors.push(message);},
   fetch:url=>{requests.push(url);return url.includes('/template/')?Promise.resolve({ok:true,json:async()=>({template:{zones:[{id:'body',zoneType:'logo',x:.2,y:.2,width:.4,height:.2}]}})}):pending.promise;},
   fileData:async()=>({data:'base-b',dataUrl:'data:image/png;base64,base-b'}),loadImage:async()=>({id:'b'}),document:{querySelector:()=>({})},loadSchemeTargets:()=>rendered.push(c.loadedMultiProductId)
  });

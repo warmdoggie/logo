@@ -1,0 +1,14 @@
+const methods={UV_PRINT:'UV印刷',PRINT_3D:'3D打印',SCREEN_PRINT:'丝印',HOT_STAMP:'烫印'};
+export function printingFields(container,value={allowed:[],defaultProcess:null,ink:null}){
+ container.innerHTML='<h3>印刷工艺预设</h3><p class="hint">由设计师确定适用工艺。业务员做图时可从这些工艺中选择。</p><fieldset><legend>适用工艺（可多选）</legend>'+Object.entries(methods).map(([id,label])=>'<label class="manage-check"><input type="checkbox" data-print-method value="'+id+'" '+(value.allowed.includes(id)?'checked':'')+'>'+label+'</label>').join('')+'</fieldset><label>默认工艺<select data-print-default required></select></label><label>黑 / 白油墨方案默认色<select data-print-ink required><option value="">请选择</option><option value="BLACK">黑色</option><option value="WHITE">白色</option></select></label><p class="hint">烫印须由业务员主动勾选。预设只影响后续做图，历史图片保持原样。</p>';
+ const options=()=>{const select=container.querySelector('[data-print-default]'),old=select.value||value.defaultProcess;select.replaceChildren(new Option('请选择默认工艺',''));for(const c of container.querySelectorAll('[data-print-method]:checked'))select.add(new Option(methods[c.value],c.value));select.value=old||'';};
+ container.querySelectorAll('[data-print-method]').forEach(c=>c.onchange=options);options();container.querySelector('[data-print-ink]').value=value.ink||'';
+ return ()=>{const allowed=[...container.querySelectorAll('[data-print-method]:checked')].map(c=>c.value),defaultProcess=container.querySelector('[data-print-default]').value,ink=container.querySelector('[data-print-ink]').value;if(!allowed.length||!allowed.includes(defaultProcess)||!ink)throw Error('请设置适用工艺、默认工艺及黑白默认色');return {allowed,defaultProcess,ink};};
+}
+export async function mountPrintingSettings(main,id,h){
+ const response=await fetch('/api/printing-settings/'+encodeURIComponent(id)),data=await response.json();if(!response.ok)throw Error(data.error);if(!h.isCurrent())return;
+ const section=document.createElement('section');section.className='panel manage-panel';main.append(section);
+ if(!data.canEdit){section.textContent='印刷工艺预设由设计师维护';return;}
+ section.innerHTML='<form><div data-print-fields></div><p role="status"></p><button class="btn primary">保存工艺预设</button></form>';
+ const read=printingFields(section.querySelector('[data-print-fields]'),data.settings);section.querySelector('form').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button'),status=e.target.querySelector('[role=status]');button.disabled=true;try{const r=await fetch('/api/printing-settings/'+id,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...read(),baseVersion:data.settings.version})}),v=await r.json();if(!r.ok)throw Error(v.error);data.settings=v;status.textContent='工艺预设已保存';h.toast(status.textContent);}catch(e){status.textContent=e.message;}finally{button.disabled=false;}};
+}

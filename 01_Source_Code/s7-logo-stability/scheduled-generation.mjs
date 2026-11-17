@@ -16,8 +16,8 @@ export function createScheduledGenerations({spaces,url,token,configPath,autoStar
  const endpoint=new URL(url);
  if(endpoint.protocol!=='http:'||endpoint.hostname!=='127.0.0.1'||token.length<40)throw Error('Invalid internal scheduler configuration');
  const pending=new Map();let refreshing=false;
- async function request(user,path,{method='GET',body,binary=false}={}){
-  const response=await fetch(endpoint.origin+path,{method,headers:{Authorization:'Bearer '+token,'X-User-ID':user.id,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(60000)});
+ async function request(user,path,{method='GET',body,binary=false,timeout=60000}={}){
+  const response=await fetch(endpoint.origin+path,{method,headers:{Authorization:'Bearer '+token,'X-User-ID':user.id,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(timeout)});
   if(!response.ok){const error=await response.json();fail(error.error==='disk_reserve_required'?'磁盘空间不足，已暂停接收新任务':error.error==='Pending job quota reached'?'待处理图片过多，请完成部分任务后再提交':`任务调度暂不可用（${error.error||response.status}）`,response.status);}
   return binary?Buffer.from(await response.arrayBuffer()):response.json();
  }
@@ -78,6 +78,10 @@ export function createScheduledGenerations({spaces,url,token,configPath,autoStar
  }
  if(autoStart){const timer=setInterval(()=>refresh().catch(()=>console.error('scheduler_projection_pending')),5000);timer.unref();void refresh().catch(()=>console.error('scheduler_projection_pending'));}
  return {
+  async deleteTasks(user){
+   await Promise.all([...pending].filter(([key])=>key.startsWith(user.id+':')).map(([,operation])=>operation));
+   return request(user,'/v1/tasks',{method:'DELETE',body:{allTasks:true},timeout:600000});
+  },
   async start(user,taskId,metadata,inputs){
    await spaces.task(user,taskId);
    const previous=await spaces.generation(user,taskId);

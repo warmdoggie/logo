@@ -1,0 +1,5 @@
+#transparent-panel img { max-width: 260px; max-height: 180px; object-fit: contain; background: #aaa; }
+#transparent-results article > div { display: flex; gap: 12px; flex-wrap: wrap; }
+#transparent-panel figure { margin: 10px 0; }
+#transparent-results article { padding: 16px 0; border-top: 1px solid #ddd; }
+#transparent-error { color: #a71930; }

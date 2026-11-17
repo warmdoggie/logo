@@ -43,7 +43,7 @@ export function createMultiLogoJobs(spaces,mockupRenderer,scheduled){
   for(const logo of input.logos){
    const layout=layouts.find(layout=>layout.logoId===logo.id),logoTargets=layout?.targets||targets,logoSchemes=layout?.schemes||schemes;
    let normalized;
-   try{normalized=await validateAiLogoOutput(Buffer.from(logo.logoImage,'base64'));}
+   try{normalized=await validateAiLogoOutput(Buffer.from(logo.logoImage,'base64'),{requireTransparency:input.processLogo!==true});}
    catch(error){fail(`${logo.name}：请上传有可见内容的透明 Logo，或先使用 AI 加工。${error.message}`);}
    const bytes=await sharp(normalized.bytes).png().toBuffer();
    const fingerprint=createHash('sha256').update(basePng).update(bytes).update(JSON.stringify([input.product.id,logoTargets,logoSchemes,input.model])).digest('hex');

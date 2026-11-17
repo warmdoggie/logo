@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import pg from 'pg';
 import {readFile} from 'node:fs/promises';
 import {createStore} from './store.mjs';
+import {runStage} from './engine.mjs';
 
 const database=process.env.TEST_DATABASE_URL||'postgres://scheduler:test-only@127.0.0.1:55433/scheduler_test';
 assert.equal(new URL(database).pathname,'/scheduler_test','Dedicated disposable test database required');
@@ -13,6 +14,30 @@ await pool.query(await readFile(new URL('./schema.sql',import.meta.url),'utf8'))
 const store=createStore(pool,{maxRunning:3,userRunning:2,maxPending:20,leaseMs:30000});
 const request=(user,requestId=randomUUID(),params={prompt:'test'})=>store.create(user,requestId,params);
 async function reset(){await pool.query('TRUNCATE job_events,jobs,business_batches,scheduler_users; UPDATE scheduler_account SET sequence=0');}
+
+test('lease recovery during OSS preparation returns to the queue without a paid submission',async()=>{
+ await reset();await request('alice');const job=await store.reserve();let release,entered,posts=0;
+ const reading=new Promise(resolve=>{entered=resolve;}),finish=new Promise(resolve=>{release=resolve;});
+ const pending=runStage('submit',job,{store,provider:{prepare:async()=>{entered();await finish;return {prompt:'original'};},submit:async()=>{posts++;return {taskId:'must-not-submit'};}}});
+ try{
+  await reading;assert.equal((await store.get('alice',job.id)).submit_started,false);
+  await pool.query("UPDATE jobs SET lease_until=now()-interval '1 second' WHERE id=$1",[job.id]);await store.recover();
+  const recovered=await store.get('alice',job.id);assert.equal(recovered.status,'QUEUED');assert.equal(recovered.slot_reserved,false);
+ }finally{release();await pending;}
+ assert.equal(posts,0);
+});
+
+test('OSS plan outages preserve image processing retries after storage recovers',async()=>{
+ await reset();await request('alice');const submitted=await store.reserve();await store.transition(submitted,'DOWNLOADED',{},true);
+ for(let n=0;n<4;n++){
+  await pool.query('UPDATE jobs SET next_action_at=now() WHERE id=$1',[submitted.id]);const processing=await store.claim('process');
+  await runStage('process',processing,{store,processImage:async()=>{throw Object.assign(Error('OSS unavailable'),{planUnavailable:true});}});
+ }
+ const waiting=await store.get('alice',submitted.id);assert.equal(waiting.status,'DOWNLOADED');assert.equal(waiting.process_attempts,0);
+ await pool.query('UPDATE jobs SET next_action_at=now() WHERE id=$1',[submitted.id]);const processing=await store.claim('process');
+ await runStage('process',processing,{store,processImage:async()=>{throw Error('temporary image processing failure');}});
+ const retried=await store.get('alice',submitted.id);assert.equal(retried.status,'DOWNLOADED');assert.equal(retried.process_attempts,1);
+});
 
 test('a durable business batch cannot dispatch until every image is committed',async()=>{
  await reset();assert.equal(typeof store.beginBatch,'function','business batches must be durable');
@@ -152,4 +177,47 @@ test('disk pause preserves download budget and source task',async()=>{
  await store.transition(job,'REMOTE_SUCCEEDED',{source_url:'https://example.test/image'},true);
  const download=await store.claim('download');await store.pauseDownload(download);
  const paused=await store.get('alice',job.id);assert.equal(paused.status,'REMOTE_SUCCEEDED');assert.equal(paused.download_attempts,0);assert.equal(paused.source_url,'https://example.test/image');
+});
+
+
+test('bulk task purge removes owned jobs and batches, retaining plans shared with another account',async()=>{
+ await reset();assert.equal(typeof store.purgeTasks,'function');
+ const own=randomUUID(),other=randomUUID(),shared='a'.repeat(64),unique='b'.repeat(64);
+ await store.beginBatch('alice',own,{taskId:'one',items:[{key:'a'},{key:'b'}]});
+ await store.beginBatch('bob',other,{taskId:'one',items:[{key:'c'}]});
+ await store.create('alice',randomUUID(),{batchId:own,key:'a',planHash:shared});
+ await store.create('alice',randomUUID(),{batchId:own,key:'b',planHash:unique});
+ await store.create('bob',randomUUID(),{batchId:other,key:'c',planHash:shared});
+ await pool.query("UPDATE jobs SET status='SUCCEEDED'; UPDATE business_batches SET status='READY'");
+ let removed;
+ await store.purgeTasks('alice',null,async data=>{removed=data;});
+ assert.equal(removed.jobs.length,2);assert.deepEqual(removed.planHashes,[unique]);
+ assert.equal(await store.batch('alice',own),null);assert.equal((await store.batch('bob',other)).jobs.length,1);
+ assert.equal((await pool.query('SELECT count(*)::int n FROM job_events')).rows[0].n,1);
+});
+
+test('task purge rejects running work and retains metadata if online cleanup fails',async()=>{
+ await reset();assert.equal(typeof store.purgeTasks,'function');
+ const id=randomUUID();await store.beginBatch('alice',id,{taskId:'one',items:[{key:'a'}]});
+ await store.create('alice',randomUUID(),{batchId:id,key:'a',planHash:'c'.repeat(64)});
+ let calls=0;const remove=async()=>{calls++;throw Error('OSS unavailable');};
+ await assert.rejects(store.purgeTasks('alice',['one'],remove),{status:409});assert.equal(calls,0);
+ await pool.query("UPDATE jobs SET status='SUCCEEDED'; UPDATE business_batches SET status='READY'");
+ await assert.rejects(store.purgeTasks('alice',['one'],remove),/OSS/);
+ assert.equal((await store.batch('alice',id)).jobs.length,1);
+});
+
+
+test('a concurrent verified upload keeps its shared plan while another account deletes tasks',async()=>{
+ await reset();const hash='d'.repeat(64),a=randomUUID(),b=randomUUID();
+ await store.beginBatch('alice',a,{taskId:'one',items:[{key:'a'}]});
+ await store.create('alice',randomUUID(),{batchId:a,key:'a',planHash:hash});
+ await pool.query("UPDATE jobs SET status='SUCCEEDED'; UPDATE business_batches SET status='READY'");
+ await store.beginBatch('bob',b,{taskId:'two',items:[{key:'b'}]});
+ let release,enter;const ready=new Promise(resolve=>{enter=resolve;}),finish=new Promise(resolve=>{release=resolve;});
+ const uploading=store.create('bob',randomUUID(),{batchId:b,key:'b',planHash:hash},{prepare:async()=>{enter();await finish;}});
+ await ready;let orphanPlans;
+ const deleting=store.purgeTasks('alice',['one'],async data=>{orphanPlans=data.planHashes;});
+ release();await uploading;await deleting;
+ assert.deepEqual(orphanPlans,[]);assert.equal((await store.batch('bob',b)).jobs.length,1);
 });

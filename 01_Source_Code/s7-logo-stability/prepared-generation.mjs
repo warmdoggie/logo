@@ -1,9 +1,11 @@
 import sharp from 'sharp';
 import {renderLogoSet} from './index.mjs';
 import {pickAspectRatio} from './ai-mockup-generation.mjs';
+import {processLogo} from './logo-processing.mjs';
 
 const dataUrl=bytes=>`data:image/png;base64,${bytes.toString('base64')}`;
 export async function prepareGenerationImage({baseImage,logoImage,targets,schemes,model,selectedVersions,originalColor='#000000',finishReferenceImage,foilAudit}){
+ logoImage=await processLogo(logoImage,{removeWhiteBackground:false});
  const base=await sharp(baseImage).png().toBuffer(),logo=await sharp(logoImage).metadata();
  const guideSet=await renderLogoSet({baseImage:base,logoImage,targets,schemes,originalColor,selectedVersions});
  return {

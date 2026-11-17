@@ -50,14 +50,22 @@ for(const mode of ['single','background','multi-product','multi-logo'])test(`${m
  assert.equal(calls.length,mode.startsWith('multi-')?2:1);
  for(const input of calls){
   const {data,info}=await sharp(Buffer.from(input.logoImage.split(',')[1],'base64')).ensureAlpha().raw().toBuffer({resolveWithObject:true});
-  assert.equal(info.width,64);assert.equal(info.height,40,'placement dimensions must not change');
+  assert.equal(info.width,34);assert.equal(info.height,26,'placement dimensions exclude transparent margins and removed dust');
   assert.equal(data[3],0,'opaque background must be removed automatically');
-  assert.equal(data[(35*64+55)*4+3],0,'isolated dust must be removed automatically');
-  assert.deepEqual([...data.subarray((20*64+25)*4,(20*64+25)*4+4)],[200,40,60,255]);
+  assert.deepEqual([...data.subarray((13*34+14)*4,(13*34+14)*4+4)],[200,40,60,255]);
  }
 }));
 
 test('automatic Logo processing failure prevents generation from starting',()=>workspace(async({call,task,calls,baseImage,targets,schemes})=>{
  const response=await call('/api/ai-render',{taskId:task.id,background:true,processLogo:true,baseImage:baseImage.toString('base64'),logoImage:baseImage.toString('base64'),targets,schemes,selectedVersions:['ORIGINAL']});
  assert.equal(response.status,400);assert.match((await response.json()).error,/没有可见像素/);assert.equal(calls.length,0);
+}));
+
+test('multi-logo generation accepts a solid mark after its transparent padding is cropped',()=>workspace(async({call,task,baseImage,targets})=>{
+ const mark=await sharp({create:{width:10,height:6,channels:4,background:'#123456'}}).extend({top:2,left:3,bottom:20,right:30,background:{r:0,g:0,b:0,alpha:0}}).png().toBuffer();
+ const response=await call('/api/ai-render-logos',{taskId:task.id,productId:'p',processLogo:true,baseImage:baseImage.toString('base64'),targets,selectedVersions:['ORIGINAL'],model:'test',logos:['a','b'].map(id=>({id,name:id,logoImage:mark.toString('base64'),preserveLogoDetails:true}))});
+ assert.equal(response.status,202,await response.clone().text());
+ let job;
+ for(let n=0;n<100;n++){job=await(await call(`/api/my-space/tasks/${task.id}/generation`)).json();if(job.status!=='running')break;await new Promise(resolve=>setTimeout(resolve,10));}
+ assert.equal(job.status,'complete',JSON.stringify(job));
 }));

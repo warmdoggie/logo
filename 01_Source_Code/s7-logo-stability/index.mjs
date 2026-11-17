@@ -3,8 +3,9 @@ import sharp from 'sharp';
 import {schemeTargets} from './schemes.mjs';
 import {chooseContrastColor} from './contrast-color.mjs';
 import {normalizeTargetPrint,resolveTargetPrint} from './target-print.mjs';
-import {laserFoilColor} from './foil-finishes.mjs';
+import {laserFoilColor,foilBrightness} from './foil-finishes.mjs';
 import {selectGenerationVersions} from './generation-versions.mjs';
+import {processLogo} from './logo-processing.mjs';
 
 const fail=message=>{throw new Error(message);};
 const fingerprint=value=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -38,13 +39,6 @@ function normalizeTargets(targets,width,height){
   });
 }
 
-function foilBrightness(x,y,width,height){
-  const u=(x+.5)/width,v=(y+.5)/height,diagonal=u*.76+v*.24;
-  const broad=Math.exp(-((diagonal-.53)**2)/.13);
-  const glint=Math.exp(-((diagonal-.39)**2)/.012);
-  return Math.min(1.24,Math.max(.72,.76+broad*.22+glint*.26));
-}
-
 async function recolorLogo(logoImage,color,finish='flat'){
   if(!color)return logoImage;
   const {data,info}=await sharp(logoImage).ensureAlpha().raw().toBuffer({resolveWithObject:true});
@@ -53,8 +47,8 @@ async function recolorLogo(logoImage,color,finish='flat'){
     const k=i*4,x=i%info.width,y=Math.floor(i/info.width);
     if(data[k+3]===0)continue;
     visible++;
-    const brightness=finish==='flat'?1:foilBrightness(x,y,info.width,info.height);
-    const tone=finish==='laser'?laserFoilColor(((x+.5)/info.width*.8+(y+.5)/info.height*.2)):color;
+    const brightness=finish==='flat'?1:foilBrightness(x,y,info.width,info.height,finish);
+    const tone=finish==='laser'?laserFoilColor((x+.5)/info.width,(y+.5)/info.height):color;
     data[k]=Math.round(Math.min(255,tone.r*brightness));
     data[k+1]=Math.round(Math.min(255,tone.g*brightness));
     data[k+2]=Math.round(Math.min(255,tone.b*brightness));
@@ -165,6 +159,7 @@ async function applySurfaceLighting(prepared,baseRaw,imageWidth,finish,target){
 export async function renderLogoSet({baseImage,logoImage,targets,originalColor,schemes,selectedVersions}){
   const selected=selectGenerationVersions({selectedVersions});
   if(!baseImage||!logoImage)fail('必须提供产品/彩盒原图和透明Logo');
+  logoImage=await processLogo(logoImage,{removeWhiteBackground:false});
   const baseMeta=await sharp(baseImage).metadata();
   const logoMeta=await sharp(logoImage).metadata();
   const contrastScale=Math.min(1,256/Math.max(logoMeta.width,logoMeta.height));

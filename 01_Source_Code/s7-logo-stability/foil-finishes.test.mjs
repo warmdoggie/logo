@@ -46,12 +46,12 @@ for(const model of ['gpt-image-2','flux-3-image'])test(`${model} describes reque
 
 test('new preview finishes have their own reflective palettes',()=>{
  const palettes=[];
- for(const finish of ['gold','silver','rose','laser']){
+ for(const finish of ['gold','silver','rose']){
   const stops=[];const context={drawImage(){},fillRect(){},createLinearGradient:()=>({addColorStop:(position,color)=>stops.push(color)})};
   renderTintedLogoLayer({createCanvas:(width,height)=>({width,height,getContext:()=>context}),logoImage:{},width:100,height:50,color:'#C58F86',finish});palettes.push(stops);
  }
  assert.ok(palettes.every(p=>p.length>=4));
- assert.equal(new Set(palettes.map(JSON.stringify)).size,4);
+ assert.equal(new Set(palettes.map(JSON.stringify)).size,3);
 });
 
 test('all four local finishes keep one mask and original non-logo pixels, with rose hue and laser chromatic variation',async()=>{

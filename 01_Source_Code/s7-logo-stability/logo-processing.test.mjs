@@ -43,3 +43,16 @@ test('加工Logo会沿边缘连续去除渐变底色',async()=>{
   const meta=await sharp(output).metadata();
   assert.deepEqual({width:meta.width,height:meta.height},{width:2,height:3});
 });
+
+for(const format of ['png','jpeg'])test(`${format}: solid background removal must not follow antialias shades into opaque lettering`,async()=>{
+  const width=96,height=64,raw=Buffer.alloc(width*height*4,255),ink=[70,30,10];
+  for(let y=12;y<48;y++)for(let x=24;x<76;x++)if(x<34||x>=66||y<20||y>=40)raw.set([...ink,255],(y*width+x)*4);
+  for(let y=24;y<36;y++)for(let x=84;x<90;x++)raw.set([...ink,255],(y*width+x)*4);
+  // A gradual antialias transition connects the white backdrop to the left stem.
+  for(let x=4;x<24;x++)raw.set([...ink.map(c=>Math.round(255+(c-255)*(x-3)/21)),255],(30*width+x)*4);
+  const source=await sharp(raw,{raw:{width,height,channels:4}}).toFormat(format,{quality:100,chromaSubsampling:'4:4:4'}).toBuffer();
+  const output=await processLogo(source,{removeInteriorBackground:true,cropTransparentBounds:false});
+  const data=await sharp(output).ensureAlpha().raw().toBuffer();
+  for(const [x,y] of [[28,24],[28,36],[48,16],[48,44],[70,30]])assert.equal(data[(y*width+x)*4+3],255,'the solid letter strokes must stay opaque');
+  for(const [x,y] of [[0,0],[48,30],[90,60]])assert.equal(data[(y*width+x)*4+3],0,'the backdrop and enclosed letter counter must become transparent');
+});

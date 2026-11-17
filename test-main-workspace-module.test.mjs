@@ -41,11 +41,15 @@ test('S7 登记为主工作区内的集成模块', async () => {
 
 test('S7 iframe uses a same-origin route for local and online access', async () => {
   const app = await readFile(new URL('./01_Source_Code/public/app.js', root), 'utf8');
-  const render = app.slice(app.indexOf('function renderS7Module()'), app.indexOf('function renderS7IfRequested()'));
+  const render = app.slice(app.indexOf('let s7ModulePanel='), app.indexOf('function renderS7IfRequested()'));
   for (const hostname of ['127.0.0.1', 'localhost', 'logo.heciai.net']) {
-    const main = {};
-    runInNewContext(render + ';renderS7Module();', { main, location: { hostname }, heading: () => '' });
-    assert.equal(main.innerHTML.match(/iframe src="([^"]+)/)[1].split('?')[0], '/s7/');
+    const panels=[],frame={contentWindow:{postMessage(){}}};
+    const main = {after:panel=>panels.push(panel)};
+    const document={createElement:()=>({querySelector:()=>frame})};
+    await runInNewContext(render + ';(async()=>{await renderS7Module();setS7ModuleActive(false);await renderS7Module();})();', { main, document,workspaceAccount:null, location: { hostname,origin:`https://${hostname}` } });
+    assert.equal(panels.length,1,'reopening keeps the existing module attached');
+    assert.equal(panels[0].innerHTML.match(/iframe src="([^"]+)/)[1], '/s7/');
+    assert.equal(main.hidden,true);assert.equal(panels[0].hidden,false);
   }
 });
 

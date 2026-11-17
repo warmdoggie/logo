@@ -13,6 +13,64 @@ async function printFixture(color){
  return {width,height,rawBase:base,rawMask:mask,baseImage:await encode(base,4),guideImage:await encode(guide,4),maskImage:await encode(mask,1)};
 }
 
+test('laser retains its established colors, foil grain and thin bonded edges',async()=>{
+ const color=[180,140,100],f=await printFixture(color);
+ const baseImage=await sharp({create:{width:f.width,height:f.height,channels:4,background:'#bda39a'}}).png().toBuffer();
+ const render=foilFinish=>lockOutsideLogo({...f,baseImage,generatedImage:baseImage,feather:0,surfaceResponse:true,foilMaskImage:f.maskImage,foilFinish});
+ const output=await render('laser'),raw=await sharp(output).ensureAlpha().raw().toBuffer();
+ const samples=[];
+ for(let y=10;y<16;y++)for(let x=12;x<26;x++)samples.push(raw[(y*f.width+x)*4]);
+ const mean=values=>values.reduce((sum,v)=>sum+v)/values.length;
+ const center=mean(samples);
+ const deviation=Math.sqrt(mean(samples.map(v=>(v-center)**2)));
+ assert.ok(deviation>=2&&deviation<=9,'laser keeps its existing fine foil texture');
+ const light=.83+.16*(.2126*189+.7152*163+.0722*154)/255;
+ assert.ok(Math.abs(center-color[0]*light)<2,'keep the accepted rainbow brightness');
+ const row=y=>mean(Array.from({length:38},(_,x)=>raw[(y*f.width+x+12)*4]));
+ assert.ok(row(8)-row(10)>8,'light-facing edge should read as bonded foil');
+ assert.ok(row(23)-row(21)<-3,'opposite edge needs a restrained shadow');
+ const base=await sharp(baseImage).ensureAlpha().raw().toBuffer();
+ for(let i=0;i<f.rawMask.length;i++){
+  assert.equal(raw[i*4+3],base[i*4+3]);
+  if(!f.rawMask[i])assert.deepEqual(raw.subarray(i*4,i*4+4),base.subarray(i*4,i*4+4));
+  else assert.ok(Math.abs((raw[i*4]-raw[i*4+1])-40*light)<=1,'neutral foil detail must not change hue');
+ }
+ assert.deepEqual(await render('laser'),output);
+});
+
+for(const [foilFinish,color,minBrightness] of [['gold',[196,160,82],210],['silver',[191,195,201],210],['rose',[197,143,134],203]])test(`${foilFinish} foil is brighter and smooth while preserving hue and cutouts`,async()=>{
+ const f=await printFixture(color);
+ const baseImage=await sharp({create:{width:f.width,height:f.height,channels:4,background:'#bda39a'}}).png().toBuffer();
+ const options={...f,baseImage,generatedImage:baseImage,feather:0,surfaceResponse:true,foilMaskImage:f.maskImage,foilFinish};
+ const result=await lockOutsideLogo(options),raw=await sharp(result).ensureAlpha().raw().toBuffer();
+ const samples=[];
+ for(let y=10;y<16;y++)for(let x=12;x<26;x++)samples.push(Math.max(...raw.subarray((y*f.width+x)*4,(y*f.width+x)*4+3)));
+ const mean=samples.reduce((sum,v)=>sum+v)/samples.length;
+ const deviation=Math.sqrt(samples.reduce((sum,v)=>sum+(v-mean)**2,0)/samples.length);
+ assert.ok(mean>=minBrightness,`亮面需要提亮反射：${mean}`);
+ assert.ok(deviation<=1.5,`平坦区域应减少颗粒和小块纹理：${deviation}`);
+ const k=(12*f.width+18)*4;
+ if(foilFinish==='gold')assert.ok(raw[k]>raw[k+1]+20&&raw[k+1]>raw[k+2]+40,'保留金色');
+ if(foilFinish==='rose')assert.ok(raw[k]>raw[k+1]+30&&raw[k+1]>raw[k+2],'保留玫瑰金');
+ const base=await sharp(baseImage).ensureAlpha().raw().toBuffer();
+ for(let i=0;i<f.rawMask.length;i++)if(!f.rawMask[i])assert.deepEqual(raw.subarray(i*4,i*4+4),base.subarray(i*4,i*4+4));
+ assert.deepEqual(await lockOutsideLogo(options),result);
+});
+
+test('gold highlight reflects pale warm light while its midtones stay gold and its cutouts stay intact',async()=>{
+ for(const color of [[240,196,100],[196,160,82],[150,122,63]]){
+  const f=await printFixture(color);
+  const result=await lockOutsideLogo({...f,generatedImage:f.baseImage,foilMaskImage:f.maskImage,goldMaskImage:f.maskImage,foilFinish:'gold',feather:0,surfaceResponse:true});
+  const raw=await sharp(result).ensureAlpha().raw().toBuffer(),k=(16*f.width+18)*4;
+  const [r,g,b]=raw.subarray(k,k+3);
+  if(color[0]===240){
+   assert.ok(r>=245&&g>=225&&b>=180,`金色高光应接近明亮的暖白金：${r},${g},${b}`);
+   assert.ok(r>g&&g>b,'高光仍保留暖金色');
+  }else assert.ok(r>g+20&&g>b+40,'中间调和暗部保持金色，不能一起变白');
+  for(let i=0;i<f.rawMask.length;i++)if(!f.rawMask[i])assert.deepEqual(raw.subarray(i*4,i*4+4),f.rawBase.subarray(i*4,i*4+4));
+ }
+});
+
 test('black screen print retains deep ink with restrained surface highlights and unchanged cutouts',async()=>{
  const f=await printFixture([0,0,0]);
  const result=await lockOutsideLogo({...f,generatedImage:f.baseImage,feather:0,surfaceResponse:true});
@@ -41,7 +99,7 @@ test('silver rejects exaggerated AI bevel lighting while controlling its own thi
  for(let i=0;i<f.rawMask.length;i++)if(!f.rawMask[i])assert.deepEqual(raw.subarray(i*4,i*4+4),f.rawBase.subarray(i*4,i*4+4));
 });
 
-test('silver retains fine foil grain in midtones and bright reflections without white plateaus',async()=>{
+test('silver has smooth midtones and bright reflections without white plateaus',async()=>{
  for(const color of [[191,195,201],[255,255,255]]){
   const f=await printFixture(color);
   const baseImage=await sharp({create:{width:f.width,height:f.height,channels:4,background:'#d8b2a0'}}).png().toBuffer();
@@ -50,7 +108,7 @@ test('silver retains fine foil grain in midtones and bright reflections without 
   for(let y=10;y<16;y++)for(let x=12;x<26;x++)samples.push(raw[(y*f.width+x)*4]);
   const mean=samples.reduce((sum,value)=>sum+value)/samples.length;
   const deviation=Math.sqrt(samples.reduce((sum,value)=>sum+(value-mean)**2,0)/samples.length);
-  assert.ok(deviation>=2&&deviation<=9,'亮部和中间调都保留克制的细密箔纹');
+  assert.ok(deviation<=1.5,'亮部和中间调应平滑，不能有明显磨砂颗粒');
   assert.ok(Math.max(...samples)<=253,'银白高光不能成为纯白色块');
   if(color[0]===255)assert.ok(mean>=240,'亮部应保留银白反射，不能整体压成磨砂灰');
   const repeated=await lockOutsideLogo({...f,baseImage,generatedImage:baseImage,feather:0,surfaceResponse:true,foilMaskImage:f.maskImage,foilFinish:'silver'});
@@ -58,7 +116,7 @@ test('silver retains fine foil grain in midtones and bright reflections without 
  }
 });
 
-test('silver highlights stay visible against white packaging without losing foil texture',async()=>{
+test('silver highlights stay visible against white packaging with a smooth finish',async()=>{
  for(const luma of [235,248,255])for(const color of [[191,195,201],[255,255,255]]){
   const f=await printFixture(color);
   const baseImage=await sharp({create:{width:f.width,height:f.height,channels:4,background:{r:luma,g:luma,b:luma,alpha:1}}}).png().toBuffer();
@@ -72,11 +130,11 @@ test('silver highlights stay visible against white packaging without losing foil
   const mean=samples.reduce((sum,value)=>sum+value)/samples.length;
   const deviation=Math.sqrt(samples.reduce((sum,value)=>sum+(value-mean)**2,0)/samples.length);
   assert.ok(mean>=155,'浅底上的银箔仍应保留金属亮度');
-  assert.ok(deviation>=1.5&&new Set(samples).size>=8,`控制高光后仍须保留细密箔纹，不能裁成均匀灰块：底色 ${luma}，银色 ${color}，标准差 ${deviation}，灰阶数 ${new Set(samples).size}`);
+  assert.ok(deviation<=1.5,`浅底上的亮面应平滑：底色 ${luma}，银色 ${color}，标准差 ${deviation}`);
  }
 });
 
-test('silver has a thin bonded edge and clustered foil variation within its original mask',async()=>{
+test('silver has a thin bonded edge and a smooth face within its original mask',async()=>{
  const f=await printFixture([191,195,201]);
  const baseImage=await sharp({create:{width:f.width,height:f.height,channels:4,background:'#bda39a'}}).png().toBuffer();
  const output=await lockOutsideLogo({...f,baseImage,generatedImage:baseImage,feather:0,surfaceResponse:true,foilMaskImage:f.maskImage,foilFinish:'silver'});
@@ -86,7 +144,7 @@ test('silver has a thin bonded edge and clustered foil variation within its orig
  assert.ok(edge>=2&&edge<=26,'压合边缘仅在字形内，亮度变化克制');
  const patchMean=(x,y)=>Array.from({length:6},(_,i)=>raw[((y+Math.floor(i/3))*f.width+x+i%3)*4]).reduce((sum,v)=>sum+v)/6;
  const patches=[];for(let x=12;x<26;x+=3)for(let y=10;y<16;y+=2)patches.push(patchMean(x,y));
- assert.ok(Math.max(...patches)-Math.min(...patches)>=7,'箔纹应有疏密与局部反射变化，不是均匀噪点');
+ assert.ok(Math.max(...patches)-Math.min(...patches)<=3,'亮面不能出现块状磨砂纹理');
  const original=await sharp(baseImage).ensureAlpha().raw().toBuffer();
  for(let i=0;i<f.rawMask.length;i++)if(!f.rawMask[i])assert.deepEqual(raw.subarray(i*4,i*4+4),original.subarray(i*4,i*4+4));
 });
@@ -117,7 +175,7 @@ test('mixed finishes restrict generated foil lighting to the metallic target mas
   assert.notDeepEqual([...raw.subarray((2*10+2)*4,(2*10+2)*4+3)],[197,75,120]);
 });
 
-test('烫金保留细微箔纹和字形内部压印边缘，框外和镂空像素完全不变',async()=>{
+test('烫金表面光滑并保留字形内部压印边缘，框外和镂空像素完全不变',async()=>{
  const width=40,height=40,baseRaw=Buffer.alloc(width*height*4),guideRaw=Buffer.alloc(width*height*4),maskRaw=Buffer.alloc(width*height);
  for(let y=0;y<height;y++)for(let x=0;x<width;x++){
   const i=y*width+x,k=i*4,inside=x>=8&&x<32&&y>=8&&y<32&&!(x>=18&&x<22&&y>=18&&y<22);
@@ -129,7 +187,7 @@ test('烫金保留细微箔纹和字形内部压印边缘，框外和镂空像�
  const raw=await sharp(result).raw().toBuffer();
  const values=[];
  for(let y=12;y<16;y++)for(let x=12;x<28;x++)values.push(raw[(y*width+x)*4]);
- assert.ok(Math.max(...values)-Math.min(...values)>=6,'平坦箔面仍应有可见的微小纹理变化');
+ assert.ok(Math.max(...values)-Math.min(...values)<=3,'平坦金箔不能有明显颗粒');
  const mean=y=>Array.from({length:20},(_,x)=>raw[(y*width+x+10)*4]).reduce((a,b)=>a+b)/20;
  assert.ok(mean(8)>mean(31)+8,'字形内上缘与下缘有克制的亮暗对比');
  for(let i=0;i<maskRaw.length;i++)if(!maskRaw[i])assert.deepEqual(raw.subarray(i*4,i*4+4),baseRaw.subarray(i*4,i*4+4));

@@ -5,7 +5,7 @@ import {isCarton,normalizeTargetPrint} from './target-print.mjs';
 const geometryKeys=['x','y','widthRatio','rotation','quad','surface','curve'];
 const appearanceKeys=['carrierType','printFinish','color','autoContrast','preserveOriginalColor'];
 const clone=value=>structuredClone(value);
-function geometry(target){return Object.fromEntries(geometryKeys.map(key=>[key,clone(target[key])]));}
+function geometry(target){return {...Object.fromEntries(geometryKeys.map(key=>[key,clone(target[key])])),regionUnlocked:target.regionUnlocked};}
 function initialTargets(targets,version){return clone(targets).map(target=>{
   if(isMixedVersion(version)){
     const finish=mixedVersionFinishes(version)[isCarton(target)?'carton':'product'];
@@ -69,14 +69,15 @@ export function editSelectedLogos(state,version,selectedIds,group,patch,dimensio
   const matches=target=>ids.has(target.id)&&isCarton(target)===(group==='carton');
   function updateGeometry(target){
     const width=patch.widthRatio??target.widthRatio,rotation=patch.rotation??target.rotation??0;
+    const fitRotation=patch.rotation!==undefined&&dimensions?.fitRotation===true;
     if(target.quad){
       const center=target.quad.reduce((sum,p)=>({x:sum.x+p.x/4,y:sum.y+p.y/4}),{x:0,y:0}),scale=width/target.widthRatio,angle=(rotation-(target.rotation||0))*Math.PI/180,aspect=dimensions?dimensions.width/dimensions.height:1;
       target.quad=target.quad.map(point=>{
         const x=(point.x-center.x)*scale,y=(point.y-center.y)*scale;
         return {x:Number((center.x+x*Math.cos(angle)-y/aspect*Math.sin(angle)).toFixed(6)),y:Number((center.y+x*aspect*Math.sin(angle)+y*Math.cos(angle)).toFixed(6))};
       });
-      if(target.quad.some(p=>p.x<0||p.x>1||p.y<0||p.y>1))throw Error('所选 Logo 的大小或角度超出原图，请调整后重试');
-    }else if(dimensions){
+      if(!fitRotation&&target.quad.some(p=>p.x<0||p.x>1||p.y<0||p.y>1))throw Error('所选 Logo 的大小或角度超出原图，请调整后重试');
+    }else if(dimensions&&!fitRotation){
       const {width:imageWidth,height:imageHeight,logoAspect}=dimensions,radians=rotation*Math.PI/180,w=width*imageWidth,h=w*logoAspect;
       const halfWidth=(Math.abs(Math.cos(radians))*w+Math.abs(Math.sin(radians))*h)/2,halfHeight=(Math.abs(Math.sin(radians))*w+Math.abs(Math.cos(radians))*h)/2;
       if(target.x*imageWidth-halfWidth<0||target.x*imageWidth+halfWidth>imageWidth||target.y*imageHeight-halfHeight<0||target.y*imageHeight+halfHeight>imageHeight)throw Error('所选 Logo 的大小或角度超出原图，请调整后重试');
@@ -129,7 +130,7 @@ export function editScheme(state,version,targets,shared=true){
     scheme.targets=targets.map(target=>{
       const previous=scheme.targets.find(item=>item.id===target.id);
       if(!previous)return initialTargets([target],scheme.version)[0];
-      return shared&&!scheme.independentGeometry?{...previous,...geometry(target)}:previous;
+      return shared&&!scheme.independentGeometry?{...previous,...geometry(target),...(target.regionUnlocked!==previous.regionUnlocked?{moveEnabled:target.moveEnabled}:{})}:previous;
     });
   }
   next.sharedTargets=next.sharedTargets.map(target=>({...target,carrierType:targets.find(item=>item.id===target.id)?.carrierType||target.carrierType}));
@@ -157,7 +158,10 @@ export function editScheme(state,version,targets,shared=true){
 
 export function restoreSharedGeometry(state,version){
   const next=clone(state),scheme=next.schemes.find(scheme=>scheme.version===version);
-  scheme.targets=scheme.targets.map(target=>({...target,...geometry(next.sharedTargets.find(item=>item.id===target.id)||target)}));
+  scheme.targets=scheme.targets.map(target=>{
+    const shared=next.sharedTargets.find(item=>item.id===target.id)||target;
+    return {...target,...geometry(shared),...(target.regionUnlocked!==shared.regionUnlocked?{moveEnabled:shared.moveEnabled}:{})};
+  });
   scheme.independentGeometry=false;return next;
 }
 

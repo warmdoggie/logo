@@ -4,6 +4,8 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 import {createSchemes,editScheme,schemeSignature} from './schemes.mjs';
 import {generationVersionsForProduct} from './download-selection.mjs';
+import {fitDefaultPlacements} from '../public/s7-placement.js';
+import {masterTargetsFromTemplate} from './product-master.mjs';
 
 test('batch submission includes cached product edits and the active product latest unswitched edits',async()=>{
   const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
@@ -17,7 +19,7 @@ test('batch submission includes cached product edits and the active product late
   let requestBody;
   const context=vm.createContext({generationVersionsForProduct,loadedTaskLogoId:null,taskDownloadOutputs:()=>[],downloadSelection:{},copyingProductPreset:false,generationSubmitting:false,generationBusy:false,logoSelectionBusy:false,setTimeout,requestAnimationFrame:callback=>callback(),generationWatcher:null,resultMeta:{},queueSchemeCards(){},
     structuredClone,schemeSignature,schemeNames:{ORIGINAL:'原色',BLACK:'黑白','GOLD FOIL':'金','SILVER FOIL':'银'},multiProductJob:null,currentTaskId:null,multiPackageBusy:false,multiPackageProducts:[{id:'a',sku:'a'},{id:'b',sku:'b'}],logoData:'test-logo',mockupModel:{value:'flux-3-image'},
-    selectedMultiProductId:'b',loadedMultiProductId:'b',baseData:'base-b',baseImage:{},
+    selectedMultiProductId:'b',loadedMultiProductId:'b',baseData:'base-b',baseImage:{},logoImage:null,
     schemeState:createSchemes([target(.4,.2)]),activeScheme:'ORIGINAL',placementScope:'shared',selectedTargetId:'master-zone',lastResultPayload:null,savedSignatures:{},schemePhases:{},
     multiProductViews:new Map([['a',{targets:aTargets,schemeState:aState,activeScheme:'GOLD FOIL',selectedVersions:['BLACK','SILVER FOIL']}]]),multiProductResults:new Map(),
     loadMultiProductView:async product=>context.multiProductViews.get(product.id),collectTargets:()=>bTargets,
@@ -47,4 +49,16 @@ test('batch submission includes cached product edits and the active product late
   context.loadedMultiProductId=null;
   context.multiProductViews=new Map(stored.map(layout=>[layout.productId,layout]));
   assert.deepEqual(JSON.parse(JSON.stringify(vm.runInContext('captureMultiProductLayouts()',context))),stored);
+});
+
+test('inactive products fit their own default frames using their own image dimensions before batch capture',async()=>{
+ const source=await readFile(new URL('./demo.js',import.meta.url),'utf8');
+ const template={zones:[{id:'body',zoneType:'logo',x:.1,y:.1,width:.4,height:.8}],automation:{areas:[{zoneId:'body',presets:[{isDefault:true,orientation:'horizontal',box:{centerX:.3,centerY:.5,width:.2,height:.2,rotation:0}}]}]}};
+ const views=new Map([['a',{baseImage:{naturalWidth:1000,naturalHeight:500}}],['b',{baseImage:{naturalWidth:500,naturalHeight:1000}}]]);
+ for(const view of views.values())Object.assign(view,{foilTemplate:template,schemeState:createSchemes(masterTargetsFromTemplate(template)),activeScheme:'ORIGINAL'});
+ const c=vm.createContext({fitDefaultPlacements,structuredClone,loadedMultiProductId:null,logoImage:{naturalWidth:100,naturalHeight:400},multiProductViews:views,multiPackageProducts:[{id:'a'},{id:'b'}]});
+ vm.runInContext(source.slice(source.indexOf('function saveMultiProductView(){'),source.indexOf('async function showMultiProduct(')),c);
+ const layouts=c.captureMultiProductLayouts();
+ assert.ok(Math.abs(layouts[0].targets[0].widthRatio-.025)<1e-9);
+ assert.ok(Math.abs(layouts[1].targets[0].widthRatio-.1)<1e-9);
 });

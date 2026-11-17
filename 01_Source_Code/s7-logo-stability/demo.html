@@ -33,7 +33,7 @@
         </div>
         <button id="use-saved-logo" type="button" class="text-button" hidden>使用已保存 Logo</button>
         <button id="clear-saved-logo" type="button" class="text-button" hidden>清除已保存 Logo</button>
-        <p class="hint">点击生成时会自动清理 Logo 并去除纯色背景。</p>
+        <p class="hint">点击“logo处理”先去除背景，再裁剪并在四周保留少量透明留白，之后可生成方案。需要 AI 处理时，请单独点击“AI 精细化处理”。</p>
 
         <section class="foil-options" aria-label="烫印设置" hidden>
           <h3>烫印设置</h3>
@@ -55,8 +55,8 @@
         <label id="original-colors-field" class="check-line"><input id="keep-original-colors" type="checkbox">使用 Logo 原色</label>
         <label class="auto-contrast-field"><input id="auto-contrast" type="checkbox" checked> 根据底色自动使用黑色或白色 Logo</label>
         <div id="custom-colors" hidden>
-          <label class="color-field">产品颜色（HEX）<input id="custom-product-color" type="text" value="#000000" maxlength="7" placeholder="#000000" spellcheck="false" autocomplete="off" aria-describedby="custom-product-color-value"><output id="custom-product-color-value"></output></label>
-          <label class="color-field">彩盒颜色（HEX）<input id="custom-carton-color" type="text" value="#000000" maxlength="7" placeholder="#000000" spellcheck="false" autocomplete="off" aria-describedby="custom-carton-color-value"><output id="custom-carton-color-value"></output></label>
+          <div class="color-field"><label for="custom-product-color">产品颜色（HEX）</label><span class="color-inputs"><input id="custom-product-color" type="text" value="#000000" maxlength="7" placeholder="#000000" spellcheck="false" autocomplete="off" aria-describedby="custom-product-color-value"><input id="custom-product-color-picker" class="color-swatch" type="color" value="#000000" aria-label="选择产品颜色" title="点击选择产品颜色"></span><output id="custom-product-color-value"></output></div>
+          <div class="color-field"><label for="custom-carton-color">彩盒颜色（HEX）</label><span class="color-inputs"><input id="custom-carton-color" type="text" value="#000000" maxlength="7" placeholder="#000000" spellcheck="false" autocomplete="off" aria-describedby="custom-carton-color-value"><input id="custom-carton-color-picker" class="color-swatch" type="color" value="#000000" aria-label="选择彩盒颜色" title="点击选择彩盒颜色"></span><output id="custom-carton-color-value"></output></div>
           <p class="hint">填写 6 位 HEX，例如 FF0000 或 #FF0000。产品和彩盒分别设色，作用于此 SKU 全部同类 Logo。</p>
         </div>
         <select id="preview-version" hidden aria-label="当前预览方案"><option value="ORIGINAL">原色</option><option value="BLACK">黑色</option><option value="GOLD FOIL">烫金</option><option value="SILVER FOIL">烫银</option><option value="CUSTOM">自定义配色</option><option value="ROSE GOLD FOIL">烫玫瑰金</option><option value="LASER FOIL">烫镭射</option></select>
@@ -64,15 +64,24 @@
       </section>
 
       <section class="panel results-panel">
-        <div class="section-title"><h2>3. 效果方案</h2><div class="result-toolbar"><span id="result-meta">选择方案查看和调整</span><button type="button" id="download-selected" class="button primary" disabled>下载到文件夹</button></div></div>
+        <div class="section-title scheme-heading"><h2>3. 效果方案</h2></div>
+        <div class="scheme-assets">
+          <div id="multi-product-tabs" class="multi-product-tabs" aria-label="批量包材"></div>
+          <div class="result-toolbar"><span id="result-meta">选择方案查看和调整</span><button type="button" id="download-selected" class="button secondary" disabled>下载到文件夹</button></div>
+        </div>
         <p id="download-status" class="hint" role="status" hidden></p>
-        <div id="multi-product-tabs" class="multi-product-tabs" aria-label="批量包材"></div>
+        <div class="scheme-feedback"><p id="status" class="status" role="status">等待上传素材。</p><button id="generate-modified" type="button" class="button secondary regenerate-modified" hidden>重新生成已修改方案</button></div>
         <div id="multi-product-output" class="multi-product-output" aria-live="polite" hidden></div>
         <div class="scheme-workspace">
           <div class="preview-section">
-            <div class="preview-title"><strong id="canvas-scheme-title">原色方案 · 编辑预览</strong><span id="selected-target">未选择目标</span></div>
+            <div class="preview-title"><div class="preview-heading"><strong id="canvas-scheme-title">原色方案 · 编辑预览</strong><span id="selected-target">未选择目标</span></div><div class="preview-tools"><div class="scheme-actions" aria-label="方案操作">
+          <button id="apply-product-preset" type="button" class="button secondary" title="选择载体、搭配和参数；产品设置应用到所有已选 SKU 的全部产品 Logo" hidden>同步设置…</button>
+          <button id="undo-placement" type="button" class="button secondary undo-placement" title="撤回 Logo 移动或旋转（最多三步）" aria-label="撤回 Logo 移动或旋转（最多三步）" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5 4 10l5 5M4 10h10a6 6 0 0 1 0 12" transform="translate(0 -2)"/></svg></button>
+          <button id="process-logo" type="button" class="button secondary" disabled>logo处理</button>
+          <button id="generate" type="button" class="button primary">生成方案</button>
+        </div><div class="canvas-actions"><button id="toggle-target-move" type="button" class="text-button" disabled>移动位置</button><button id="toggle-target-region" type="button" class="text-button region-lock" aria-label="解锁产品框范围" aria-pressed="false" title="限制在产品框内，点击解锁后可自由移动" disabled><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path class="lock-closed" d="M8 10V7a4 4 0 0 1 8 0v3"/><path class="lock-open" d="M8 10V7a4 4 0 0 1 7.5-2"/><path d="M12 14v3"/></svg></button><button id="add-target" type="button" class="text-button">＋ 添加目标</button></div></div></div>
             <div class="canvas-wrap"><canvas id="placement-canvas" aria-label="Logo拖动定位画布"></canvas><div id="preview-empty" class="preview-empty">上传原图后，这里会显示可拖动的 Logo</div></div>
-            <p class="hint">单击选择 Logo，Ctrl + 单击可多选（Mac 使用 ⌘），也可勾选工具栏中的 Logo。多选后拖蓝色方块可缩放同类 Logo；单击旋转箭头转 90°，长按可自由旋转。彩盒与产品分别操作，母版位置默认锁定。</p>
+            <p class="hint">单击选择 Logo，Ctrl + 单击可多选（Mac 使用 ⌘）。需要移动时，点击画布上方的“移动位置”。多选后拖蓝色方块可缩放同类 Logo；单击旋转箭头转 90°，长按可自由旋转。彩盒与产品分别操作，母版位置默认锁定。右侧小锁关闭时限制在产品框内；打开后可移出产品框自由移动。</p>
           </div>
           <div class="scheme-list">
             <label class="scheme-select-all">全选<input id="select-all-schemes" type="checkbox" class="select-download" aria-label="全选当前 SKU 的方案及所有已生成图片" title="全选当前 SKU 的方案及所有已生成图片，再次点击全部取消"></label>
@@ -86,20 +95,9 @@
       </section>
     </div>
   </main>
-  <section id="target-toolbar" class="target-toolbar" aria-label="上样目标悬浮工具栏">
-    <div class="target-toolbar-head">
-      <button id="target-toolbar-drag" class="target-toolbar-drag" type="button" aria-label="拖动工具栏，也可使用方向键移动" title="拖动工具栏 · 方向键也可移动"><svg width="16" height="20" viewBox="0 0 16 20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="4" r="1.5"/><circle cx="11" cy="4" r="1.5"/><circle cx="5" cy="10" r="1.5"/><circle cx="11" cy="10" r="1.5"/><circle cx="5" cy="16" r="1.5"/><circle cx="11" cy="16" r="1.5"/></svg></button>
-      <div class="target-toolbar-title"><strong>上样目标</strong><span id="target-toolbar-summary">拖动 Logo 调整位置</span></div>
-      <button id="toggle-target-toolbar" class="target-toolbar-toggle" type="button" aria-expanded="false" aria-controls="target-toolbar-body">展开 <span aria-hidden="true">⌄</span></button>
-      <button id="generate" type="button" class="button primary">生成选中的方案</button>
-    </div>
-    <div id="target-toolbar-body" class="target-toolbar-body" hidden>
-      <div class="target-toolbar-editor-head"><p>点击“移动位置”后拖动 Logo；在下方调整载体与工艺。</p><div class="target-toolbar-editor-actions"><button id="apply-product-preset" type="button" class="button secondary" title="选择载体、搭配和参数；产品设置应用到所有已选 SKU 的全部产品 Logo" hidden>同步设置…</button><button id="add-target" type="button" class="button secondary">+ 添加目标</button></div></div>
-      <div id="targets" class="targets"></div>
-      <div class="target-toolbar-footer">
-        <details class="target-toolbar-settings"><summary>生成设置</summary><label class="model-field">生成方式<select id="mockup-model" required disabled><option value="local">本地合成</option></select></label></details>
-        <button id="reset-target-toolbar" type="button" class="text-button">回到画布上方</button>
-      </div>
+  <div hidden>
+    <div id="targets"></div>
+    <select id="mockup-model" hidden aria-label="生成方式"><option value="local">本地合成</option></select>
       <fieldset id="generation-versions" class="generation-versions" hidden>
         <legend>选择生成版本</legend>
         <label><input type="checkbox" value="ORIGINAL" checked> 原色</label>
@@ -111,10 +109,7 @@
         <label><input type="checkbox" value="LASER FOIL"> 烫镭射</label>
         <small class="hint">默认勾选原色和黑白；四种烫印工艺、自定义配色可按需勾选，至少选择一项。</small>
       </fieldset>
-      <button id="generate-modified" type="button" class="button secondary regenerate-modified" hidden>重新生成已修改方案</button>
-      <p id="status" class="status" role="status">等待上传素材。</p>
-    </div>
-  </section>
+  </div>
   <div id="image-preview" class="image-preview" hidden role="dialog" aria-modal="true" aria-label="图片预览">
     <div class="image-preview-backdrop" data-close-preview></div>
     <div class="image-preview-panel">
@@ -143,20 +138,29 @@
     <footer><button id="cancel-preset-scope" type="button" class="button secondary">取消</button><button id="confirm-preset-scope" type="button" class="button">确认应用</button></footer>
   </dialog>
   <script type="module" src="demo.js"></script>
-  <script type="module" src="target-toolbar.mjs"></script>
   <dialog id="foil-confirmation" class="foil-dialog" aria-labelledby="foil-confirmation-title">
     <h2 id="foil-confirmation-title" data-foil-title></h2>
+    <div class="foil-notice" data-foil-notice hidden>
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.3 3.9 2.2 18a2 2 0 0 0 1.7 3h16.2a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4m0 4h.01"/></svg>
+      <p>通用彩盒默认采用油墨印刷，<strong>通常不建议使用烫印</strong>。如需烫印，请<strong>向设计师咨询具体可行性</strong>。</p>
+    </div>
     <p data-foil-messages></p>
     <footer><button type="button" class="button secondary" data-foil-cancel>返回修改</button><button type="button" class="button primary" data-foil-continue>已知晓，继续烫印</button></footer>
   </dialog>
   <dialog id="print-combination-dialog" class="foil-dialog" aria-labelledby="print-combination-title">
     <h2 id="print-combination-title">增加搭配</h2>
+    <div class="combination-previews" role="group" aria-label="烫印效果参考">
+      <figure><span class="combination-swatch" data-finish="GOLD FOIL" aria-hidden="true"></span><figcaption>烫金</figcaption></figure>
+      <figure><span class="combination-swatch" data-finish="SILVER FOIL" aria-hidden="true"></span><figcaption>烫银</figcaption></figure>
+      <figure><span class="combination-swatch" data-finish="ROSE GOLD FOIL" aria-hidden="true"></span><figcaption>烫玫瑰金</figcaption></figure>
+      <figure><span class="combination-swatch" data-finish="LASER FOIL" aria-hidden="true"></span><figcaption>烫镭射</figcaption></figure>
+    </div>
     <div class="combination-fields">
-      <label>产品印刷<select data-combination-product aria-label="产品印刷"><option value="ORIGINAL">普通印刷（Logo 原色）</option><option value="BLACK">黑白印刷</option><option value="GOLD FOIL">烫金</option><option value="SILVER FOIL">烫银</option><option value="ROSE GOLD FOIL">烫玫瑰金</option><option value="LASER FOIL">烫镭射</option></select></label>
-      <label>彩盒印刷<select data-combination-carton aria-label="彩盒印刷"><option value="ORIGINAL">普通印刷（Logo 原色）</option><option value="BLACK">黑白印刷</option><option value="GOLD FOIL">烫金</option><option value="SILVER FOIL">烫银</option><option value="ROSE GOLD FOIL">烫玫瑰金</option><option value="LASER FOIL">烫镭射</option></select></label>
+      <label>产品印刷<select id="combination-product" data-combination-product aria-label="产品印刷"><option value="ORIGINAL">普通印刷（Logo 原色）</option><option value="BLACK">黑白印刷</option><option value="GOLD FOIL">烫金</option><option value="SILVER FOIL">烫银</option><option value="ROSE GOLD FOIL">烫玫瑰金</option><option value="LASER FOIL">烫镭射</option></select></label>
+      <label>彩盒印刷<select id="combination-carton" data-combination-carton aria-label="彩盒印刷"><option value="ORIGINAL">普通印刷（Logo 原色）</option><option value="BLACK">黑白印刷</option><option value="GOLD FOIL">烫金</option><option value="SILVER FOIL">烫银</option><option value="ROSE GOLD FOIL">烫玫瑰金</option><option value="LASER FOIL">烫镭射</option></select></label>
     </div>
     <p class="hint" data-combination-rule></p>
-    <p class="combination-warning" data-combination-warning hidden>彩盒不建议烫印，开始作图时会提示，知晓后可以继续。</p>
+    <p class="combination-warning" data-combination-warning hidden>通用彩盒默认采用油墨印刷，<strong>通常不建议使用烫印</strong>。如需烫印，请<strong>向设计师咨询具体可行性</strong>。</p>
     <p class="combination-error" data-combination-error role="alert"></p>
     <footer><button type="button" class="button secondary" data-combination-cancel>取消</button><button type="button" class="button primary" data-combination-confirm>确认增加</button></footer>
   </dialog>

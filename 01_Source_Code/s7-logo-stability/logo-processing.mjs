@@ -1,4 +1,29 @@
 import sharp from 'sharp';
+import {refineTransparentLogo} from './logo-refinement.mjs';
+import {visibleLogoBounds as visibleBounds} from './logo-image-transfer.mjs';
+
+export async function prepareLogoForPlacement(source,{preserveDetails=false}={}){
+  const isolated=await processLogo(source,{removeWhiteBackground:!preserveDetails,removeInteriorBackground:true,cropTransparentBounds:false});
+  const processed=preserveDetails?isolated:await refineTransparentLogo(isolated,{targetColor:'original'});
+  return processLogo(processed,{removeWhiteBackground:false});
+}
+
+export async function cropLogoForPlacement(source){
+  const {data,info}=await sharp(source).ensureAlpha().raw().toBuffer({resolveWithObject:true});
+  const mask=Buffer.from(data);
+  let hasTransparency=false;
+  for(let i=3;i<mask.length;i+=4)if(mask[i]<255){hasTransparency=true;break;}
+  // The mask locates the artwork; only the untouched original pixels are returned.
+  if(!hasTransparency)removeEdgeBackground(mask,info.width,info.height,24);
+  const bounds=visibleBounds(mask,info.width,info.height);
+  const image=sharp(data,{raw:{width:info.width,height:info.height,channels:4}});
+  if(!bounds)return image.png().toBuffer();
+  const padding=Math.max(2,Math.ceil(Math.max(bounds.width,bounds.height)*.03));
+  if(hasTransparency)return image.extract(bounds).extend({top:padding,bottom:padding,left:padding,right:padding,background:{r:0,g:0,b:0,alpha:0}}).png().toBuffer();
+  const left=Math.max(0,bounds.left-padding),top=Math.max(0,bounds.top-padding);
+  const right=Math.min(info.width,bounds.left+bounds.width+padding),bottom=Math.min(info.height,bounds.top+bounds.height+padding);
+  return image.extract({left,top,width:right-left,height:bottom-top}).png().toBuffer();
+}
 
 function nearColor(data,index,background,threshold){
   return Math.max(Math.abs(data[index]-background[0]),Math.abs(data[index+1]-background[1]),Math.abs(data[index+2]-background[2]))<=threshold;
@@ -85,7 +110,8 @@ export async function processLogo(source,{removeWhiteBackground=true,cropTranspa
     const background=removeInteriorBackground?solidBackground(data,info.width,info.height):null;
     const outer=edgeBackground(data,info.width,info.height);
     const corners=[0,(info.width-1)*4,(info.height-1)*info.width*4,(info.width*info.height-1)*4];
-    if(!removeInteriorBackground||outer&&corners.every(i=>nearColor(data,i,outer,threshold)))removeEdgeBackground(data,info.width,info.height,threshold);
+    // Solid backgrounds use the fixed color below; adaptive flooding can follow antialias shades into the ink.
+    if(!removeInteriorBackground)removeEdgeBackground(data,info.width,info.height,threshold);
     if(background){
       for(let i=0;i<data.length;i+=4)if(nearColor(data,i,background,threshold))data[i+3]=0;
       // A uniform screenshot frame can leave a differently colored UI fragment at its edge.
@@ -93,10 +119,9 @@ export async function processLogo(source,{removeWhiteBackground=true,cropTranspa
       recoverBackgroundBlend(data,info.width,info.height,background);
     }
   }
-  let left=info.width,top=info.height,right=-1,bottom=-1;
-  for(let y=0;y<info.height;y++)for(let x=0;x<info.width;x++)if(data[(y*info.width+x)*4+3]){left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);}
-  if(right<0)throw Error('加工后Logo没有可见像素');
+  const bounds=visibleBounds(data,info.width,info.height);
+  if(!bounds)throw Error('加工后Logo没有可见像素');
   const image=sharp(data,{raw:{width:info.width,height:info.height,channels:4}});
-  if(cropTransparentBounds)return image.extract({left,top,width:right-left+1,height:bottom-top+1}).png().toBuffer();
+  if(cropTransparentBounds)return image.extract(bounds).png().toBuffer();
   return image.png().toBuffer();
 }
